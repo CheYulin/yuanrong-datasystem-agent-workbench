@@ -19,10 +19,8 @@ CHAIN_HEADERS = [
     "URMA错误码与日志",
     "OS接口调用",
     "OS错误码与日志",
-    "详细故障原因解释",
-    "返回方式/重试策略",
-    "定位建议(简短)",
-    "代码锚点",
+    "原因与定位建议",
+    "备注(返回/重试/代码锚点)",
 ]
 
 CHAIN_ROWS = [
@@ -331,13 +329,13 @@ def enrich_chain(chain, location, owner):
     own = str(owner)
 
     # Add component hint on root function: client/worker1/worker2/worker3
-    comp_hint = "client本地访问"
+    comp_hint = "client组件"
     if "worker2" in loc:
-        comp_hint = "worker2元数据"
+        comp_hint = "worker-元数据访问"
     elif "worker3" in loc:
-        comp_hint = "worker3数据"
+        comp_hint = "worker-数据拉取"
     elif "worker1" in loc:
-        comp_hint = "worker1本地访问"
+        comp_hint = "worker组件"
     root, *rest = [p.strip() for p in out.split("|_")]
     if f"({comp_hint})" not in root:
         root = f"{root} ({comp_hint})"
@@ -585,6 +583,21 @@ def derive_root_cause_detail(row):
     )
 
 
+def simplify_owner(owner, info, step):
+    """Simplify owner categories: 用户参数/数据系统/RPC框架/OS/UMDK或URMA."""
+    o = str(owner)
+    t = f"{owner} {info} {step}".lower()
+    if "用户参数" in o:
+        return "用户参数"
+    if "urma" in t or "jfc" in t or "jfr" in t or "jfs" in t or "umdk" in t:
+        return "UMDK/URMA"
+    if any(k in t for k in ["socket", "zmq", "send", "recv", "connect", "poll", "mmap", "fd", "errno", "close"]):
+        return "OS"
+    if "rpc" in t:
+        return "RPC框架"
+    return "数据系统"
+
+
 def build_chain_rows_with_system_info(rows):
     out = []
     iface_step_counter = {}
@@ -593,7 +606,6 @@ def build_chain_rows_with_system_info(rows):
         # 0接口 1调用链 2步骤 3发生位置 4责任 5接口信息 6典型status日志 7返回 8重试 9建议 10锚点
         iface, chain, step, location, owner, info, status_log, ret, retry, advice, anchor = row
         iface_step_counter[iface] = iface_step_counter.get(iface, 0) + 1
-        idx = iface_step_counter[iface]
         chain = enrich_chain(chain, location, owner)
         loc_main, loc_detail = split_location_detail(location)
         comp_desc = "client1本地访问"
@@ -616,27 +628,34 @@ def build_chain_rows_with_system_info(rows):
         combined_status = f"{status_log}\n{internal_info}"
         urma_err = derive_urma_error_info(list(row))
         os_err = derive_os_error_info(list(row))
+        # Consistency guard:
+        # when error/log columns exist, corresponding interface columns must not be empty.
+        if urma_err != "-" and (urma_info == "-" or str(urma_info).strip() == ""):
+            urma_info = "（补充）URMA链路调用\n见调用链中的 urma_* / jfc / jfr / jfs"
+        if os_err != "-" and (os_info == "-" or str(os_info).strip() == ""):
+            os_info = "（补充）OS/RPC调用\nsocket/connect/send/recv/zmq_poll/mmap/fd"
         root_cause = derive_root_cause_detail(list(row))
+        owner_simple = simplify_owner(owner, info, step)
         if retry == "视阶段重试":
             return_retry = "返回: 状态直接返回；重试: 连接阶段通常快速失败，业务RPC阶段按 RetryOnError 对 1001/1002/19 退避重试。"
         elif retry in ("无", "-", "一般无"):
             return_retry = f"返回: {ret}；重试: 通常不重试。"
         else:
             return_retry = f"返回: {ret}；重试: {retry}。"
+        reason_and_advice = f"{root_cause}\n- 定位建议: {advice}"
+        remark = f"{return_retry}\n- 代码锚点: {anchor}"
         out.append(
             (
                 iface,
                 chain_with_meta,
-                owner,
+                owner_simple,
                 combined_status,
                 urma_info,
                 urma_err,
                 os_info,
                 os_err,
-                root_cause,
-                return_retry,
-                advice,
-                anchor,
+                reason_and_advice,
+                remark,
             )
         )
     return out
