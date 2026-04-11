@@ -12,6 +12,7 @@
 | **`scripts/verify/`** | 特性门禁与回归（CTest 封装） | 合入前跑 KV executor / brpc 参考用例 |
 | **`scripts/lib/`** | 解析 `DATASYSTEM_ROOT` 与本仓根 | 被其它脚本 `source` / Python `import`，一般不单独跑 |
 | **`scripts/git/`** | 根据当前 diff **生成 commit message 草稿**（路径启发，无 LLM） | 合入前在本仓根执行 `scripts/git/generate_commit_message.sh`；`--copy` 写入剪贴板 |
+| **`scripts/excel/`** | **KV SDK FEMA × observable** 工作簿 | `python3 scripts/excel/build_kv_sdk_fema_workbook.py`；编辑 `workspace/reliability/kv_sdk_fema_rows.tsv` 后重跑 |
 
 ## 2. 按任务选脚本
 

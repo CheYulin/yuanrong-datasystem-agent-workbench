@@ -2,6 +2,10 @@
 
 本目录提供 **Excel 工作簿**（便于评审、筛选）及 **Markdown 证据版**（便于版本管理与 PR 评论），内容与 `docs/flows/sequences/kv-client/` 时序图、`docs/observable/` 既有定位定界材料一致，并 **锚定 `yuanrong-datasystem` 源码**。
 
+**分支覆盖率 + 定位定界总流程（Mermaid）**：[分支覆盖率与定位定界-流程指南.md](../分支覆盖率与定位定界-流程指南.md)（与下方 PlantUML 总图互补）。
+
+**客户向：读写全分支 + Trace 粒度 SOP + 细 Mermaid**：[kv-client-定位定界-客户操作手册-分支全量与Trace粒度.md](kv-client-定位定界-客户操作手册-分支全量与Trace粒度.md)
+
 ## 文件
 
 | 文件 | 说明 |
@@ -15,14 +19,22 @@
 | [kv-client-URMA-OS-读写初始化-跨模块错误与重试.md](./kv-client-URMA-OS-读写初始化-跨模块错误与重试.md) | **Init/读/写**：URMA 与 OS、跨模块传播、`Status`/`last_rc`/仅日志、**RetryOnError** 与触发码 |
 | [kv-client-URMA-错误枚举与日志-代码证据.md](./kv-client-URMA-错误枚举与日志-代码证据.md) | URMA 专项：UMDK 枚举值（`urma_status_t`）+ 数据系统实际 error 日志与处理路径（代码证据） |
 | [kv-client-定位定界手册-基于Excel.md](./kv-client-定位定界手册-基于Excel.md) | 精简手册：如何结合 3 个 Sheet 快速定界，并给出日志自动化分析建议 |
-| [kv-client-定位定界-总图.puml](./puml/kv-client-定位定界-总图.puml) | 测试/开发/Agent 共用定位流程图：按状态码/日志分支到 URMA、OS、RPC、系统逻辑、用户参数，并给出下钻 Sheet 建议 |
+| [kv-client-定位定界-客户操作手册-分支全量与Trace粒度.md](./kv-client-定位定界-客户操作手册-分支全量与Trace粒度.md) | **客户 SOP**：Trace 粒度说明、**读写+Init 分支表**、**细 Mermaid**、grep 示例；与下方 PlantUML 步骤图互补 |
+| [puml/README-总图与分图.md](./puml/README-总图与分图.md) | **总图与 02～05 分图**的阅读顺序与设计说明（客户先错误码+手册） |
+| [kv-client-定位定界-总图.puml](./puml/kv-client-定位定界-总图.puml) | **总图（精简）**：错误码 → 手册 → Trace → 指向分图 02～05 |
+| [kv-client-定位定界-总图-02-URMA.puml](./puml/kv-client-定位定界-总图-02-URMA.puml) | 分图：URMA / UB / 1004·1006·1008 |
+| [kv-client-定位定界-总图-03-RPC与网络.puml](./puml/kv-client-定位定界-总图-03-RPC与网络.puml) | 分图：RPC、超时、断连 |
+| [kv-client-定位定界-总图-04-OS与资源.puml](./puml/kv-client-定位定界-总图-04-OS与资源.puml) | 分图：mmap、fd、shm、资源 |
+| [kv-client-定位定界-总图-05-参数与业务语义.puml](./puml/kv-client-定位定界-总图-05-参数与业务语义.puml) | 分图：INVALID、NOT_FOUND、etcd、缩容、seal/NX |
 | [kv-client-定位定界-步骤1-Init.puml](./puml/kv-client-定位定界-步骤1-Init.puml) | 分步骤图（Init）：调用链 + 错误分支 + 责任团队 |
 | [kv-client-定位定界-步骤2-读路径Get_MGet.puml](./puml/kv-client-定位定界-步骤2-读路径Get_MGet.puml) | 分步骤图（读）：Get/MGet 调用链 + 错误分支 + 责任团队 |
-| [kv-client-定位定界-步骤3-写路径Put_MSet.puml](./puml/kv-client-定位定界-步骤3-写路径Put_MSet.puml) | 分步骤图（写）：Put/MSet 调用链 + 错误分支 + 责任团队 |
+| [kv-client-定位定界-步骤3-写路径Put_MSet.puml](./puml/kv-client-定位定界-步骤3-写路径Put_MSet.puml) | 分步骤图（写）：**MCreate / MSet(buffer) / Put / MSet(kv)** 调用链 + 错误分支 + 责任团队 |
 | [kv-client-性能关键路径与采集手册.md](./kv-client-性能关键路径与采集手册.md) | 性能专题：线程切换、RPC等待、URMA降级影响、采集命令与 ST 验证建议 |
 | [../kv-client-Get路径-树状错误矩阵.md](../kv-client-Get路径-树状错误矩阵.md) | **Get/MGet 专用**：路径为列、阶段为行的树状错误矩阵（内部 / OS / URMA / RPC） |
 | [../kv-client-SDK与Worker-读路径-快速定位定界.md](../kv-client-SDK与Worker-读路径-快速定位定界.md) | **读路径工单级**：快速区分 OS/URMA/系统，定段①～⑥、模块、入口/远端 Worker |
 | [scripts/generate_kv_client_observability_xlsx.py](./scripts/generate_kv_client_observability_xlsx.py) | 重新生成 xlsx（依赖 `openpyxl`） |
+
+**可靠性 / FEMA 联动（Init·MCreate·MSet·MGet）**：**[使用步骤](../../workspace/reliability/kv-sdk-fema-使用步骤.md)** · [背景与流程图](../../workspace/reliability/kv-sdk-fema-reliability-observability.md) · `python3 scripts/excel/build_kv_sdk_fema_workbook.py` → `workspace/reliability/kv_sdk_fema_analysis.xlsx`。
 
 ## 重新生成 Excel
 
@@ -31,6 +43,10 @@ python3 docs/observable/kv-client-excel/scripts/generate_kv_client_observability
 ```
 
 （在 `vibe-coding-files` 仓库根目录执行时，请使用脚本绝对路径或 `cd` 到仓库后调整路径。）
+
+## 可预览网页（PlantUML + 错误码文档 + Excel Sheet1）
+
+一键生成静态 **`preview/dist/index.html`**（浏览器打开即可）：[`preview/README.md`](./preview/README.md)。
 
 ## 外部资料说明（URMA）
 

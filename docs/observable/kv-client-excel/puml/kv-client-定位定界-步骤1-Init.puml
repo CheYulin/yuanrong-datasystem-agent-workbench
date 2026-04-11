@@ -4,7 +4,7 @@ skinparam roundcorner 8
 skinparam defaultFontName "SansSerif"
 skinparam sequenceMessageAlign center
 
-title KV Client 定位定界（步骤1: Init）
+title KV Client 定位定界（步骤1: Init）\nInit 建连：RPC + UDS 传 fd + URMA/UB + mmap；可与「可见 StatusCode 说明」对照
 
 actor "测试/开发/Agent" as T
 participant "client1\nSDK" as C

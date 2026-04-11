@@ -79,6 +79,8 @@ bash build.sh -c html -t run_cpp -l 'st*'
 bash "$VIBE/scripts/verify/validate_brpc_kv_executor.sh" --build-dir "$DS/build" --coverage-html
 ```
 
+**分支覆盖率含义、报告阅读方式、与定位定界联动的流程图**：[`docs/observable/分支覆盖率与定位定界-流程指南.md`](../observable/分支覆盖率与定位定界-流程指南.md)（`build.sh` 已使用 `lcov_branch_coverage=1`）。
+
 ---
 
 ## 4. 运行用例 — executor 注入

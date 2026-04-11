@@ -10,6 +10,15 @@
 | 客户视角一表 | [`KV_CLIENT_CUSTOMER_ALLINONE.md`](../../plans/kv_client_triage/KV_CLIENT_CUSTOMER_ALLINONE.md) | 业务流程 / 故障模式编号与之一致 |
 | Triage Playbook | [`KV_CLIENT_TRIAGE_PLAYBOOK.md`](../../plans/kv_client_triage/KV_CLIENT_TRIAGE_PLAYBOOK.md) | [operations/](operations/) 运维长文 |
 
+## KV SDK × FEMA × 定位定界（Excel / 预览稿）
+
+面向 **Init / MCreate / MSet / MGet** 的故障模式行表、检测与恢复（含 **URMA+Trace 关联**）、报错码下钻与傻瓜步骤：
+
+- **使用步骤（推荐先读）**：[workspace/reliability/kv-sdk-fema-使用步骤.md](../../workspace/reliability/kv-sdk-fema-使用步骤.md)  
+- 预览与流程图：[workspace/reliability/kv-sdk-fema-reliability-observability.md](../../workspace/reliability/kv-sdk-fema-reliability-observability.md)  
+- 生成 Excel：`python3 scripts/excel/build_kv_sdk_fema_workbook.py` → `workspace/reliability/kv_sdk_fema_analysis.xlsx`  
+- 与 [`docs/observable/kv-client-excel/`](../observable/kv-client-excel/README.md) 联动使用。
+
 ## 分册列表（按阅读顺序）
 
 | 文档 | 内容 |
@@ -26,6 +35,7 @@
 | 类型 | 目录 |
 |------|------|
 | **读写时序 / 拓扑 / E2E / 部署交互** | [`docs/flows/sequences/kv-client/`](../flows/sequences/kv-client/) |
+| **定位定界总图与分图（客户：先错误码+手册）** | [`docs/observable/kv-client-excel/puml/README-总图与分图.md`](../observable/kv-client-excel/puml/README-总图与分图.md) |
 | **故障处理与 triage 文档地图** | [`docs/reliability/diagrams/kv-client/`](diagrams/kv-client/) |
 
 ## 高可信度外部入口
