@@ -12,10 +12,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../lib/datasystem_root.sh"
-# shellcheck source=../lib/vibe_coding_root.sh
-. "${SCRIPT_DIR}/../lib/vibe_coding_root.sh"
+# shellcheck source=../../development/lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
+# shellcheck source=../../development/lib/vibe_coding_root.sh
+. "${SCRIPT_DIR}/../../development/lib/vibe_coding_root.sh"
 BUILD_DIR="${ROOT_DIR}/build"
 OUT_DATA="${VIBE_CODING_ROOT}/workspace/observability/perf/kv_lock_io.perf.data"
 FILTER="${FILTER:-KVClientExecutorRuntimeE2ETest.*}"

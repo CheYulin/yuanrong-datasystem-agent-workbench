@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./ops <command> [args...]
+
+Stage-oriented commands:
+  test.kv_executor                 -> validate KV executor tests
+  test.brpc_kv_executor            -> validate brpc KV executor tests
+  test.urma_tcp_logs               -> validate URMA/TCP observability logs
+  runtime.lock_perf                -> run lock contention perf test
+  analysis.kv_executor_perf        -> analyze executor perf
+  analysis.collect_lock_baseline   -> collect lock baseline artifacts
+  analysis.compare_lock_baseline   -> compare two lock baseline runs
+  analysis.lock_ebpf_workflow      -> print/drive lock eBPF workflow
+  analysis.refresh_urma_index      -> refresh URMA/UB IDE index database
+  docs.kv_fema_workbook            -> build KV SDK FEMA workbook
+  docs.kv_observability_xlsx       -> build KV observability workbook
+  docs.kv_observability_preview    -> build static preview site
+  dev.commit_message               -> generate commit message draft
+
+Examples:
+  ./ops test.kv_executor --skip-build /path/to/datasystem/build
+  ./ops test.urma_tcp_logs /path/to/logs
+  ./ops analysis.kv_executor_perf --build-dir /path/to/datasystem/build
+  ./ops docs.kv_fema_workbook
+EOF
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+  test.kv_executor)
+    exec bash "${ROOT_DIR}/scripts/testing/verify/validate_kv_executor.sh" "$@"
+    ;;
+  test.brpc_kv_executor)
+    exec bash "${ROOT_DIR}/scripts/testing/verify/validate_brpc_kv_executor.sh" "$@"
+    ;;
+  test.urma_tcp_logs)
+    exec bash "${ROOT_DIR}/scripts/testing/verify/validate_urma_tcp_observability_logs.sh" "$@"
+    ;;
+  runtime.lock_perf)
+    exec bash "${ROOT_DIR}/scripts/analysis/perf/run_kv_concurrent_lock_perf.sh" "$@"
+    ;;
+  analysis.kv_executor_perf)
+    exec python3 "${ROOT_DIR}/scripts/analysis/perf/kv_executor_perf_analysis.py" "$@"
+    ;;
+  analysis.collect_lock_baseline)
+    exec bash "${ROOT_DIR}/scripts/analysis/perf/collect_client_lock_baseline.sh" "$@"
+    ;;
+  analysis.compare_lock_baseline)
+    exec bash "${ROOT_DIR}/scripts/analysis/perf/compare_client_lock_baseline.sh" "$@"
+    ;;
+  analysis.lock_ebpf_workflow)
+    exec bash "${ROOT_DIR}/scripts/analysis/perf/run_kv_lock_ebpf_workflow.sh" "$@"
+    ;;
+  analysis.refresh_urma_index)
+    exec python3 "${ROOT_DIR}/scripts/development/index/refresh_urma_index_db.py" "$@"
+    ;;
+  docs.kv_fema_workbook)
+    exec python3 "${ROOT_DIR}/scripts/documentation/excel/build_kv_sdk_fema_workbook.py" "$@"
+    ;;
+  docs.kv_observability_xlsx)
+    exec python3 "${ROOT_DIR}/scripts/documentation/observable/kv-client-excel/generate_kv_client_observability_xlsx.py" "$@"
+    ;;
+  docs.kv_observability_preview)
+    exec python3 "${ROOT_DIR}/scripts/documentation/observable/kv-client-excel/preview/build_preview.py" "$@"
+    ;;
+  dev.commit_message)
+    exec bash "${ROOT_DIR}/scripts/development/git/generate_commit_message.sh" "$@"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "[error] unknown command: ${cmd}" >&2
+    usage
+    exit 2
+    ;;
+esac

@@ -1,0 +1,3 @@
+kv_single	KVCacheClientTest\.TestSingleKey
+kv_mset_mget	KVCacheClientTest\.TestMsetAndMGet
+kv_mset_suite	KVClientMSetTest\..*

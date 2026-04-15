@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../lib/datasystem_root.sh"
+# shellcheck source=../../development/lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
 REPO_ROOT="${ROOT_DIR}"
 SKIP_BUILD=0
 POS_ARGS=()

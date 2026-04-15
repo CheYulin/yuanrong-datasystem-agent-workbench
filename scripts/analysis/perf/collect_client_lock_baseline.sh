@@ -5,8 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../lib/datasystem_root.sh"
+# shellcheck source=../../development/lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
 BUILD_DIR="${ROOT_DIR}/build"
 OUT_ROOT="${ROOT_DIR}/plans/client_lock_baseline/runs"
 RUN_PERF="on"
@@ -91,7 +91,7 @@ mkdir -p "${RUN_DIR}"
 echo "[INFO] Writing gate logs to ${RUN_DIR}"
 
 set +e
-bash "${SCRIPT_DIR}/../verify/validate_brpc_kv_executor.sh" \
+bash "${SCRIPT_DIR}/../../testing/verify/validate_brpc_kv_executor.sh" \
   --build-dir "${BUILD_DIR}" \
   "${VALIDATE_EXTRA[@]}" \
   >"${RUN_DIR}/gate_validate.log" 2>&1

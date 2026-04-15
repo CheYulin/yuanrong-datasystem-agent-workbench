@@ -1,42 +1,45 @@
 # 开发脚本（操作 `yuanrong-datasystem`）
 
-本目录脚本的**权威位置**在 **`vibe-coding-files`**。**`yuanrong-datasystem`** 的 `scripts/` 仅保留与官方构建链强绑定的内容（如 `build_thirdparty.sh`）；说明见该仓库内 `scripts/README.md`。
+本目录脚本的权威位置在 `vibe-coding-files`。`yuanrong-datasystem` 的 `scripts/` 仅保留与官方构建链强绑定的内容（如 `build_thirdparty.sh`）。
 
-**约定**：新增可执行脚本（构建、验证、perf、索引、**生成 xlsx 等**）优先放在本目录下合适子目录；若在 `docs/**/scripts` 等处新增脚本，建议后续迁到 `scripts/` 或在此增加薄封装，并在 [`docs/agent/scripts-map.md`](../docs/agent/scripts-map.md) 登记。专题表格生成可逐步归集到 **`excel/`**（目录可按需创建）。
-
-## 目录结构（按用途）
+## 目录结构（按阶段）
 
 | 子目录 | 用途 |
 |--------|------|
-| [**`build/`**](build/) | 编译构建辅助：第三方 / brpc ST 兼容引导、client 依赖清单 |
-| [**`index/`**](index/) | 代码索引（IDE）：URMA/UB 等宏补全用的 `compile_commands` 派生 |
-| [**`perf/`**](perf/) | 性能分析：executor perf、锁竞争 ST、bpftrace/strace/perf、基线采集与对比 |
-| [**`verify/`**](verify/) | 特性验证 / 门禁：KV executor、brpc 参考用例与覆盖率流程 |
-| [**`git/`**](git/) | 本仓 Git 辅助：根据变更**生成提交说明草稿**（无 LLM） |
-| [**`excel/`**](excel/) | **KV SDK FEMA × 定位定界** xlsx 生成（`build_kv_sdk_fema_workbook.py`） |
-| **`lib/`** | 共享：`datasystem_root`、`vibe_coding_root`（解析 `$DS` 与本仓根） |
+| [**`build/`**](build/) | 构建辅助（保留原位置，不迁移） |
+| [**`development/`**](development/) | 开发阶段：`git`、`index`、`lib` |
+| [**`runtime/`**](runtime/) | 运行阶段：运行期相关入口（当前映射到 perf/verify） |
+| [**`testing/`**](testing/) | 测试阶段：`verify` |
+| [**`analysis/`**](analysis/) | 分析阶段：`perf` |
+| [**`documentation/`**](documentation/) | 文档阶段：`excel`、`observable` |
 
-**Agent 速查表**（何时用哪个脚本）：[`docs/agent/scripts-map.md`](../docs/agent/scripts-map.md)。
+## 兼容策略
 
-## 能力一览
+- 为避免打断构建链，当前仅保留 `scripts/lib`、`scripts/verify` 兼容入口（`build/remote_build_run_datasystem.sh` 仍在使用）。
+- `scripts/build` 维持原位，避免影响并行中的构建流程。
 
-在 **已配置 CMake 的 datasystem `build/`** 前提下：
+## 推荐入口（给文档与日常使用）
 
-- **门禁**：`verify/validate_kv_executor.sh`（`--skip-build` 推荐日常）、`verify/validate_brpc_kv_executor.sh`  
-- **锁 / 并发 perf**：`perf/run_kv_concurrent_lock_perf.sh`  
-- **Executor perf 分析**：`perf/kv_executor_perf_analysis.py`  
-- **基线**：`perf/collect_client_lock_baseline.sh`、`perf/compare_client_lock_baseline.sh`  
-- **bpftrace / strace / perf**：`perf/run_kv_lock_ebpf_workflow.sh`、`perf/trace_kv_lock_io_bpftrace.sh`、`perf/trace_kv_lock_io.sh`、`perf/perf_record_kv_lock_io.sh`、`perf/analyze_*.py`、`perf/bpftrace/`  
-- **索引**：`index/refresh_urma_index_db.py`  
-- **构建辅助**：`build/list_client_third_party_deps.sh`、`build/bootstrap_brpc_st_compat.sh`、`build/remote_build_run_datasystem.sh`（本地 rsync 到远端后执行构建/CTest/验证/example，默认读取 `build/remote_build_run_datasystem.rsyncignore` 跳过构建产物）  
-- **提交说明草稿**：`git/generate_commit_message.sh`（默认已暂存或未暂存工作区；`--all` 相对 HEAD；`-c` 复制到剪贴板；`-o FILE` 写入文件）  
-- **KV SDK FEMA + observable 联动 Excel**：`excel/build_kv_sdk_fema_workbook.py`（输入 `workspace/reliability/kv_sdk_fema_rows.tsv`，输出 `workspace/reliability/kv_sdk_fema_analysis.xlsx`）
+仓库根提供统一入口 `./ops`，优先用“能力命令”而非 `scripts/...` 内部路径：
 
-**构建、examples、全量 CTest** 仍使用 **datasystem 根目录的 `build.sh`**（见 [`docs/verification/cmake-non-bazel.md`](../docs/verification/cmake-non-bazel.md)）。
+- `./ops test.kv_executor`
+- `./ops test.brpc_kv_executor`
+- `./ops runtime.lock_perf`
+- `./ops analysis.kv_executor_perf`
+- `./ops analysis.collect_lock_baseline`
+- `./ops analysis.compare_lock_baseline`
+- `./ops analysis.lock_ebpf_workflow`
+- `./ops analysis.refresh_urma_index`
+- `./ops docs.kv_fema_workbook`
+- `./ops docs.kv_observability_xlsx`
+- `./ops docs.kv_observability_preview`
+- `./ops dev.commit_message`
+
+详细脚本地图见 [`docs/agent/scripts-map.md`](../docs/agent/scripts-map.md)。
 
 ## Datasystem 根目录
 
-Shell：在脚本中设 `SCRIPT_DIR` 后 `source "${SCRIPT_DIR}/../lib/datasystem_root.sh"`（`SCRIPT_DIR` 为**当前脚本所在目录**，如 `.../scripts/verify`）。Python：`lib/datasystem_root.py`（`scripts_root_from_here` / `resolve_datasystem_root`）。
+Shell：在脚本中设 `SCRIPT_DIR` 后 `source "${SCRIPT_DIR}/../lib/datasystem_root.sh"`。Python：`lib/datasystem_root.py`（`scripts_root_from_here` / `resolve_datasystem_root`）。
 
 解析顺序：`DATASYSTEM_ROOT` / `YUANRONG_DATASYSTEM_ROOT` → 与 `vibe-coding-files` 同级的 `../yuanrong-datasystem` 等（见 `lib/datasystem_root.sh`）。
 

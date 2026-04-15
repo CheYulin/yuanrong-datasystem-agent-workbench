@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../lib/datasystem_root.sh"
+# shellcheck source=../../development/lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
 BUILD_DIR="${ROOT_DIR}/build"
 OUT_DIR="${ROOT_DIR}/.third_party/brpc_st_compat"
 JOBS="${JOBS:-$(nproc)}"
@@ -155,7 +155,7 @@ generate_feature_coverage_html() {
 
 if [[ "${RUN_BOOTSTRAP}" == "on" ]]; then
     echo "[STEP] Bootstrap brpc compatibility toolchain"
-    "${SCRIPT_DIR}/../build/bootstrap_brpc_st_compat.sh" \
+    "${SCRIPT_DIR}/../../build/bootstrap_brpc_st_compat.sh" \
         --build-dir "${BUILD_DIR}" \
         --out-dir "${OUT_DIR}" \
         --jobs "${JOBS}"

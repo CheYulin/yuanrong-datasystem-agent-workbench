@@ -12,8 +12,8 @@
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../lib/datasystem_root.sh"
+# shellcheck source=../../development/lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
 if [[ $# -ge 1 ]]; then
   BUILD="$1"
 else

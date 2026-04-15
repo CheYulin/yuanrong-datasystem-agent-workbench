@@ -96,8 +96,8 @@ flowchart TD
 | FM-009 | 读路径：W1→W3 拉对象数据失败 | OS | 依封装 | 元数据有、数据拉失败 | `Get from remote failed`；`Failed to get object data from remote`；`ObjectKey` |
 | FM-010 | 数据面：urma write / read 失败 | URMA | `5` `1004` 等 | 读写到对端 UB 失败 | `Failed to urma write object`；`Failed to urma read object`；`urma_write`；`urma_read` |
 | FM-011 | CQ：poll / wait / rearm jfc 失败 | URMA | `1004` | 完成事件异常、停滞 | `Failed to wait jfc`；`Failed to poll jfc`；`Failed to rearm jfc`；`Polling failed with an error for requestId`；`CR.status` |
-| FM-012 | UB 连接状态不稳定 / 需重建 | URMA | `1006` `K_URMA_NEED_CONNECT` | 需重连、抖动 | `Urma connect unstable`；`need to reconnect`；`No existing connection requires creation`；`1006` |
-| FM-013 | JFS 重建策略（如 CR.status=9 ACK timeout） | URMA | `1004` 等 | 自动 Recreate JFS 失败 | `Recreate JFS for requestId` `failed`；见 urma_manager 策略表 |
+| FM-012 | UB 连接状态不稳定 / 需重建 | URMA | `1006` `K_URMA_NEED_CONNECT` | 需重连、抖动 | `URMA_NEED_CONNECT`；`remoteAddress`；`remoteInstanceId`；`remoteWorkerId`；`need reconnect`；`1006` |
+| FM-013 | JFS 重建策略（如 CR.status=9 ACK timeout） | URMA | `1004` 等 | 自动 Recreate JFS 失败 | `URMA_RECREATE_JFS`；`URMA_RECREATE_JFS_FAILED`；`URMA_RECREATE_JFS_SKIP`；见 urma_manager 策略表 |
 | FM-014 | 客户端 UB Get 缓冲：超上限 / 分配失败 → 降级 TCP payload | NEITHER（功能仍可用，**性能**见 §4） | 常无 URMA 错误码上抛 | 大对象走 TCP、延迟升高 | `UB Get buffer size` `exceeds max`；`fallback to TCP/IP payload`；`UB Get buffer allocation failed` |
 | FM-015 | UB payload 与应答尺寸不一致 | NEITHER | 业务返回链 | 解析失败、非法 payload | `UB payload overflow`；`Invalid UB payload size`；`Build UB payload rpc message failed` |
 | FM-016 | 客户端 SHM mmap 组装失败 | OS | 依 ToString | Get 响应处理失败 | `Failed for` + `objectKey`；`Get mmap entry failed`；`mmap failed` |
@@ -123,8 +123,9 @@ flowchart TD
 |------|------------------|--------------|
 | ZMQ / RPC | `Register client failed`, `1001`, `1002`, `rpc unavailable`, `deadline exceeded`, `try again`, `send`, `recv`, `zmq_` | FM-001, FM-002, FM-007, FM-019 |
 | URMA 初始化 | `Failed to urma init`, `get device by name`, `get eid list`, `create context`, `jfce`, `jfc`, `jfs`, `jfr`, `dlopen loader` | FM-003 |
-| URMA 数据面 / CQ | `Failed to urma write`, `Failed to urma read`, `Failed to poll jfc`, `Failed to wait jfc`, `Failed to rearm jfc`, `CR.status`, `requestId` | FM-010, FM-011 |
-| URMA 连接 | `Urma connect unstable`, `need to reconnect`, `1006`, `No existing connection requires creation` | FM-012 |
+| URMA 数据面 / CQ | `Failed to urma write`, `Failed to urma read`, `URMA_POLL_ERROR`, `Failed to wait jfc`, `Failed to rearm jfc`, `CR.status`, `requestId` | FM-010, FM-011 |
+| URMA 连接 | `URMA_NEED_CONNECT`, `remoteAddress`, `remoteInstanceId`, `remoteWorkerId`, `need reconnect`, `1006` | FM-012 |
+| URMA JFS 重建 | `URMA_RECREATE_JFS`, `URMA_RECREATE_JFS_FAILED`, `URMA_RECREATE_JFS_SKIP`, `newJfsId` | FM-013 |
 | 握手 / JFR | `Fast transport handshake`, `import`, `jfr`, `advise jfr` | FM-005 |
 | 降级（性能敏感） | `fallback to TCP/IP payload`, `UB Get buffer` | FM-014 |
 | UB 逻辑错误 | `UB payload overflow`, `Invalid UB payload`, `Build UB payload rpc message failed` | FM-015 |
