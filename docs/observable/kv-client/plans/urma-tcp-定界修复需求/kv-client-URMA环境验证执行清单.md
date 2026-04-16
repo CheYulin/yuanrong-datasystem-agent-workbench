@@ -7,17 +7,20 @@
 
 ## 1. 验证目标（本轮重点）
 
-### 1.1 错误码语义
+### 1.1 错误码语义（与评审后实现一致）
 
-- `Event::WaitFor` / `EventWaiter::WaitAny` 超时返回 `K_URMA_WAIT_TIMEOUT`，不再返回 RPC 超时码。
-- 注入 `UrmaManager.UrmaWaitError` 后，远端 Get 场景返回 `K_URMA_WAIT_TIMEOUT`。
-- `RetryOnError` 集合已纳入 `K_URMA_WAIT_TIMEOUT`。
+- **共享原语** `Event::WaitFor` / `EventWaiter::WaitAny` 超时返回 **`K_RPC_DEADLINE_EXCEEDED`（1001）**，日志文案为通用等待超时（见 5.0），**不**再带 `[URMA_WAIT_TIMEOUT]`，避免 UCP 等非 URMA 路径被误标为 URMA。
+- **`UrmaManager::WaitToFinish`** 在收到 `Event::WaitFor` 的 1001 后，**对外**映射为 **`K_URMA_WAIT_TIMEOUT`（1010）**；仅 URMA 完成等待对外暴露 1010。
+- 注入 `UrmaManager.UrmaWaitError` 后，相关场景仍返回 `K_URMA_WAIT_TIMEOUT`。
+- `IsRpcTimeout` / `IsRpcError` / `RetryOnRPCErrorByTime` 等已纳入 `K_URMA_WAIT_TIMEOUT`；业务侧 `RetryOnError` 白名单按需包含 1010。
 
 ### 1.2 关键日志可观测性
 
+- **Event 等待超时（5.0）**：`RETURN_STATUS_LOG_ERROR` 打 **`ERROR`**，关键字 **`Timed out waiting for request`** / **`Timed out waiting for any event`**（与 1001 语义一致）。
+- **URMA 管理器**：`timeoutMs < 0` 等路径仍可有 **`[URMA_WAIT_TIMEOUT]`** 前缀日志；`VLOG(1)` 含 **`[UrmaEventHandler] Started/Done waiting for the request id`**（需提高 verbose，如 `--v=1` 或 `FLAGS_v=1`）。
 - `CheckUrmaConnectionStable` 返回 `K_URMA_NEED_CONNECT` 时有 `WARNING/ERROR` 可检索日志。
 - `ServerEventHandleThreadMain` 对 `PollJfcWait` 的非 OK（非 `K_TRY_AGAIN`）结果有 `ERROR` 日志。
-- 日志能区分 TCP 与 URMA 问题域（至少从错误码和日志前缀可定界）。
+- 日志能区分 TCP 与 URMA 问题域（错误码 + 前缀 + 5.0/5.1–5.4 关键字）。
 
 ### 1.3 兼容与回归
 
@@ -37,6 +40,7 @@
   - `src/datasystem/worker/object_cache/service/worker_oc_service_get_impl.cpp`
   - `src/datasystem/worker/object_cache/service/worker_oc_service_batch_get_impl.cpp`
   - `tests/ut/common/util/status_test.cpp`
+  - `tests/ut/common/util/rpc_util_test.cpp`（`IsRpcTimeout` 与 1010）
   - `tests/st/client/object_cache/urma_object_client_test.cpp`
 
 ---
@@ -65,16 +69,16 @@ cmake --build . --target ds_ut ds_st_object_cache -j4
 
 ## 4. 用例执行步骤
 
-## 4.1 Phase 1 UT（必须通过）
+## 4.1 Phase 1 UT（必须通过，**无 URMA 环境也可跑**）
 
 ```bash
 cd build-urma/tests/ut
-./ds_ut --gtest_filter="StatusTest.EventWaitForTimeoutReturnsUrmaWaitTimeout:StatusTest.EventWaitForSucceedsAfterNotify:StatusTest.EventWaitAnyTimeoutReturnsUrmaWaitTimeout:StatusTest.EventWaitAnySucceedsAfterNotify"
+./ds_ut --gtest_filter="StatusTest.EventWaitForTimeoutReturnsDeadlineExceeded:StatusTest.EventWaitForSucceedsAfterNotify:StatusTest.EventWaitAnyTimeoutReturnsDeadlineExceeded:StatusTest.EventWaitAnySucceedsAfterNotify:RpcUtilTest.IsRpcTimeoutIncludesUrmaWaitTimeout"
 ```
 
 期望：
-- 4/4 通过。
-- 日志中可见 `URMA_WAIT_TIMEOUT` 相关输出（超时路径）。
+- 5/5 通过（前 4 个断言 **1001** + 超时文案；最后一个断言 **`IsRpcTimeout(1010)`**）。
+- **超时路径若开启 glog 输出**：`ERROR` 日志正文含 **`Timed out waiting for request`** 或 **`Timed out waiting for any event`**（**不再**要求日志里出现字符串 `URMA_WAIT_TIMEOUT`——与共享 `Event` 语义一致）。
 
 ## 4.2 Phase 1 ST（URMA 关键用例）
 
@@ -112,6 +116,17 @@ cd build-urma/tests/ut
 ## 5. 日志验证步骤
 
 建议在执行 ST 前先清理日志，再按关键字检索。
+
+### 5.0 Event / URMA wait 超时（本轮语义与检索）
+
+| 场景 | 对外/返回码 | 典型检索关键字（`ERROR` 为主） | 说明 |
+|------|----------------|--------------------------------|------|
+| `Event::WaitFor` / `WaitAny` 超时（任意调用方） | **1001** | `Timed out waiting for request` / `Timed out waiting for any event` | 共享原语，**非** URMA 专用前缀 |
+| `UrmaManager::WaitToFinish` 映射后对外 | **1010** | 业务/Status；上游若打完整 `Status::ToString()` 可见 **1010** | 内部先经 `Event::WaitFor`，日志仍多为上一行通用文案 |
+| `UrmaManager` `timeoutMs < 0` 等 | **1010** | **`[URMA_WAIT_TIMEOUT] timedout waiting for request`** | 仍带 URMA 前缀，便于定界 |
+| 注入 `UrmaManager.UrmaWaitError` | **1010** | 依实现/注入文案 | ST/注入环境 |
+
+**无 URMA 硬件时**：用 **4.1 UT** 锁定「1001 + 文案」与「`IsRpcTimeout` 含 1010」；不依赖真实 RDMA。
 
 ### 5.1 `K_URMA_NEED_CONNECT` 关键日志
 

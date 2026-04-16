@@ -35,7 +35,7 @@ Fixes #<ISSUE_ID>
 **关键信息**
 
 - **可靠性语义**
-  - `Event::WaitFor` / `EventWaiter::WaitAny` / `UrmaManager::WaitToFinish` 超时语义统一。
+  - 共享 `Event`/`EventWaiter` 超时为 **1001**；**仅** `UrmaManager::WaitToFinish` 对外映射 **1010**；UCP 等非 URMA 路径保持 **1001**（见下文「评审问题修复说明」）。
   - reconnect / poll / recreate 场景日志可直接检索。
 
 - **可观测性**
@@ -64,6 +64,58 @@ Fixes #<ISSUE_ID>
   - 新增：`scripts/testing/verify/validate_urma_tcp_observability_logs.sh`
   - 新增：`./ops test.urma_tcp_logs`
   - 接入：`scripts/build/remote_build_run_datasystem.sh` 可选日志验收参数。
+
+---
+
+## 评审问题修复说明（共享 Event 与 1010 分类）
+
+以下回应 Code Review 中两类问题：**(A) 共享 `Event` 超时误标 URMA；(B) `K_URMA_WAIT_TIMEOUT`(1010) 未纳入通用 timeout/retry 分类**。代码路径均以 **`yuanrong-datasystem` 仓库根目录** 为准。
+
+### (A) 通用 `Event`/`EventWaiter` 超时不应直接返回 1010
+
+**问题**：`Event::WaitFor` / `EventWaiter::WaitAny` 为共享原语；若超时统一返回 `K_URMA_WAIT_TIMEOUT`，则 **UCP** 等同样调用 `Event::WaitFor` 的路径（如 `src/datasystem/common/rdma/ucp_manager.cpp::WaitToFinish`）会被误标为 URMA，且与上层按 **`K_RPC_DEADLINE_EXCEEDED`(1001)** 处理超时的约定不一致。
+
+**修复**：
+
+1. **`Event::WaitFor` / `EventWaiter::WaitAny`**：超时返回 **`K_RPC_DEADLINE_EXCEEDED`**，通用文案（不带 URMA 专用语义）。
+2. **`UrmaManager::WaitToFinish`**：在 `event->WaitFor` 返回 **1001** 时，**映射为 `K_URMA_WAIT_TIMEOUT`** 并保留原消息；UCP 无此映射，仍从 `WaitFor` 得到 **1001**。
+
+**证据（代码）** — `src/datasystem/common/rdma/rdma_util.h`：`WaitAny` / `WaitFor` 使用 `K_RPC_DEADLINE_EXCEEDED`。
+
+**证据（代码）** — `src/datasystem/common/rdma/urma_manager.cpp`：`WaitToFinish` 内 `waitRc.GetCode() == K_RPC_DEADLINE_EXCEEDED` 时 `return Status(K_URMA_WAIT_TIMEOUT, waitRc.GetMsg())`。
+
+**证据（代码）** — `src/datasystem/common/rdma/ucp_manager.cpp`：`WaitToFinish` 仅 `RETURN_IF_NOT_OK(event->WaitFor(...))`，无 1010 映射。
+
+**证据（单测）** — `tests/ut/common/util/status_test.cpp`：`EventWaitForTimeoutReturnsDeadlineExceeded`、`EventWaitAnyTimeoutReturnsDeadlineExceeded` 断言 **1001** 与 `Timed out waiting for ...` 文案。
+
+---
+
+### (B) 1010 需同步纳入 timeout / RPC 错误分类与基于时间的重试白名单
+
+**问题**：若 **`IsRpcTimeout` / `IsRpcError`** 不认 **1010**，且 **`RetryOnRPCErrorByTime`** 等显式重试集合不含 **1010**，则 URMA wait timeout 会绕开原有「超时 / 重试」语义。
+
+**修复**：
+
+- **`IsRpcTimeout`**（`src/datasystem/common/util/rpc_util.h`）：增加 **`StatusCode::K_URMA_WAIT_TIMEOUT`**（`IsRpcTimeoutOrTryAgain` 随之覆盖）。
+- **`IsRpcError`**（`src/datasystem/common/rpc/zmq/zmq_common.h`）：增加 **1010**。
+- **`RetryOnRPCErrorByTime`**（`rpc_util.h`）：`RetryOnError` 的 retry 码集合增加 **`K_URMA_WAIT_TIMEOUT`**。
+- 业务侧 **`RetryOnError(..., 显式 retry 集合)`** 已在相关路径按需包含 1010；其它手写码表需个案审计。
+
+**证据（代码）** — `rpc_util.h`：`IsRpcTimeout` 含 `K_URMA_WAIT_TIMEOUT`；`RetryOnRPCErrorByTime` 的集合含 `K_URMA_WAIT_TIMEOUT`。
+
+**证据（代码）** — `zmq_common.h`：`IsRpcError` 含 `K_URMA_WAIT_TIMEOUT`。
+
+**证据（单测）** — `tests/ut/common/util/rpc_util_test.cpp`：`IsRpcTimeoutIncludesUrmaWaitTimeout` 断言 **1010** 被 `IsRpcTimeout` / `IsRpcTimeoutOrTryAgain` 识别。
+
+**说明**：`include/datasystem/utils/status.h` 与 `src/datasystem/common/util/status_code.def` 需已定义 **`K_URMA_WAIT_TIMEOUT`**，与上述引用保持一致。
+
+**验证命令（示例）**：
+
+```bash
+./ds_ut --gtest_filter='StatusTest.EventWaitForTimeoutReturnsDeadlineExceeded:StatusTest.EventWaitForSucceedsAfterNotify:StatusTest.EventWaitAnyTimeoutReturnsDeadlineExceeded:StatusTest.EventWaitAnySucceedsAfterNotify:RpcUtilTest.IsRpcTimeoutIncludesUrmaWaitTimeout'
+```
+
+期望：**5/5 PASSED**；超时路径若输出 glog，可见 `Timed out waiting for request` / `Timed out waiting for any event`（与 `RETURN_STATUS_LOG_ERROR` 一致）。
 
 ---
 

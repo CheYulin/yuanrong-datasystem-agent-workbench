@@ -541,4 +541,77 @@ cmake --build . --target common_rpc_zmq -j8
 
 ---
 
-*档案更新时间：2026-04-16（追加 §十一并整理编号）；原 §一至 §十：2026-04-16，原 §一至 §六：2026-04-15*
+## 十三、2026-04-16 追加：UT/ST 复跑 + 脚本字段校验（最新代码）
+
+### 13.1 复跑命令（远端 Bazel）
+
+执行节点：`root@38.76.164.55`
+
+```bash
+cd /root/workspace/git-repos/yuanrong-datasystem
+USE_BAZEL_VERSION=7.4.1 bazel test \
+  //tests/ut/common/rpc:zmq_metrics_test \
+  //tests/st/common/rpc/zmq:zmq_metrics_fault_test \
+  --jobs=8 --test_output=errors
+```
+
+关键输出摘要：
+
+```text
+//tests/st/common/rpc/zmq:zmq_metrics_fault_test  PASSED in 9.6s
+//tests/ut/common/rpc:zmq_metrics_test            PASSED in 0.6s
+Executed 0 out of 2 tests: 2 tests pass. (cached)
+```
+
+### 13.2 日志校验脚本执行与修正
+
+本次从远端 Bazel testlog 拉取日志并本地校验：
+
+```bash
+ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem && \
+  cat bazel-testlogs/tests/st/common/rpc/zmq/zmq_metrics_fault_test/test.log' \
+  > /tmp/zmq_metrics_fault_test.latest.log
+
+bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh \
+  /tmp/zmq_metrics_fault_test.latest.log
+```
+
+首次执行发现 1 处脚本模式与新指标名不一致：
+
+- 旧模式：`zmq\.io\.(send|recv)_us,count=`
+- 新指标：`zmq_send_io_latency,count=` / `zmq_receive_io_latency,count=`
+
+已更新脚本匹配规则为：
+
+```text
+zmq_(send|receive)_io_latency,count=
+```
+
+修正后脚本结果：
+
+```text
+Mandatory RESULT: 15 matched | 0 missing
+```
+
+### 13.3 关键观测字段（`rg` 抽样证据）
+
+在 `/tmp/zmq_metrics_fault_test.latest.log` 中可检索到：
+
+- `[METRICS DUMP - Normal RPCs]`
+- `[METRICS DUMP - Server Killed]`
+- `[METRICS DUMP - Slow Server]`
+- `[METRICS DUMP - High Load]`
+- `zmq_send_io_latency,count=...`
+- `zmq_receive_io_latency,count=...`
+- `zmq_rpc_serialize_latency,count=...`
+- `zmq_rpc_deserialize_latency,count=...`
+- `[ISOLATION] gw_recreate total=...`
+- `[SELF-PROOF] framework_ratio=...`
+- `[SELF-PROOF REPORT]`
+- `CONCLUSION: ...`
+
+结论：最新代码状态下，相关 UT/ST 通过，且故障注入可观测字段链路完整，脚本校验 0 missing。
+
+---
+
+*档案更新时间：2026-04-16（追加 §十三）；原 §一至 §十二：2026-04-16，原 §一至 §六：2026-04-15*
