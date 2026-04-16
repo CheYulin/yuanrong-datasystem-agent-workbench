@@ -1073,3 +1073,544 @@ IF Down 发生
 超时策略主动做的。TCP 本身在 IF Down 时只会默默重传, 永远不会主动
 放弃一个连接 (直到 tcp_retries2 耗尽, 约 15-30min)。
 ```
+
+---
+
+## 12. SO_LINGER vs ZMQ_LINGER 对比
+
+两个 LINGER 工作在不同层次，控制的是 close 时等不等数据发完，但作用域完全不同。
+
+### 12.1 SO_LINGER (TCP/内核层)
+
+控制 `close(fd)` 时内核对 TCP send buffer 中未发送数据的处理。
+
+```
+三种模式:
+┌─────────────────┬────────────────────────────────────────────┐
+│ 配置             │ close(fd) 行为                             │
+├─────────────────┼────────────────────────────────────────────┤
+│ l_onoff = 0     │ 默认行为:                                  │
+│ (默认)          │   close() 立即返回                          │
+│                 │   内核在后台继续发送 send buffer 中的数据    │
+│                 │   发完后正常 FIN 四次挥手                    │
+│                 │   数据不丢失 (除非对端先断)                  │
+├─────────────────┼────────────────────────────────────────────┤
+│ l_onoff = 1     │ 优雅关闭 (有超时):                          │
+│ l_linger > 0    │   close() 阻塞最多 l_linger 秒             │
+│                 │   等 send buffer 排空 + 收到对端 FIN        │
+│                 │   超时 → 丢弃剩余数据, 发 RST              │
+├─────────────────┼────────────────────────────────────────────┤
+│ l_onoff = 1     │ 硬关闭 (立即):                              │
+│ l_linger = 0    │   close() 立即返回                          │
+│                 │   内核丢弃 send buffer 全部数据              │
+│                 │   直接发 RST (不走 FIN 四次挥手)             │
+└─────────────────┴────────────────────────────────────────────┘
+```
+
+### 12.2 ZMQ_LINGER (ZMQ/用户态层)
+
+控制 `zmq_close(socket)` 时 ZMQ 用户态 pipe 中排队消息的处理。
+
+```
+三种模式:
+┌─────────────────┬────────────────────────────────────────────┐
+│ 配置             │ zmq_close() 行为                           │
+├─────────────────┼────────────────────────────────────────────┤
+│ ZMQ_LINGER = -1 │ 默认: 无限等待                              │
+│ (libzmq 默认)   │   zmq_close() 阻塞直到 pipe 中所有消息     │
+│                 │   都交给 TCP send buffer                    │
+│                 │   可能永远阻塞 (如果对端不收)               │
+├─────────────────┼────────────────────────────────────────────┤
+│ ZMQ_LINGER > 0  │ 有超时 (毫秒):                              │
+│                 │   zmq_close() 等最多 N 毫秒                │
+│                 │   尽量把 pipe 中消息排到 TCP                │
+│                 │   超时后丢弃剩余消息, 关闭底层 fd           │
+├─────────────────┼────────────────────────────────────────────┤
+│ ZMQ_LINGER = 0  │ 立即丢弃 (你们的配置):                      │
+│                 │   zmq_close() 立即返回                     │
+│                 │   pipe 中所有排队消息立即丢弃               │
+│                 │   底层 fd 立即 close()                      │
+└─────────────────┴────────────────────────────────────────────┘
+```
+
+### 12.3 两者的作用域
+
+```
+zmq_send(msg)
+    │
+    ▼
+┌──────────────┐          ┌──────────────┐
+│  ZMQ pipe    │          │  TCP send    │
+│  (用户态)    │──write──→│  buffer      │──网络──→ 对端
+│              │          │  (内核态)    │
+└──────────────┘          └──────────────┘
+       │                         │
+  ZMQ_LINGER                SO_LINGER
+  控制这里的数据              控制这里的数据
+```
+
+### 12.4 ZMQ_LINGER=0 在当前架构下是正确的
+
+zmq_close() 被调用的场景只有三个：
+
+| 场景 | 代码位置 | 说明 |
+|------|---------|------|
+| liveness=0 重建 DEALER | `zmq_stub_conn.cpp:378` swap 后旧 socket 析构 | 故障恢复路径 |
+| WorkerEntry 退出 | `zmq_stub_conn.cpp:320` Raii guard | shutdown |
+| Server/Context shutdown | `zmq_server_impl.cpp:98` | shutdown |
+
+linger=0 为什么是对的：
+
+```
+liveness=0 触发时, 连接已"判死" (~12s 无响应):
+  1. pipe 里的数据发到旧连接也没用 (对端可能早断了)
+  2. 新 DEALER 有新 routing-id, 旧消息的 response 回旧身份, 新 socket 收不到
+  3. 等 pipe 排空 = 浪费时间 + 阻塞 WorkerEntry + 延迟故障恢复
+  4. shutdown 时不阻塞, 进程快速退出
+
+改大 linger 的后果:
+  ZMQ_LINGER=5000 → zmq_close() 阻塞 5 秒
+    → WorkerEntry 被阻塞 → 新 DEALER 建立延迟
+    → 故障恢复从 ~12s 变成 ~17s
+    → 且数据仍然发不出去 (网络不通) → 白等
+```
+
+---
+
+## 13. ZMQ 为什么 close(fd) 而不是等 TCP 恢复
+
+### 13.1 根本矛盾
+
+```
+TCP 的态度: "我重传 15-30 分钟再放弃"
+应用的态度: "3 秒没响应我就等不了了"
+
+时间尺度差三个数量级, 应用不可能等 TCP
+```
+
+### 13.2 ZMQ 架构限制: session 与 engine 1:1
+
+```
+ZMQ 内部:
+  session ──→ engine ──→ fd
+
+一个 session 只能绑一个 engine (一个 TCP 连接)
+不支持同时持有新旧两个连接:
+  session ──→ engine_old(fd1)  ← 等恢复
+         └──→ engine_new(fd2)  ← 同时建新的  ← 不支持!
+
+要建新连接, 必须先销毁旧 engine = close(旧 fd)
+```
+
+理想方案 (ZMQ 不支持)：
+```
+保留旧 fd, 同时建新 fd, 设宽限期:
+  fd1 恢复了 → 好, 数据不丢, 关 fd2
+  fd1 超时   → 关 fd1, 切 fd2
+
+这需要 session 支持双 engine + 消息去重
+→ ZMQ 作为轻量传输层不做这个
+→ 这是 QUIC 或应用层协议的工作
+```
+
+### 13.3 正确策略: 避免不该 close 的时候 close
+
+```
+既然 close(fd) 是破坏性的, 最好的策略是让超时 > IF Down 持续时间:
+
+你的场景: 2.5s 周期, 0.5s IF Down
+
+┌──────────────────────────┬──────────┬──────────────────────────┐
+│ 超时配置                  │ 推荐值   │ 原因                      │
+├──────────────────────────┼──────────┼──────────────────────────┤
+│ ZMQ_HEARTBEAT_TIMEOUT    │ 不配置   │ 0.5s IF Down 让 TCP      │
+│ (或 > 2s)                │ 或 3000  │ 自己重传就够了            │
+├──────────────────────────┼──────────┼──────────────────────────┤
+│ liveness 超时            │ ~12-120s │ 0.5s IF Down 远不会      │
+│ (heartbeatInterval*max)  │ (不改)   │ 耗尽 liveness            │
+├──────────────────────────┼──────────┼──────────────────────────┤
+│ RPC timeout              │ 3-60s    │ 当前值已足够              │
+└──────────────────────────┴──────────┴──────────────────────────┘
+
+结果: 0.5s IF Down 全程无 close(fd) → TCP 重传兜底 → 零丢包
+```
+
+---
+
+## 14. RPC 框架 WorkerEntry 主循环详解
+
+### 14.1 架构总览
+
+```
+业务线程 (KV Client)
+    │ 调用 RPC: Put(key, value)
+    ▼
+┌──────────────────────────────────────────────────┐
+│  ZmqFrontend (专用后台线程)                       │
+│                                                   │
+│  ┌─────────┐        ┌──────────────┐             │
+│  │ msgQue_ │ ←───── │ 业务线程     │ request入队 │
+│  │ (内部   │        │ SendMsg()    │             │
+│  │  队列)  │        └──────────────┘             │
+│  └────┬────┘                                     │
+│       │ eventfd 通知                              │
+│       ▼                                          │
+│  ┌──────────────┐                                │
+│  │ DEALER socket │ ←TCP→ Server ROUTER socket    │
+│  │ (frontend_)   │                               │
+│  └──────────────┘                                │
+│                                                   │
+│  主循环: WorkerEntry()                            │
+│    while(!interrupt) {                            │
+│       HandleEvent()  // poll + 收发               │
+│       liveness 管理  // 健康检查                   │
+│    }                                              │
+└──────────────────────────────────────────────────┘
+```
+
+### 14.2 HandleEvent: 每次循环干什么
+
+```
+HandleEvent(timeout):
+  poll(zmq_fd, eventfd, timeout_ms)
+  同时监听:
+    zmq_fd:  DEALER socket 有数据可收? (Server 发来 response)
+    eventfd: 内部队列有新 request 要发?
+
+  zmq_fd 可读 → ZmqSocketToBackend():
+    从 DEALER 收 response → ResetLiveness() → 转发给业务线程
+    
+  eventfd 可读 → BackendToFrontend():
+    从内部队列取 request → 通过 DEALER 发出
+
+  都没有 → 返回 K_NOT_FOUND (idle)
+```
+
+### 14.3 liveness 递减的精确逻辑
+
+```cpp
+// zmq_stub_conn.cpp:334-386 简化后的逻辑:
+while (!interrupt_) {
+    rc = HandleEvent(timeout);
+
+    if (rc == K_NOT_FOUND) {          // idle: 没有任何事件
+        timeout = 100;                // 下次 poll 等 100ms
+        if (t < heartbeatInterval_)   // 还没到心跳间隔
+            continue;                 // → 跳回开头, 不减 liveness!
+    } else {
+        timeout = 0;
+        if (rc == K_TRY_AGAIN) {      // EAGAIN: 直接判死
+            liveness_ = 0;            // → 立即跳到重建
+        } else {
+            continue;                 // 正常收到数据, 跳回开头
+        }
+    }
+
+    // 只有累计 idle >= heartbeatInterval_ 才到这里
+    if (liveness_ > 0) liveness_--;
+    SendHeartBeats();                 // 发应用层心跳
+    t.Reset();
+
+    if (liveness_ == 0) {             // 判死 → 重建 DEALER
+        InitFrontend(new_socket);
+        swap(frontend_, new_socket);  // 旧 socket 析构 → close(fd)
+    }
+}
+```
+
+关键：**不是每 100ms 减一次！**
+
+```
+每次循环:
+  idle → 检查 t < heartbeatInterval_ → 不到就 continue, 不减 liveness
+  
+  只有累计 idle 时间 >= heartbeatInterval_ (默认 1000ms) 才:
+    liveness_--, SendHeartBeats(), t.Reset()
+    
+实际递减频率 = 每 heartbeatInterval_ ms 减一次
+```
+
+### 14.4 从 IF Down 到 close 的时间计算
+
+```
+默认配置:
+  heartbeatInterval_ = 1000ms (K_ONE_SECOND)
+  maxLiveness_ = 120 (K_LIVENESS)
+  → close 时间 = 1000ms × 120 = 120s (2分钟)
+
+如果被 UpdateLiveness() 动态调整过:
+  UpdateLiveness(timeoutMs):
+    interval = max(200ms, min(timeoutMs/4, 30000ms))
+    newLiveness = max(timeoutMs*0.9/interval, 3)
+    
+  例如 timeoutMs=3000ms:
+    interval = max(200, min(750, 30000)) = 750ms
+    liveness = max(2700/750, 3) = max(3.6, 3) = 3
+    → close 时间 = 750ms × 3 ≈ 2.25s
+
+快速通道: HandleEvent 返回 K_TRY_AGAIN
+  → liveness 直接置 0 → 立即重建, 不用等
+```
+
+### 14.5 应用层心跳 vs ZMTP 心跳
+
+```
+应用层心跳 (RPC框架, 当前在用):           ZMTP 心跳 (ZMQ协议层, 当前未用):
+────────────────────────────              ────────────────────────────
+发送: 普通 MetaPb RPC 消息                发送: ZMTP PING 帧 (协议内部)
+  method_index = ZMQ_HEARTBEAT_METHOD       不经过 pipe, engine 直接发
+经过: pipe → engine → TCP                 经过: engine → TCP
+
+处理: Server ROUTER 收到                  处理: 对端 engine 内部处理
+  → 回一条 response                         → 自动回 PONG
+  → 走正常 RPC 回路                         → 不经过应用层
+
+超时: liveness 递减到 0                   超时: heartbeat_timeout_timer 到期
+  → RPC 框架 zmq_close()                   → libzmq error(timeout_error)
+  → Level 2 重建 (pipe 全丢)               → Level 1 内部重连 (pipe 保留)
+  → 新 routing-id                          → routing-id 不变
+```
+
+---
+
+## 15. 故障注入方式对比与分析
+
+### 15.1 三种 IF Down 注入方式
+
+```bash
+# 方式 1: ip link down/up (真 IF Down, 链路层)
+while true; do
+  ip link set eth0 down; sleep 0.5
+  ip link set eth0 up;   sleep 2.0
+done
+
+# 方式 2: tc netem 100% 丢包 (网络层模拟)
+while true; do
+  tc qdisc add dev eth0 root netem loss 100%; sleep 0.5
+  tc qdisc del dev eth0 root;                 sleep 2.0
+done
+
+# 方式 3: iptables DROP (网络层过滤)
+while true; do
+  iptables -A INPUT -i eth0 -j DROP
+  iptables -A OUTPUT -o eth0 -j DROP; sleep 0.5
+  iptables -F;                        sleep 2.0
+done
+```
+
+### 15.2 不同方式的本质区别
+
+```
+┌─────────────────┬──────────────┬──────────────┬──────────────┐
+│                 │ ip link down │ tc netem     │ iptables     │
+│                 │ (真IF Down)  │ loss 100%    │ DROP         │
+├─────────────────┼──────────────┼──────────────┼──────────────┤
+│ 作用层          │ 链路层 (L2)  │ 网络层 (L3)  │ 网络层 (L3)  │
+│ 网卡 carrier    │ 消失         │ 保持         │ 保持         │
+│ ARP 表          │ 可能失效     │ 保持         │ 保持         │
+│ TCP 连接状态    │ 内核可能     │ 不感知       │ 不感知       │
+│                 │ 立即通知应用 │ 只是丢包     │ 只是丢包     │
+│ 恢复后行为      │ 需要重新     │ 立即恢复     │ 立即恢复     │
+│                 │ ARP/路由     │              │              │
+│ 对 TCP socket   │ send 可能返回│ 无直接影响   │ 无直接影响   │
+│ 的直接影响      │ ENETDOWN     │ TCP 默默重传 │ TCP 默默重传 │
+└─────────────────┴──────────────┴──────────────┴──────────────┘
+```
+
+### 15.3 ip link down (真 IF Down) 的精确行为
+
+```
+ip link set eth0 down 执行时:
+│
+├─ 内核: IFF_UP 标志清除, carrier 丢失
+├─ 该网卡上所有路由: 标记为不可达
+├─ 已有的 TCP socket:
+│   ├─ 正在 send(): 返回 ENETDOWN (-1, errno=100)
+│   ├─ 正在 recv(): 不会立即返回错误 (recv 只在有数据或FIN时返回)
+│   ├─ 后续 send(): 返回 ENETDOWN
+│   └─ TCP 连接: 内核不主动断开, 但无法重传
+│
+├─ ZMQ 的行为:
+│   ├─ engine out_event(): tcp_write → ENETDOWN
+│   │   → write 错误只 reset_pollout, 不 close(fd)!
+│   ├─ engine in_event(): recv buf 空则不被调用
+│   └─ 不触发 close(fd)
+│
+└─ ip link set eth0 up 之后:
+    ├─ carrier 恢复
+    ├─ 路由恢复
+    ├─ ARP 需要重新解析 (几十ms)
+    ├─ TCP: 下次重传成功 → 连接恢复
+    └─ 之前 ENETDOWN 的 send: 下次调用就能成功
+
+结论: 0.5s ip link down → TCP 未断 → ZMQ 无感 → 不丢消息
+     只有 ~200-500ms 延迟抖动 (TCP 重传等待)
+```
+
+### 15.4 观测到的 0.7~0.8ms 故障时间分析
+
+```
+0.7~0.8ms 远小于 0.5s IF Down 持续时间, 可能的解释:
+
+  场景 A: 链路层 carrier detect 时间
+    ip link down → up 后, 网卡从 "no carrier" 恢复
+    到 "carrier detected" 需要 ~0.7ms
+    这是物理层/驱动层的恢复时间
+
+  场景 B: 监控工具观测的网络中断时间
+    最后一个成功包到第一个恢复成功包的时间差
+    如果注入工具实际 IF Down 只有 sub-ms 级
+
+  场景 C: 实际 IF Down 只有 0.7ms 而非 0.5s
+    注入脚本的实际执行精度问题
+    在 0.7ms 尺度上: 可能只丢 1 个 TCP segment
+    TCP 快速重传 (3 dup ACK) 几 ms 内恢复
+    对 ZMQ 和应用层几乎无感知
+
+需要确认: 注入方式 (ip link / tc / iptables / 物理拔线)
+         和 0.7~0.8ms 的测量点 (网卡状态 / RPC延迟 / 丢包统计)
+```
+
+---
+
+## 16. liveness=0 的精确触发条件
+
+liveness 变为 0 只有两种方式：
+
+### 16.1 方式 1 (慢路径): 自然递减到 0
+
+前提：**长时间没收到任何 response（包括心跳 response）**。
+
+```
+WorkerEntry 主循环每一轮:
+
+  HandleEvent(timeout) 返回 K_NOT_FOUND (idle)
+    → 检查: t.ElapsedMilliSecond() < heartbeatInterval_ ?
+    → 是: continue, 不减 liveness (跳回循环开头)
+    → 否 (累计 idle >= heartbeatInterval_):
+        liveness_--
+        SendHeartBeats()  // 发应用心跳, 尝试让对端回 response
+        t.Reset()         // 重置心跳计时器
+
+每 heartbeatInterval_ (默认 1s) 减一次, 不是每 100ms
+从 maxLiveness_ (默认 120) 减到 0:
+  默认: 120 × 1s = 120s (2分钟)
+  UpdateLiveness 调过后: 可能快至 ~2-3s
+```
+
+**什么能重置 liveness 阻止它到 0？收到任意一条 response：**
+
+```
+HandleEvent() → ZMQ_POLLIN 就绪 → ZmqSocketToBackend():
+  frontend_->GetAllFrames()  // 从 DEALER 收到数据
+  ResetLiveness()            // liveness 重置回 maxLiveness_ (120)
+
+只要收到一条 response (RPC response 或心跳 response), liveness 就回满
+```
+
+### 16.2 方式 2 (快路径): K_TRY_AGAIN 直接置 0
+
+```cpp
+// zmq_stub_conn.cpp:348-352
+if (rc.GetCode() == K_TRY_AGAIN) {
+    liveness_ = 0;  // 不等递减, 直接判死
+}
+```
+
+**什么时候 HandleEvent 返回 K_TRY_AGAIN？** 追踪调用链：
+
+```
+HandleEvent()
+  ├─ ZmqSocketToBackend()         → RETURN_IF_NOT_OK (错误冒泡)
+  └─ BackendToFrontend()          → RETURN_IF_NOT_OK
+      └─ RouteToZmqSocket()
+          └─ frontend_->SendAllFrames(p, DONTWAIT)
+              └─ zmq_send(DONTWAIT) 返回 EAGAIN
+                 → Status(K_TRY_AGAIN)
+                 → 冒泡到 HandleEvent 返回值
+```
+
+即：**尝试通过 DEALER 发消息但 zmq_send(DONTWAIT) 返回 EAGAIN**。
+
+zmq_send(DONTWAIT) 在 DEALER 上返回 EAGAIN 的条件：
+
+```
+1. ZMQ_IMMEDIATE=true 且没有已建立的连接
+   → 当前配置了 IMMEDIATE=true
+   → 含义: 只有 TCP 连接建立后才能发消息
+   → 如果底层 TCP 连接断了且尚未重连 → EAGAIN
+
+2. 所有 peer 的 pipe 都满了 (HWM 限制)
+   → 当前 HWM=0 (无限), 几乎不可能
+```
+
+### 16.3 IF Down 时走哪条路径
+
+```
+IF Down 期间:
+
+  TCP 连接还在! (内核层面没断, 只是重传中)
+  DEALER socket 认为连接正常
+  zmq_send(DONTWAIT) → 成功 (消息进入 pipe → TCP send buffer)
+  → HandleEvent 不会返回 K_TRY_AGAIN
+  → 方式 2 不触发
+
+  但 Server response 回不来 (IF Down, 网络不通)
+  → HandleEvent 持续返回 K_NOT_FOUND (idle)
+  → 走方式 1 (慢路径), liveness 一次一次递减
+
+结论: IF Down 时走方式 1
+```
+
+### 16.4 完整判定流程图
+
+```
+HandleEvent() 返回什么?
+│
+├─ OK (收到 response)
+│    → ZmqSocketToBackend 中已 ResetLiveness()
+│    → liveness = maxLiveness_ (120)
+│    → 永远不会到 0
+│
+├─ K_NOT_FOUND (idle, 没事件)
+│    → 累计 idle < heartbeatInterval_ → continue, 不减
+│    → 累计 idle >= heartbeatInterval_ → liveness--
+│    → 慢慢减到 0 (方式1, 约 120s 或 ~2-3s)
+│
+├─ K_TRY_AGAIN (EAGAIN, 发不出去)
+│    → liveness = 0 (立即, 方式2)
+│    → IF Down 时: TCP 还在, send 能成功, 几乎不走这条
+│    → 真正触发场景: TCP 连接已断 + IMMEDIATE=true → send EAGAIN
+│
+├─ K_SHUTTING_DOWN
+│    → break 退出循环, 不走 liveness 逻辑
+│
+└─ 其他错误 (K_RUNTIME_ERROR 等)
+     → 从 HandleEvent 内部 RETURN_IF_NOT_OK 返回
+     → 不匹配 K_NOT_FOUND 也不匹配 K_TRY_AGAIN
+     → else 分支: timeout=0, continue
+     → 不减 liveness, 下一轮继续
+```
+
+### 16.5 SendHeartBeats 也可能失败
+
+```
+每次 liveness-- 后会调 SendHeartBeats():
+
+Status ZmqFrontend::SendHeartBeats() {
+    events = frontend_->Get(ZMQ_EVENTS);
+    if (!(events & ZMQ_POLLOUT))
+        return K_RPC_UNAVAILABLE;      // 不可写 → 发不出心跳
+    
+    SendAllFrames(heartbeat, DONTWAIT); // 发心跳消息
+}
+
+如果 ZMQ_POLLOUT 不就绪 (TCP send buffer 满):
+  → SendHeartBeats 返回错误
+  → 但 WorkerEntry 中用的是 (void)SendHeartBeats()
+  → 返回值被忽略! 不影响主循环逻辑
+  → liveness 继续递减
+
+所以心跳发不出去不会加速判死, 也不会阻止判死
+只是一个"尽力而为"的保活尝试
+```
