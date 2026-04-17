@@ -1,0 +1,43 @@
+---
+description: Vibe-coding-files — stable scripted outputs; avoid per-run unique paths unless opted in (workspace, results, plans runs, etc.)
+alwaysApply: true
+---
+
+# Scripted and workspace output hygiene
+
+This applies to **any script or automation** in this repo that writes files under **`workspace/`**, **`results/`**, **`plans/**/runs/`**, or other **ephemeral / evidence** paths — not only observability.
+
+## Principle
+
+- **Many outputs over the life of a project are fine** (archives, milestones, deliberate reports).
+- **Scripts must not, by default, create a new uniquely named file or directory on every run** (e.g. mandatory `trace_$(date +%Y%m%d_%H%M%S)_*` everywhere). That **spams the tree**, increases git noise, and complicates review and CI.
+
+## What agents and script authors should do
+
+1. **Stable default paths**  
+   Prefer **fixed names** or a **single “current run” location** that **overwrites** the previous run (`latest/`, `out/latest.*`, `summary.csv`, etc.), unless the user explicitly wants retention.
+
+2. **Opt-in archival / timestamps**  
+   Timestamped dirs or unique filenames are fine when controlled by a **flag** (`--archive`, `--keep-run`), an **explicit env** (`OUT_DIR=...`, `RUN_ID=...`), or when the script’s **documented contract** is “archive-only”.
+
+3. **Narrative vs raw**  
+   **`results/`** and **`plans/.../runs/`** are for **dated or named deliverables**; still avoid **unbounded** auto-generated siblings from routine automation — use stable defaults and move to a dated filename only when **promoting** a result.
+
+4. **Refactoring**  
+   When editing `scripts/**`, **bias defaults toward stable outputs**; keep old behavior behind flags/env if needed.
+
+5. **Git**  
+   Prefer **`.gitignore`** for large/raw churn; stable defaults reduce accidental mass commits.
+
+## Examples (non-exhaustive)
+
+| Area | Prefer | Avoid as default-only behavior |
+|------|--------|--------------------------------|
+| `workspace/observability/bpftrace`, `perf`, `strace` | Overwrite `latest/*` or fixed `stacks.txt` / `maps.txt` | New `trace_*_timestamp_*` set every invocation with no opt-out |
+| `workspace/reliability/**` | Stable scratch or `latest` + explicit export | Unbounded dated dirs from every dry-run |
+| `results/**` | User- or milestone-named files; scripts write **one** canonical `latest` then **copy** to a dated name when requested | Auto `result_$(date -Iseconds).md` on every run |
+
+## Related
+
+- Repo layout: `.cursor/rules/datasystem-repo-and-outputs.mdc`.
+- Observability folder intent: `workspace/observability/README.md`, `workspace/README.md`.

@@ -17,7 +17,7 @@ Use this URL when referring to the official open-source project. Local clone pat
 | Location | Contents |
 |----------|----------|
 | **`yuanrong-datasystem`** | Product **source code**, official build chain, and **repository structure** documented under **`.repo_context/`** (see that repo’s `.cursor/rules/repo-context.mdc`). |
-| **`vibe-coding-files`** | **Everything else**: verification/analysis scripts, `plans/`, narrative `docs/`, run artifacts under `results/` or `plans/.../runs/`, perf/bpf outputs under `workspace/` when used, Cursor skills, and any intermediate outputs tied to development workflow — **not** a substitute for `.repo_context/` in the code repo. |
+| **`vibe-coding-files`** | **Everything else**: verification/analysis scripts, `plans/`, narrative `docs/`, run artifacts under `results/` or `plans/.../runs/`, outputs under `workspace/` when used, Cursor skills, and any intermediate outputs tied to development workflow — **not** a substitute for `.repo_context/` in the code repo. Scripted writes follow **`.cursor/rules/workspace-output-hygiene.mdc`** (stable defaults; no per-run file sprawl unless opted in). |
 
 ## Naming note (product vs repo)
 

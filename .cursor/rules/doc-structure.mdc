@@ -19,6 +19,7 @@ globs: docs/**
 
 ## Update Boundaries
 
+- **New script or artifact path** → follow **`.cursor/rules/workspace-output-hygiene.mdc`** (stable default outputs; timestamped dirs only when opted in).
 - **New script added** → update `docs/agent/scripts-map.md` + `docs/agent/maintenance.md` checklist.
 - **Verification step changed** → update `docs/verification/手动验证确认指南.md` + `cmake-non-bazel.md` if commands changed.
 - **New doc page added** → update `docs/README.md` index + `docs/agent/decision-tree.md` routing table.
