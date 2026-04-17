@@ -1,0 +1,24 @@
+---
+description: Where outputs live vs yuanrong-datasystem; canonical repo name and upstream URL
+alwaysApply: true
+---
+
+# yuanrong-datasystem vs vibe-coding-files
+
+## Upstream (canonical)
+
+- **Repository name**: `yuanrong-datasystem`
+- **Upstream URL**: https://gitcode.com/openeuler/yuanrong-datasystem
+
+Use this URL when referring to the official open-source project. Local clone path is commonly a sibling of `vibe-coding-files`, e.g. `../yuanrong-datasystem/` (override with `DATASYSTEM_ROOT` / `YUANRONG_DATASYSTEM_ROOT`).
+
+## What goes where
+
+| Location | Contents |
+|----------|----------|
+| **`yuanrong-datasystem`** | Product **source code**, official build chain, and **repository structure** documented under **`.repo_context/`** (see that repo’s `.cursor/rules/repo-context.mdc`). |
+| **`vibe-coding-files`** | **Everything else**: verification/analysis scripts, `plans/`, narrative `docs/`, run artifacts under `results/` or `plans/.../runs/`, perf/bpf outputs under `workspace/` when used, Cursor skills, and any intermediate outputs tied to development workflow — **not** a substitute for `.repo_context/` in the code repo. |
+
+## Naming note (product vs repo)
+
+The Git repository directory is **`yuanrong-datasystem`**. Published Python packages, Helm chart names, or docs paths may still use **`openyuanrong`** / **`openyuanrong_datasystem`**; do not rename the clone directory to match those — keep **`yuanrong-datasystem`** for paths and scripts unless the user standardizes otherwise.

@@ -1,0 +1,15 @@
+---
+description: Run builds, tests, and debug commands on the designated remote host
+alwaysApply: true
+---
+
+# Remote execution host
+
+For **debugging, running, and verifying** this repository (build, unit tests, integration tests, scripts, log checks, Bazel/CMake targets):
+
+- Use the remote host: **`root@38.76.164.55`** (SSH).
+- Do **not** assume the local workspace machine is where commands must execute; prefer proposing or using **`ssh root@38.76.164.55 '...'`** (or the user’s SSH config alias) for runnable verification.
+- When giving concrete commands, mention the **remote working directory** if it differs from the local clone path (ask once if unknown).
+- Code edits stay in the local workspace; **execution** of compilers, test binaries, and environment-dependent steps targets the remote unless the user explicitly asks for local-only.
+
+If SSH is unavailable in the current session, state that limitation and still provide the exact remote command line for the user to run on **`root@38.76.164.55`**.

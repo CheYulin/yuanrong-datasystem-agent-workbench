@@ -76,6 +76,10 @@
 - `src/datasystem/common/rpc/zmq/zmq_metrics_def.h`
   - 独立 ZMQ 指标定义头已收敛进 `kv_metrics` 体系
 
+**测试辅助变更（与 ZMQ metrics 功能正交，需在 PR 中知晓）**
+
+- `tests/st/common/rpc/zmq/zmq_test.h`：`zmq_metrics_fault_test` 为在 Bazel 下避免对 `//tests/st:st_common`（及 `tests/st/cluster/common.cpp`）的过重链接依赖，与 `zmq_test.h` 中 Demo 服务实现自洽编译；原先 `datasystem::st::GetCrc32` 来自 ST 公共库，解耦后改为头文件内 **`CalcCrc32`**（与 `GetCrc32` 同语义：CRC-32 逐位算法；多项式以命名常量 **`CRC32_POLYNOMIAL`** 表示）。该改动不改变 ZMQ metrics 行为，仅服务 ST 构建与可维护性。
+
 ---
 
 **测试与脚本/文档交付**

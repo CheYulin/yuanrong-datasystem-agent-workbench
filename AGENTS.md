@@ -13,7 +13,11 @@
 ## 脚本与 Skill
 
 - **新增可执行脚本**：放在仓库根目录 **`scripts/`** 合适子目录，并更新 [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md) 或对应 README。  
-- **同一流程多次重复**：建议沉淀为 **Cursor Agent Skill**（本仓示例：[`.cursor/skills/feature-tree-to-docs/SKILL.md`](.cursor/skills/feature-tree-to-docs/SKILL.md)）。
+- **同一流程多次重复**：建议沉淀为 **Cursor Agent Skill**。现有 Skill：
+  - [`.cursor/skills/feature-tree-to-docs/`](.cursor/skills/feature-tree-to-docs/SKILL.md) — 特性树 TSV → Markdown 文档
+  - [`.cursor/skills/run-and-verify/`](.cursor/skills/run-and-verify/SKILL.md) — 远程 SSH 编译 → 测试 → 结果检查
+  - [`.cursor/skills/perf-baseline/`](.cursor/skills/perf-baseline/SKILL.md) — 性能基线采集与对比
+  - [`.cursor/skills/new-script-scaffold/`](.cursor/skills/new-script-scaffold/SKILL.md) — 新增脚本脚手架（含文档索引同步）
 
 ## Excel / PPT
 

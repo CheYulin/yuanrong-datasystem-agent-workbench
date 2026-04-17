@@ -1,0 +1,35 @@
+---
+description: How to use the unified ./ops entry point for scripts and common commands
+alwaysApply: true
+---
+
+# Unified Entry: `./ops`
+
+All runnable capabilities in this repo are exposed through the **`./ops`** script at the repository root. Prefer `./ops` over calling scripts inside `scripts/` directly.
+
+## Usage
+
+```
+./ops <capability-command> [options]
+```
+
+## Common Commands
+
+| Command | Purpose |
+|---------|---------|
+| `./ops test.kv_executor` | KV executor injection + source keyword audit |
+| `./ops test.kv_executor --skip-build <build>` | Re-run without recompiling |
+| `./ops test.brpc_kv_executor` | brpc/bthread reference cases + optional coverage |
+| `./ops runtime.lock_perf` | Lock contention batch unit test |
+| `./ops analysis.kv_executor_perf` | Executor inline vs injected curves / csv |
+| `./ops analysis.collect_lock_baseline` | Gate + optional perf record to baseline dir |
+| `./ops analysis.compare_lock_baseline` | Compare two run directories |
+| `./ops analysis.lock_ebpf_workflow` | bpftrace workflow (prints sudo collection commands) |
+| `./ops analysis.refresh_urma_index` | Generate URMA-aware index from compile_commands.json |
+| `./ops docs.kv_observability_xlsx` | Generate observability workbook |
+
+## Rules
+
+- Only access `scripts/...` internal paths when **debugging or developing the scripts themselves**.
+- If a capability is missing from `./ops`, add a route in `ops` and document it in `docs/agent/scripts-map.md`.
+- When `DATASYSTEM_ROOT` is not set and the repos are not siblings, set it before running `./ops`.

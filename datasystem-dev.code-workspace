@@ -13,5 +13,16 @@
       "path": "./workspace/observability"
     }
   ],
-  "settings": {}
+  "settings": {
+    "files.associations": {
+      "*.mdc": "markdown",
+      "SKILL.md": "markdown"
+    },
+    "search.exclude": {
+      "**/.venv*/**": true,
+      "**/results/**": true,
+      "**/workspace/observability/**": true,
+      "**/__pycache__/**": true
+    }
+  }
 }

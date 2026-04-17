@@ -8,6 +8,10 @@ Contents were migrated from `yuanrong-datasystem/plans/` with **directory layout
 
 New material: prefer **English filenames**, short **kebab-case** names, and organize by feature area as the feature tree matures.
 
+## UT / ST 全量跑测与整改
+
+- **[`ut-st-remediation/`](ut-st-remediation/README.md)**：CMake 全量 `ds_ut` / `ds_st` 跑测结论、慢测与失败项、分阶段整改建议（[`UT-ST全量跑测结论与整改计划.md`](ut-st-remediation/UT-ST全量跑测结论与整改计划.md)）。
+
 ## Top-level `.plan.md` in this repo
 
 - **Active**：`urma_ub_索引脚本使用说明.plan.md`（URMA/UB 索引脚本与验证入口交叉引用）；`agent开发载体_vibe与yuanrong分工.plan.md`（vibe 与 datasystem 分工）。

@@ -1,0 +1,29 @@
+---
+description: docs/ directory structure, update boundaries, and what to sync after changes
+globs: docs/**
+---
+
+# Documentation Structure
+
+## Directory Responsibilities
+
+| Directory | Contents | When to update |
+|-----------|----------|----------------|
+| `docs/agent/` | Agent-facing guides, decision-tree, scripts-map, maintenance spec | After changing scripts, adding docs, or modifying verification flows |
+| `docs/architecture/` | 4+1 views, ADRs | After structural or interface changes in yuanrong-datasystem |
+| `docs/flows/` | Sequence diagrams, process flows | After workflow or protocol changes |
+| `docs/reliability/` | FEMA, failure modes, StatusCode, operations | After adding failure modes or changing status codes |
+| `docs/verification/` | Manual verification guide, build artifacts, cmake commands | After changing build steps, test commands, or artifact paths |
+| `docs/feature-tree/` | Product capability matrix | After capability additions or removals |
+| `docs/observable/` | Observability docs, Excel generators, PPT materials | After changing metrics, log structure, or table generation scripts |
+
+## Update Boundaries
+
+- **New script added** → update `docs/agent/scripts-map.md` + `docs/agent/maintenance.md` checklist.
+- **Verification step changed** → update `docs/verification/手动验证确认指南.md` + `cmake-non-bazel.md` if commands changed.
+- **New doc page added** → update `docs/README.md` index + `docs/agent/decision-tree.md` routing table.
+- **Reliability/FEMA updated** → check `00-kv-client-fema-index.md` still covers all entries.
+
+## Stale Context
+
+If documentation contradicts observed behavior, fix the documentation rather than silently working around it.

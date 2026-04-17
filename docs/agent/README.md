@@ -26,6 +26,8 @@
 
 | 文档 | 用途 |
 |------|------|
+| [**`decision-tree.md`**](decision-tree.md) | **按意图路由**：快速找到最相关的文档 |
+| [**`maintenance.md`**](maintenance.md) | **维护规范**：修改后需同步更新哪些索引 |
 | [**`scripts-map.md`**](scripts-map.md) | **`scripts/` 分类地图**：build / index / perf / verify 何时用哪个入口 |
 | [`docs/verification/手动验证确认指南.md`](../verification/手动验证确认指南.md) | **逐步验收**：每步命令、成功判据、自检清单 |
 | [`docs/verification/构建产物目录与可复现工作流.md`](../verification/构建产物目录与可复现工作流.md) | 第三方缓存、`output`/`build` 目录结构、Client/Worker/whl |

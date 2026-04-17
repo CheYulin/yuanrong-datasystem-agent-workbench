@@ -1,0 +1,43 @@
+---
+description: Remote SSH execution safety: what can and cannot run remotely, fallback when SSH unavailable
+alwaysApply: true
+---
+
+# Remote SSH Safety
+
+## Remote Host
+
+- **Host**: `root@38.76.164.55` (SSH)
+- **Purpose**: Build, test, debug, and verify — any command that requires the compiled environment.
+
+## What Runs Remotely
+
+- Compilation (`bash build.sh`, cmake, make)
+- Test execution (`ctest`, `./ops test.*`)
+- Performance collection (`perf record`, `bpftrace`, `strace`)
+- Runtime verification (worker startup, cluster checks)
+
+## What Stays Local
+
+- **File edits** — always edit in the local workspace, never on the remote host.
+- **Git operations** — commit, diff, log, branch management stay local.
+- **Documentation** — writing and updating `docs/` stays local.
+
+## Fallback When SSH Unavailable
+
+If SSH access is not possible in the current session:
+
+1. State the limitation clearly to the user.
+2. Provide the exact remote command line for the user to run on `root@38.76.164.55`.
+3. Include the remote working directory in the command if it differs from the local clone path.
+4. Do **not** attempt local execution as a silent substitute — the build/runtime environment is not available locally.
+
+## Remote Working Directory
+
+If the remote clone path differs from the local one, ask the user once and remember for the session. Common convention: same relative path under the user's home or `~/workspace/git-repos/`.
+
+## Safety
+
+- Never pipe untrusted or user-generated content directly into remote `bash -c`.
+- Prefer single-quoted remote commands: `ssh root@38.76.164.55 'cd /path && ./ops test.kv_executor'`.
+- Do not use `--skip-build` unless the user explicitly confirms the remote build is up to date.
