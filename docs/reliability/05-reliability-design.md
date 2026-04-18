@@ -11,7 +11,7 @@
 | `src/datasystem/client/listen_worker.cpp` | Client 心跳超时 → 23 |
 | `src/datasystem/common/util/rpc_util.h` | `RetryOnError` 重试间隔 `1, 5, 50, 200, 1000, 5000` ms |
 
-故障处理配图：[diagrams/kv-client/](diagrams/kv-client/)
+故障处理配图：[diagrams/](diagrams/)
 
 ---
 

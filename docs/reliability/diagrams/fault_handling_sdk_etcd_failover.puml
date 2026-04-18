@@ -15,7 +15,7 @@ SDK -> Wbad : 读写 / 心跳
 
 == Worker 故障 ==
 note over SDK
-  SDK 心跳超时约 2s（可调）
+  SDK 心跳超时约 2s（由 node_timeout_s 联动下发，可调）
   检测对端故障后切流到健康 Worker
 end note
 SDK -x Wbad : 心跳失败
@@ -23,15 +23,16 @@ SDK -> Wok : 自动切流，后续请求
 
 Wbad -> ETCD : 租约无法续期
 note over ETCD, Wok
-  etcd 侧约 2s（可调）未收到心跳
-  其他节点故障隔离小于约 3s
+  etcd lease 到期 = node_timeout_s
+  隔离（SetTimedOut + 切 primary）在 t=node_timeout_s 完成
+  与 node_dead_timeout_s 无关（后者只控 TIMEOUT→FAILED）
 end note
 ETCD -> Wok : 成员与路由更新
 
 note right of SDK
   切换前请求可能失败.
   隔离完成前路由到故障节点的请求可能失败.
-  与 cases 文档中时间指标、2/N 粗算一致.
+  时间指标与 2/N 粗算见 02-failure-modes-and-sli.md.
 end note
 
 @enduml

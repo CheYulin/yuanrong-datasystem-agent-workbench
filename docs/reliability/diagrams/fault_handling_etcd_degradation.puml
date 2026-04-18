@@ -13,7 +13,7 @@ state "全部 etcd 不可用" as AllDown
 
 Normal : 无额外影响
 Single : 集群容错，通常无影响
-Lease : 触发故障隔离\n（见 fault_handling_sdk_etcd_failover）
+Lease : 触发故障隔离\n(见 fault_handling_sdk_etcd_failover)
 AllDown : 降级：缓存集群视图；\n数据面在方案前提下可保持；\n扩缩容/隔离受影响
 
 Normal --> Single : 单副本故障
@@ -25,7 +25,7 @@ Lease --> Normal : 恢复
 AllDown --> Normal : etcd 恢复
 
 note bottom of AllDown
-  与 FAULT_HANDLING §四 表一致；以现网版本为准
+  详见 05-reliability-design.md § 2 etcd 集群故障行；以现网版本为准
 end note
 
 @enduml

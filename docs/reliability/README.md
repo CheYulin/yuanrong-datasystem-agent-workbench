@@ -34,7 +34,7 @@
 ## 图与时序
 
 - 读写主路径时序：`../flows/sequences/kv-client/`
-- 故障处理配图（PlantUML）：[diagrams/kv-client/](diagrams/kv-client/)
+- 故障处理配图（PlantUML）：[diagrams/](diagrams/)
 
 ---
 

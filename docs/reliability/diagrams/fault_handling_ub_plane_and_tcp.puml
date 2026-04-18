@@ -10,14 +10,14 @@ if (单平面故障？) then (是)
   note right
     **硬件侧平面故障感知 ~128ms 量级**
     检测 + 平面切换整体 **~133ms（128+5ms）**
-    见 cases「UB 链路故障」
+    见 02-failure-modes-and-sli.md § 3
   end note
 else (否)
   :正常 URMA 路径;
 endif
 note left
-  用户 RPC 超时（如 20ms）与 128ms 感知
-  不同量级；短超时见 REMOTE §4.5
+  用户 RPC 超时（如 20ms）与 128ms 感知不同量级
+  短超时重试行为见 deep-dives/timeout-and-latency-budget.md § 4
 end note
 stop
 
