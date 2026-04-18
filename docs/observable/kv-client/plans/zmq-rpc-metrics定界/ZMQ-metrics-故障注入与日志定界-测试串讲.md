@@ -12,7 +12,7 @@
 
 - 故障注入分支是否打出**带标签的结构化日志**（如 `[FAULT INJECT]`、`[ISOLATION]`、`[METRICS DUMP]`）；
 - **metrics 文本块**（`zmq.*=` 与 histogram 行）是否与定界结论一致；
-- 可选路径上的 **`[ZMQ_RECV_FAIL]` / `[ZMQ_SEND_FAIL]` / `[ZMQ_RECV_TIMEOUT]`** 在什么故障下才会出现（避免误判「没打日志 = 没生效」）。
+- 可选路径上的 **`[ZMQ_RECEIVE_FAILURE_TOTAL]` / `[ZMQ_SEND_FAILURE_TOTAL]` / `[ZMQ_RECV_TIMEOUT]`** 在什么故障下才会出现（避免误判「没打日志 = 没生效」）。
 
 ---
 
@@ -49,7 +49,7 @@ bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh
    - `[METRICS DUMP - ...]`：紧跟其后的 **Total / Compare** 块是**证据快照**；  
    - `[ISOLATION] ...`：用自然语言总结**本场景应得出的定界结论**。  
 3. **ZMQ 底层告警**（不一定每个场景都有，见 §6）：  
-   - `[ZMQ_RECV_FAIL]` / `[ZMQ_SEND_FAIL]`：`zmq_msg_recv/send` 返回 **-1 且 errno 非 EAGAIN/EINTR**；  
+   - `[ZMQ_RECEIVE_FAILURE_TOTAL]` / `[ZMQ_SEND_FAILURE_TOTAL]`：`zmq_msg_recv/send` 返回 **-1 且 errno 非 EAGAIN/EINTR**；  
    - `[ZMQ_RECV_TIMEOUT]`：**阻塞 recv + 套接字 RCVTIMEO** 路径上的超时（与 client stub 的 **poll + DONTWAIT** 路径不同）。
 
 ### 3.2 metrics 行与故障类型对照（速查）
@@ -118,7 +118,7 @@ bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh
 
 ## 6. 常见误区（串讲时重点强调）
 
-1. **「没看到 `[ZMQ_RECV_FAIL]` 说明埋点没生效」**  
+1. **「没看到 `[ZMQ_RECEIVE_FAILURE_TOTAL]` 说明埋点没生效」**  
    **错。** 当前 client stub 以 **DONTWAIT + poll** 为主，很多「超时 / 对端死」不会走到 `zmq_msg_recv` 的硬失败；应结合 **`gw_recreate`**、RPC 返回码与 **metrics fault 是否为 0** 综合判断。
 
 2. **「慢调用一定会涨 `zmq_receive_try_again_total`」**  
@@ -134,7 +134,7 @@ bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh
 - [ ] `ds_st --gtest_filter='ZmqMetricsFaultTest.*' --alsologtostderr` 全通过  
 - [ ] `verify_zmq_fault_injection_logs.sh <log>` exit 0，**Mandatory 区无 ✗**  
 - [ ] 能口头说明四个场景中 **至少 2 条** `[ISOLATION]` 与 metrics 的对应关系  
-- [ ] 能说明为何本 run **可以没有** `[ZMQ_RECV_FAIL]`（§6）
+- [ ] 能说明为何本 run **可以没有** `[ZMQ_RECEIVE_FAILURE_TOTAL]`（§6）
 
 ---
 
@@ -200,10 +200,10 @@ Mandatory RESULT: 15 matched | 0 missing
 - 必须有 `[SELF-PROOF REPORT]` 与 `CONCLUSION:`。
 - 不要只看 WARNING 文案，需结合 `io.*` 与 `rpc.*` 的 avg 值做占比判断。
 
-### 9.4 为什么这轮没有 `[ZMQ_RECV_FAIL]` / `[ZMQ_SEND_FAIL]` / `[ZMQ_RECV_TIMEOUT]`
+### 9.4 为什么这轮没有 `[ZMQ_RECEIVE_FAILURE_TOTAL]` / `[ZMQ_SEND_FAILURE_TOTAL]` / `[ZMQ_RECV_TIMEOUT]`
 
 这轮故障注入走的是 `stub poll + DONTWAIT` 主路径，且没有触发底层硬 errno：
-- 所以可能没有 `[ZMQ_RECV_FAIL]` / `[ZMQ_SEND_FAIL]`；
+- 所以可能没有 `[ZMQ_RECEIVE_FAILURE_TOTAL]` / `[ZMQ_SEND_FAILURE_TOTAL]`；
 - 也可能没有 `[ZMQ_RECV_TIMEOUT]`（该标签更偏阻塞 recv + RCVTIMEO 路径）。
 
 这不是失败，属于**与故障模型匹配的预期行为**。测试侧应优先看 `[ISOLATION]` 行和 metrics dump 的 fault counters。
@@ -228,7 +228,7 @@ grep -E "zmq\\.(send|recv|net|gw|evt|io|rpc)" zmq_fault.log
 | 路径 | 说明 |
 |------|------|
 | `yuanrong-datasystem/tests/st/common/rpc/zmq/zmq_metrics_fault_test.cpp` | 四场景故障注入与 `[FAULT INJECT]` / `[ISOLATION]` 日志 |
-| `yuanrong-datasystem/src/datasystem/common/rpc/zmq/zmq_socket_ref.cpp` | `[ZMQ_RECV_FAIL]` / `[ZMQ_SEND_FAIL]` |
+| `yuanrong-datasystem/src/datasystem/common/rpc/zmq/zmq_socket_ref.cpp` | `[ZMQ_RECEIVE_FAILURE_TOTAL]` / `[ZMQ_SEND_FAILURE_TOTAL]` |
 | `yuanrong-datasystem/src/datasystem/common/rpc/zmq/zmq_socket.cpp` | `[ZMQ_RECV_TIMEOUT]` |
 | `vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh` | 日志关键字自动化验收 |
 

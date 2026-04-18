@@ -186,11 +186,11 @@ need "CONCLUSION line" 'CONCLUSION:'
 
 echo ""
 echo "── Optional: ZMQ socket hard-fail tags (only if errno path hit) ──"
-if grep -qE '\[ZMQ_RECV_FAIL\]|\[ZMQ_SEND_FAIL\]' "$LOG_FILE"; then
-  echo "  ℹ  Found [ZMQ_RECV_FAIL] or [ZMQ_SEND_FAIL] (hard ZMQ errno path exercised)"
+if grep -qE '\[ZMQ_RECEIVE_FAILURE_TOTAL\]|\[ZMQ_SEND_FAILURE_TOTAL\]' "$LOG_FILE"; then
+  echo "  ℹ  Found [ZMQ_RECEIVE_FAILURE_TOTAL] or [ZMQ_SEND_FAILURE_TOTAL] (hard ZMQ errno path exercised)"
   ((++PASS)) || true
 else
-  echo "  ○  No [ZMQ_RECV_FAIL]/[ZMQ_SEND_FAIL] in this run (expected for stub poll + clean TCP)"
+  echo "  ○  No [ZMQ_RECEIVE_FAILURE_TOTAL]/[ZMQ_SEND_FAILURE_TOTAL] in this run (expected for stub poll + clean TCP)"
 fi
 
 echo ""
