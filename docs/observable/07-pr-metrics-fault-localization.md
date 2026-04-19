@@ -239,7 +239,7 @@ grep -E "\[FAULT INJECT\]|\[METRICS DUMP -|\[ISOLATION\]|\[SELF-PROOF( REPORT)?\
 **一键远端采集（≈30s KV ST + grep + 可选子目录 tar）**：流程与 [`run_zmq_rpc_metrics_remote.sh`](../../scripts/testing/verify/run_zmq_rpc_metrics_remote.sh) 对齐——默认 **`rsync` 源码到远端**、`**BUILD_BACKEND=bazel**` 下 `bazel build //tests/st/client/kv_cache:kv_client_mset_test` 后从 `bazel-bin/.../kv_client_mset_test` 启动（仍 `cd` 到 `.st_metrics_wr/a/b` 以满足 mock OBS）。`BUILD_BACKEND=cmake` 时仍用 `${REMOTE_BUILD}/tests/st/ds_st_kv_cache`。Bazel 编译的 `st_cluster` 将 **`WORKER_BIN_PATH` 固定为 `/usr/local/bin/datasystem_worker`**（与 ZMQ ST 相同），远端需已有该可执行文件或与当前 metrics 代码一致的安装；否则改用 cmake 全量构建或先同步 worker 到该路径。
 
 ```bash
-# 默认：bazel、root@38.76.164.55、MsetNtxSmallObj、LOG_MONITOR_MS=8000、拉 worker*/log + client
+# 默认：bazel、xqyun-32c32g、MsetNtxSmallObj、LOG_MONITOR_MS=8000、拉 worker*/log + client
 bash vibe-coding-files/scripts/testing/verify/run_kv_rw_metrics_remote_capture.sh
 
 # 仅远端已有树：SKIP_RSYNC=1；纯 CMake：BUILD_BACKEND=cmake

@@ -7,9 +7,25 @@ alwaysApply: true
 
 For **debugging, running, and verifying** this repository (build, unit tests, integration tests, scripts, log checks, Bazel/CMake targets):
 
-- Use the remote host: **`root@38.76.164.55`** (SSH).
-- Do **not** assume the local workspace machine is where commands must execute; prefer proposing or using **`ssh root@38.76.164.55 '...'`** (or the user’s SSH config alias) for runnable verification.
+- Use the remote host: **`xqyun-32c32g`** (SSH).
+- Do **not** assume the local workspace machine is where commands must execute; prefer proposing or using **`ssh xqyun-32c32g '...'`** (or the user’s SSH config alias) for runnable verification.
 - When giving concrete commands, mention the **remote working directory** if it differs from the local clone path (ask once if unknown).
 - Code edits stay in the local workspace; **execution** of compilers, test binaries, and environment-dependent steps targets the remote unless the user explicitly asks for local-only.
 
-If SSH is unavailable in the current session, state that limitation and still provide the exact remote command line for the user to run on **`root@38.76.164.55`**.
+## Third-party cache (REQUIRED for any build)
+
+Every CMake / build.sh invocation MUST set `DS_OPENSOURCE_DIR` to a **dedicated, persistent** cache directory **separate from the build output directory** so 3rd-party libs (protobuf, grpc, openssl, rocksdb, jemalloc, …) are reused across builds (saves 20–30 min per cold build):
+
+```bash
+export DS_OPENSOURCE_DIR="$HOME/.cache/yuanrong-datasystem-third-party"
+mkdir -p "$DS_OPENSOURCE_DIR"
+bash build.sh -t build -B "$HOME/workspace/git-repos/yuanrong-datasystem/build" -i on -j 16
+```
+
+Rules:
+- **Never** rely on the default (which uses a temporary `/tmp/<hash>` that gets wiped).
+- **Never** point `DS_OPENSOURCE_DIR` inside the per-build `build/` directory — when `build/` is removed for a clean build, the cache must survive.
+- If `CMakeCache.txt` records a different `DS_OPENSOURCE_DIR`, delete `CMakeCache.txt` first to force a fresh configure (otherwise the cache won't take effect).
+- Reference implementation: `vibe-coding-files/scripts/build/remote_build_run_datasystem.sh` (handles the cache-mismatch invalidation automatically).
+
+If SSH is unavailable in the current session, state that limitation and still provide the exact remote command line for the user to run on **`xqyun-32c32g`**.

@@ -106,7 +106,7 @@ RPC 框架额外开销占比 = (ser_us.avg + deser_us.avg) /
 ### UT（CMake）
 
 ```bash
-# 远端节点 root@38.76.164.55
+# 远端节点 xqyun-32c32g
 cd /root/workspace/git-repos/yuanrong-datasystem/build
 ./tests/ut/ds_ut --gtest_filter="ZmqMetricsTest.*:MetricsTest.*" -v
 # 结果：42/42 PASSED（ZmqMetricsTest 20 + MetricsTest 22）

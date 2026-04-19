@@ -1,7 +1,7 @@
 # ZMQ Metrics 实施验证结果档案
 
 **执行日期**：2026-04-15  
-**远端节点**：`root@38.76.164.55`  
+**远端节点**：`xqyun-32c32g`  
 **构建目录**：`/root/workspace/git-repos/yuanrong-datasystem/build`  
 **并发限制**：`-j8`（防止 OOM）
 
@@ -163,7 +163,7 @@
 
 ```bash
 # 登录远端节点
-ssh root@38.76.164.55
+ssh xqyun-32c32g
 
 # 检查 ctest 是否已完成
 ps aux | grep ctest | grep -v grep
@@ -178,7 +178,7 @@ ls /root/workspace/git-repos/yuanrong-datasystem/build/Testing/Temporary/
 ### 4.2 单独重跑 ZMQ Metrics UT（最关键，< 1s）
 
 ```bash
-ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem/build && \
+ssh xqyun-32c32g 'cd /root/workspace/git-repos/yuanrong-datasystem/build && \
   ./tests/ut/ds_ut --gtest_filter="ZmqMetricsTest.*:MetricsTest.*" --gtest_color=yes 2>&1'
 # 预期：42/42 PASSED
 ```
@@ -186,7 +186,7 @@ ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem/build &&
 ### 4.3 单独重跑全量 UT（不含 ST，快）
 
 ```bash
-ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem/build && \
+ssh xqyun-32c32g 'cd /root/workspace/git-repos/yuanrong-datasystem/build && \
   ./tests/ut/ds_ut 2>&1 | tail -5'
 # 预期：所有 UT PASSED，无 FAILED
 ```
@@ -194,7 +194,7 @@ ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem/build &&
 ### 4.4 验证改动文件都已同步到远端
 
 ```bash
-ssh root@38.76.164.55 'grep -l "ZMQ_M_IO_SEND\|ZMQ_M_SEND_FAIL" \
+ssh xqyun-32c32g 'grep -l "ZMQ_M_IO_SEND\|ZMQ_M_SEND_FAIL" \
   /root/workspace/git-repos/yuanrong-datasystem/src/datasystem/common/rpc/zmq/*.cpp \
   /root/workspace/git-repos/yuanrong-datasystem/src/datasystem/common/rpc/zmq/*.h'
 # 预期输出：zmq_metrics_def.h zmq_socket_ref.cpp zmq_common.h zmq_stub_conn.cpp zmq_monitor.cpp
@@ -203,7 +203,7 @@ ssh root@38.76.164.55 'grep -l "ZMQ_M_IO_SEND\|ZMQ_M_SEND_FAIL" \
 ### 4.5 验证 metrics summary 输出格式
 
 ```bash
-ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem/build && \
+ssh xqyun-32c32g 'cd /root/workspace/git-repos/yuanrong-datasystem/build && \
   ./tests/ut/ds_ut --gtest_filter="ZmqMetricsTest.all_metrics_registered_and_zero" -v 2>&1'
 ```
 
@@ -310,7 +310,7 @@ USE_BAZEL_VERSION=7.4.1 bazel build \
 
 **对照文档**：`README.md`（验证依赖说明）、本文 §4.2–§4.5、`plan-zmq-rpc-metrics-定界可观测.md` §11.1。
 
-**远端节点**：`root@38.76.164.55`  
+**远端节点**：`xqyun-32c32g`  
 **构建目录**：`/root/workspace/git-repos/yuanrong-datasystem/build`  
 **代码同步**：本地 `yuanrong-datasystem` → 远端 `rsync`（排除 `.git/`、`build/`、`.cache/`），与 §4 一致。
 
@@ -415,13 +415,13 @@ Mandatory RESULT: 15 matched | 0 missing
 ## 十、2026-04-16 远端复跑证据（Build + UT + ST + 日志验收）
 
 **目标**：按最新代码状态再执行一轮远端构建与测试，补充“可复核的命令 + 关键输出摘要”。  
-**远端节点**：`root@38.76.164.55`  
+**远端节点**：`xqyun-32c32g`  
 **构建目录**：`/root/workspace/git-repos/yuanrong-datasystem/build`
 
 ### 10.1 复跑命令（单次串行执行）
 
 ```bash
-ssh root@38.76.164.55 'set -euo pipefail
+ssh xqyun-32c32g 'set -euo pipefail
 cd /root/workspace/git-repos/yuanrong-datasystem/build
 cmake --build . --target ds_ut ds_st -j8
 echo "=== RUN UT: ZmqMetricsTest + MetricsTest ==="
@@ -503,7 +503,7 @@ Mandatory RESULT: 15 matched | 0 missing
 
 ### 11.3 最新远端验证证据
 
-执行节点：`root@38.76.164.55`
+执行节点：`xqyun-32c32g`
 
 ```bash
 # 1) 快速编译 ZMQ 相关核心库
@@ -545,7 +545,7 @@ cmake --build . --target common_rpc_zmq -j8
 
 ### 13.1 复跑命令（远端 Bazel）
 
-执行节点：`root@38.76.164.55`
+执行节点：`xqyun-32c32g`
 
 ```bash
 cd /root/workspace/git-repos/yuanrong-datasystem
@@ -568,7 +568,7 @@ Executed 0 out of 2 tests: 2 tests pass. (cached)
 本次从远端 Bazel testlog 拉取日志并本地校验：
 
 ```bash
-ssh root@38.76.164.55 'cd /root/workspace/git-repos/yuanrong-datasystem && \
+ssh xqyun-32c32g 'cd /root/workspace/git-repos/yuanrong-datasystem && \
   cat bazel-testlogs/tests/st/common/rpc/zmq/zmq_metrics_fault_test/test.log' \
   > /tmp/zmq_metrics_fault_test.latest.log
 

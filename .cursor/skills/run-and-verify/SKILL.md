@@ -3,7 +3,7 @@ name: run-and-verify
 description: >-
   Remote SSH compile → ctest execution → result pull workflow.
   Use when the user wants to build, run tests, and check results on the
-  designated remote host (root@38.76.164.55). Covers the most common
+  designated remote host (xqyun-32c32g). Covers the most common
   verification loop: compile, test, inspect.
 ---
 
@@ -20,7 +20,7 @@ description: >-
 ### 1. 确认远程可达
 
 ```bash
-ssh root@38.76.164.55 'echo ok'
+ssh xqyun-32c32g 'echo ok'
 ```
 
 若不可达，告知用户并提供完整命令让其手动在远程执行。
@@ -28,7 +28,7 @@ ssh root@38.76.164.55 'echo ok'
 ### 2. 编译（如需）
 
 ```bash
-ssh root@38.76.164.55 'cd <remote-path>/yuanrong-datasystem && bash build.sh'
+ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem && bash build.sh'
 ```
 
 若用户确认已有最新编译，使用 `--skip-build` 跳过。
@@ -39,14 +39,14 @@ ssh root@38.76.164.55 'cd <remote-path>/yuanrong-datasystem && bash build.sh'
 
 | 目标 | 命令 |
 |------|------|
-| KV executor | `ssh root@38.76.164.55 'cd <remote-path>/vibe-coding-files && ./ops test.kv_executor'` |
-| brpc 参考 | `ssh root@38.76.164.55 'cd <remote-path>/vibe-coding-files && ./ops test.brpc_kv_executor'` |
-| 锁性能 | `ssh root@38.76.164.55 'cd <remote-path>/vibe-coding-files && ./ops runtime.lock_perf'` |
+| KV executor | `ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops test.kv_executor'` |
+| brpc 参考 | `ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops test.brpc_kv_executor'` |
+| 锁性能 | `ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops runtime.lock_perf'` |
 
 或直接用 ctest：
 
 ```bash
-ssh root@38.76.164.55 'cd <remote-path>/yuanrong-datasystem/build && ctest --test-dir . -R <pattern> --output-on-failure'
+ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem/build && ctest --test-dir . -R <pattern> --output-on-failure'
 ```
 
 ### 4. 检查结果

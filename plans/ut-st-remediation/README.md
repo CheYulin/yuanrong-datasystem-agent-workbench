@@ -10,4 +10,4 @@
 
 **Bazel 远端修复流程与运行报告（ZMQ metrics）**：[../../results/20260417_remote_bazel_zmq_metrics_workflow_and_report.md](../../results/20260417_remote_bazel_zmq_metrics_workflow_and_report.md)（`.bazelversion`、build/test 命令与耗时）。
 
-**跑测环境（参考）**：远端 `root@38.76.164.55`，构建目录 `.../yuanrong-datasystem/build`，二进制 `tests/ut/ds_ut`、`tests/st/ds_st`。
+**跑测环境（参考）**：远端 `xqyun-32c32g`，构建目录 `.../yuanrong-datasystem/build`，二进制 `tests/ut/ds_ut`、`tests/st/ds_st`。

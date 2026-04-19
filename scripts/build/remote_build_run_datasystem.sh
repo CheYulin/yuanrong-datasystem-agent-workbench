@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 LOCAL_DS="${ROOT_DIR}"
 LOCAL_VIBE="${VIBE_CODING_ROOT}"
-REMOTE="rsync@yuanrong-datasystem"
+REMOTE="xqyun-32c32g"
 REMOTE_BASE="~/workspace/git-repos"
 REMOTE_DS=""
 REMOTE_VIBE=""
@@ -82,7 +82,7 @@ Default behavior:
   6) install built wheel to user site-packages (best effort)
 
 Options:
-  --remote <user@host>            Remote SSH target (default: rsync@yuanrong-datasystem)
+  --remote <user@host>            Remote SSH target (default: xqyun-32c32g)
   --remote-base <path>            Remote workspace base (default: ~/workspace/git-repos)
   --remote-ds <path>              Remote DS absolute path (default: <remote-base>/yuanrong-datasystem)
   --remote-vibe <path>            Remote vibe absolute path (default: <remote-base>/vibe-coding-files)

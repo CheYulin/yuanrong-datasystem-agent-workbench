@@ -24,7 +24,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_DS="${LOCAL_DS:-$(cd "${SCRIPT_DIR}/../../../../yuanrong-datasystem" 2>/dev/null && pwd || true)}"
 BAZEL_CMD="${BAZEL_CMD:-bazel}"
-REMOTE_HOST="${REMOTE_HOST:-root@38.76.164.55}"
+REMOTE_HOST="${REMOTE_HOST:-xqyun-32c32g}"
 REMOTE_DS="${REMOTE_DS:-/root/workspace/git-repos/yuanrong-datasystem}"
 BAZEL_UT_ZMQ="${BAZEL_UT_ZMQ:-//tests/ut/common/rpc:zmq_metrics_test}"
 BAZEL_ST_FAULT="${BAZEL_ST_FAULT:-//tests/st/common/rpc/zmq:zmq_metrics_fault_test}"

@@ -20,7 +20,7 @@
 #   LOCAL_DS         yuanrong-datasystem root (local --run / local bazel; optional if cwd is repo)
 #
 # Environment (with --remote):
-#   REMOTE_HOST      default root@38.76.164.55
+#   REMOTE_HOST      default xqyun-32c32g
 #   REMOTE_DS        default /root/workspace/git-repos/yuanrong-datasystem
 #   REMOTE_BUILD     default ${REMOTE_DS}/build
 #   BUILD_BACKEND    default bazel (overridden by --backend / --cmake)
@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERIFY_METRICS="${VERIFY_METRICS:-$SCRIPT_DIR/verify_zmq_metrics_fault.sh}"
 DEFAULT_METRICS_LOG="${DEFAULT_METRICS_LOG:-/tmp/zmq_metrics_fault_output.txt}"
 
-REMOTE_HOST="${REMOTE_HOST:-root@38.76.164.55}"
+REMOTE_HOST="${REMOTE_HOST:-xqyun-32c32g}"
 REMOTE_DS="${REMOTE_DS:-/root/workspace/git-repos/yuanrong-datasystem}"
 REMOTE_BUILD="${REMOTE_BUILD:-${REMOTE_DS}/build}"
 BAZEL_ST_FAULT="${BAZEL_ST_FAULT:-//tests/st/common/rpc/zmq:zmq_metrics_fault_test}"

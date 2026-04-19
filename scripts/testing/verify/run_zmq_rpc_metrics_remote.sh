@@ -11,7 +11,7 @@
 #
 # 环境变量（均可覆盖）：
 #   BUILD_BACKEND   bazel | cmake   （默认 bazel）
-#   REMOTE_HOST     默认 root@38.76.164.55
+#   REMOTE_HOST     默认 xqyun-32c32g
 #   REMOTE_DS       默认 /root/workspace/git-repos/yuanrong-datasystem
 #   LOCAL_DS        默认脚本旁 yuanrong-datasystem
 #   BUILD_JOBS      默认 8
@@ -26,7 +26,7 @@
 # =============================================================================
 set -euo pipefail
 
-REMOTE_HOST="${REMOTE_HOST:-root@38.76.164.55}"
+REMOTE_HOST="${REMOTE_HOST:-xqyun-32c32g}"
 REMOTE_DS="${REMOTE_DS:-/root/workspace/git-repos/yuanrong-datasystem}"
 REMOTE_BUILD="${REMOTE_BUILD:-${REMOTE_DS}/build}"
 BUILD_JOBS="${BUILD_JOBS:-8}"

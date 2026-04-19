@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Remote Host
 
-- **Host**: `root@38.76.164.55` (SSH)
+- **Host**: `xqyun-32c32g` (SSH)
 - **Purpose**: Build, test, debug, and verify — any command that requires the compiled environment.
 
 ## What Runs Remotely
@@ -16,6 +16,23 @@ alwaysApply: true
 - Test execution (`ctest`, `./ops test.*`)
 - Performance collection (`perf record`, `bpftrace`, `strace`)
 - Runtime verification (worker startup, cluster checks)
+
+## Third-party cache (REQUIRED for any build)
+
+Every CMake / build.sh invocation MUST set `DS_OPENSOURCE_DIR` to a **dedicated, persistent** cache directory **separate from the per-build `build/`** so 3rd-party libs (protobuf, grpc, openssl, rocksdb, jemalloc, …) are reused across builds (saves 20–30 min per cold build).
+
+```bash
+ssh xqyun-32c32g 'export DS_OPENSOURCE_DIR=$HOME/.cache/yuanrong-datasystem-third-party; \
+                  mkdir -p "$DS_OPENSOURCE_DIR"; \
+                  cd ~/workspace/git-repos/yuanrong-datasystem && \
+                  bash build.sh -t build -B build -i on -j 16'
+```
+
+Hard rules:
+- **Never** rely on the build.sh default (uses a `/tmp/<hash>/...` that vanishes).
+- **Never** point `DS_OPENSOURCE_DIR` inside the per-build `build/` directory — clean rebuilds must preserve the cache.
+- If `build/CMakeCache.txt` records a different `DS_OPENSOURCE_DIR`, delete it before the next configure (the reference scripts do this automatically).
+- Reference implementation: `vibe-coding-files/scripts/build/remote_build_run_datasystem.sh`.
 
 ## What Stays Local
 
@@ -28,7 +45,7 @@ alwaysApply: true
 If SSH access is not possible in the current session:
 
 1. State the limitation clearly to the user.
-2. Provide the exact remote command line for the user to run on `root@38.76.164.55`.
+2. Provide the exact remote command line for the user to run on `xqyun-32c32g`.
 3. Include the remote working directory in the command if it differs from the local clone path.
 4. Do **not** attempt local execution as a silent substitute — the build/runtime environment is not available locally.
 
@@ -39,5 +56,5 @@ If the remote clone path differs from the local one, ask the user once and remem
 ## Safety
 
 - Never pipe untrusted or user-generated content directly into remote `bash -c`.
-- Prefer single-quoted remote commands: `ssh root@38.76.164.55 'cd /path && ./ops test.kv_executor'`.
+- Prefer single-quoted remote commands: `ssh xqyun-32c32g 'cd /path && ./ops test.kv_executor'`.
 - Do not use `--skip-build` unless the user explicitly confirms the remote build is up to date.
