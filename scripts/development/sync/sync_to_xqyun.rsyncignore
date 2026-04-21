@@ -1,0 +1,105 @@
+# rsync 排除清单：sync_to_xqyun.sh 专用
+# 目标：保留 .git/ 一起同步，只忽略构建/运行产物。
+#
+# 语法说明（rsync --exclude-from）：
+#   - 以 / 结尾代表目录
+#   - 以 / 开头代表相对源根的绝对路径
+#   - 不带前导 / 代表任意层级匹配
+
+# ===== CMake / Make 构建产物 =====
+/build/
+/build_cov/
+build/
+build_cov/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+config.cmake
+
+# ===== Bazel 构建产物 =====
+bazel-*
+.clwb/
+MODULE.bazel.lock
+
+# ===== 第三方缓存 =====
+.cache/
+.third_party/
+third_party/.cache/
+third_party/build/
+
+# ===== Python 构建/缓存 =====
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+
+# ===== Java 构建产物 =====
+target/
+
+# ===== Go 构建产物 =====
+go.work
+go.sum.lock
+
+# ===== 编译产物（对象/静态/动态库等） =====
+*.d
+*.o
+*.obj
+*.ko
+*.elf
+*.slo
+*.lo
+*.la
+*.lai
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.gch
+*.pch
+
+# ===== Protobuf 生成文件 =====
+*.pb.cc
+*.pb.h
+*.pb-c.c
+*.pb-c.h
+
+# ===== 文档构建 =====
+build_zh_cn/
+build_en/
+docs/source_en/generated/
+
+# ===== 示例/输出/覆盖率产物 =====
+output/
+coverage_report/
+example/datasystem
+example/build/
+example/cpp/build/
+
+# ===== 运行期产物（大文件、日志、pprof、火焰图等） =====
+results/
+*.log
+*.tmp
+*.swp
+nohup.out
+core
+core.*
+*.prof
+*.pprof
+
+# ===== 编辑器/临时文件 =====
+.DS_Store
+__TEMP__*
+__checked_files_list__
+__code_format_check_result__

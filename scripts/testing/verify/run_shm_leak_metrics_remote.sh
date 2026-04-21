@@ -31,6 +31,7 @@
 #   CMAKE_BIN            默认 ds_ut           （二进制名）
 #   GTEST_FILTER         默认 'ShmLeakMetricsTest.*'
 #   BAZEL_UT             仅 BUILD_BACKEND=bazel 时使用
+#   BAZEL_EXTRA_OPTS     仅 bazel：额外参数（默认 --config=no_urma_sdk，无 URMA/RDMA 的节点必用）
 #   FORCE_FULL_BUILD     1 = 删 build/ 重新 configure（默认 0，增量）
 #   SKIP_RSYNC           1 = 跳过同步
 #   SKIP_SSH             1 = 仅打印远端脚本
@@ -49,6 +50,8 @@ BUILD_RETRIES="${BUILD_RETRIES:-3}"
 CMAKE_TARGET="${CMAKE_TARGET:-ds_ut}"
 CMAKE_BIN="${CMAKE_BIN:-ds_ut}"
 BAZEL_UT="${BAZEL_UT:-//tests/ut/common/metrics:shm_leak_metrics_test}"
+# 远端无 UB/URMA/RDMA 时与仓库 .bazelrc 中 no_urma_sdk 一致；本机有 SDK 时可 export BAZEL_EXTRA_OPTS=''
+BAZEL_EXTRA_OPTS="${BAZEL_EXTRA_OPTS---config=no_urma_sdk}"
 GTEST_FILTER="${GTEST_FILTER:-ShmLeakMetricsTest.*}"
 FORCE_FULL_BUILD="${FORCE_FULL_BUILD:-0}"
 SKIP_RSYNC="${SKIP_RSYNC:-0}"
@@ -83,6 +86,7 @@ log() { printf '\n[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$META"; }
   echo "cmake_target=$CMAKE_TARGET"
   echo "cmake_bin=$CMAKE_BIN"
   echo "bazel_ut=$BAZEL_UT"
+  echo "bazel_extra_opts=$BAZEL_EXTRA_OPTS"
   echo "gtest_filter=$GTEST_FILTER"
   echo "force_full_build=$FORCE_FULL_BUILD"
 } | tee "$META"
@@ -177,7 +181,8 @@ build_with_retry() {
       build_cmake_full "${jobs}"
       rc=$?
     else
-      USE_BAZEL_VERSION=7.6.2 bazel build "${BAZEL_UT}" \
+      # shellcheck disable=SC2086
+      USE_BAZEL_VERSION=7.6.2 bazel build ${BAZEL_EXTRA_OPTS} "${BAZEL_UT}" \
         --jobs="${jobs}" --show_progress_rate_limit=2 --color=no
       rc=$?
     fi
@@ -206,7 +211,8 @@ run_test() {
     fi
     "${bin}" --gtest_filter="${GTEST_FILTER}" --gtest_print_time=1 --alsologtostderr
   else
-    USE_BAZEL_VERSION=7.6.2 bazel test "${BAZEL_UT}" \
+    # shellcheck disable=SC2086
+    USE_BAZEL_VERSION=7.6.2 bazel test ${BAZEL_EXTRA_OPTS} "${BAZEL_UT}" \
       --jobs="${BUILD_JOBS}" --color=no \
       --test_output=streamed --test_arg="--gtest_print_time=1"
   fi
@@ -277,6 +283,7 @@ export BUILD_RETRIES='${BUILD_RETRIES}'
 export CMAKE_TARGET='${CMAKE_TARGET}'
 export CMAKE_BIN='${CMAKE_BIN}'
 export BAZEL_UT='${BAZEL_UT}'
+export BAZEL_EXTRA_OPTS='${BAZEL_EXTRA_OPTS}'
 export GTEST_FILTER='${GTEST_FILTER}'
 export FORCE_FULL_BUILD='${FORCE_FULL_BUILD}'
 export PRUNE_LOGS='${PRUNE_LOGS}'
