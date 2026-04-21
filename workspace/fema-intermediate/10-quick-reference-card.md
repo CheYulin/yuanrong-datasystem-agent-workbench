@@ -237,28 +237,44 @@ RPC框架占比 = (ser + deser) / (send + recv + ser + deser)
 
 ---
 
+
+---
+
 ## 九、故障处理路线图
 
 ```
-                    ┌─ 用户层(A) ──────────────────┐
-                    │  K_INVALID/NOT_FOUND/NOT_READY│
-                    │  → 检查业务参数/Init顺序      │
-                    └─────────────────────────────┘
-                              │
-┌─ 成功率↓/P99↑ ─┼─ OS层(B) ──────────────────┐
-│                │  K_RPC_*/K_TRY_AGAIN        │
-│                │  → ZMQ/TCP标签 + metrics     │
-│                └─────────────────────────────┘
+ ┌─ 用户层(A) ─────────────────────────────────────────┐
+ │  K_INVALID(2) / K_NOT_FOUND(3) / K_NOT_READY(8)     │
+ │  → 检查业务参数/Init顺序                              │
+ │  → respMsg关键字 / access log code                   │
+ └─────────────────────────────────────────────────────┘
+ │
+┌─ 成功率↓/P99↑ ─┼─ OS层(B) ────────────────────────────────┐
+│                │  K_RPC_*(1001/1002) / K_TRY_AGAIN(19)     │
+│                │  → ZMQ/TCP标签 + metrics                    │
+│                │  关注: [TCP_CONNECT_FAILED] / [RPC_RECV_   │
+│                │        TIMEOUT] / [ZMQ_SEND_FAILURE_TOTAL]  │
+│                └────────────────────────────────────────────┘
 │                              │
-└──────────────┼─ URMA层(C) ──────────────────┐
-               │  K_URMA_*                   │
-               │  → URMA标签 + UB/TCP bytes  │
-               └─────────────────────────────┘
+└──────────────┼─ URMA层(C) ────────────────────────────────┐
+               │  K_URMA_*(1004/1006/1008/1010)              │
+               │  → URMA标签 + UB/TCP bytes                  │
+               │  关注: [URMA_NEED_CONNECT] / [URMA_RECREATE_ │
+               │        JFS] / fallback to TCP               │
+               └────────────────────────────────────────────┘
                               │
-               ┌─ 组件层(D) ──────────────────┐
-               │  K_CLIENT_WORKER_DISCONNECT  │
-               │  K_SCALE_DOWN/K_SCALING     │
-               │  SHM Leak (PR#652)         │
-               │  → Worker状态/etcd/memory  │
-               └─────────────────────────────┘
+ ┌─ 组件层(D) ─────────────────────────────────────────┐
+ │  K_CLIENT_WORKER_DISCONNECT(23)                      │
+ │  K_SCALE_DOWN(31) / K_SCALING(32)                    │
+ │  SHM Leak (PR#652)                                   │
+ │  → Worker状态/etcd/memory                            │
+ │  关注: [HealthCheck] Worker is exiting now           │
+ │  关注: Cannot receive heartbeat / etcd is timeout    │
+ └─────────────────────────────────────────────────────┘
 ```
+
+**说明**：
+- **A类(用户层)**：业务参数问题，直接看respMsg
+- **B类(OS层-控制面)**：RPC/ZMQ/网络问题，看结构化日志标签
+- **C类(URMA层)**：UB/URMA硬件问题，看URMA标签和降级指标
+- **D类(组件层)**：Worker/etcd/SHM问题，看HealthCheck和资源指标

@@ -10,44 +10,62 @@
 fema-intermediate/
 ├── code-evidence/
 │   ├── 01-urma-fault-detection.md    # URMA层故障检测代码证据
-│   ├── 02-component-lifecycle.md    # 组件生命周期代码证据
-│   └── 03-os-layer-faults.md         # OS层故障检测代码证据（已更新）
-├── 05-urma-api-faults.md            # URMA API错误传播
-├── 06-kvcache-interface-faults.md   # KVCache接口故障
+│   ├── 02-component-lifecycle.md     # 组件生命周期代码证据
+│   └── 03-os-layer-faults.md         # OS层故障检测代码证据
+├── 05-urma-api-faults.md             # URMA API错误传播
+├── 06-kvcache-interface-faults.md     # KVCache接口故障
 ├── 07-core-flow-orthogonal-analysis.md  # 核心流程正交分析
-├── 08-fault-triage-guide.md         # 故障定位定界指南（三板斧）
-├── 09-fault-test-construction.md   # 故障测试构造指南
+├── 08-fault-triage-guide.md          # 故障定位定界指南（三板斧）
+├── 09-fault-test-construction.md     # 故障测试构造指南
 ├── 10-quick-reference-card.md        # 快速参考卡
-└── 11-fault-triage-flowcharts.md    # 故障排查流程图 ← 新增
+├── 11-fault-triage-flowcharts.md     # 故障排查流程图
+└── 00-index.md                       # 本文档
 
 workspace/
-├── fema-final.csv                  # FMEA最终分析（65条目，5大类）
-└── fema-analysis-filled.csv         # FMEA详细分析（48条目）
+├── fema-final.csv                    # FMEA最终分析（65条目，4大类）
+└── fema-analysis-filled.csv          # FMEA详细分析（48条目）
 ```
 
 ---
 
-## 文档用途说明
+## 故障域分类（4大类）
 
-| 文档 | 用途 | 使用者 |
-|------|------|--------|
-| `08-fault-triage-guide.md` | 故障定位定界指南（三板斧） | 测试/运维 |
-| `09-fault-test-construction.md` | 故障构造与验证 | 测试 |
-| `10-quick-reference-card.md` | 快速参考卡（grep命令） | 运维 |
-| `11-fault-triage-flowcharts.md` | Mermaid流程图 | 开发/测试 |
-| `code-evidence/*.md` | 代码证据归档 | 开发 |
+| 故障域 | 错误码 | 典型日志 | 日志来源 |
+|--------|--------|---------|---------|
+| **A类-用户层** | 2/3/8 | respMsg关键字 | Client日志 |
+| **B类-OS层控制面** | 1001/1002/19 | `[TCP_*]` / `[ZMQ_*]` / `[RPC_*]` | Worker日志 |
+| **C类-URMA层** | 1004/1006/1008/1010 | `[URMA_*]` / `fallback to TCP` | Worker日志 |
+| **D类-组件层** | 23/31/32 | `[HealthCheck]` / `Cannot receive heartbeat` | Worker日志 |
+
+**注**：原OS层资源面(5/6/7/13/20/25)归入组件层D类的Resources子域
 
 ---
 
-## 故障域分类
+## 故障域定位路线图
 
-| 故障域 | 错误码 | 典型日志 | 定位方法 |
-|--------|--------|---------|---------|
-| **用户层(A)** | 2/3/8 | `K_INVALID` / `NOT_FOUND` | 参数校验 |
-| **OS层(B)** | 1001/1002/19 | `ZMQ_SEND_FAILURE_TOTAL` / `RPC_RECV_TIMEOUT` | 网络故障注入 |
-| **URMA层(C)** | 1004/1006/1008 | `[URMA_NEED_CONNECT]` / `[URMA_RECREATE_JFS]` | UB故障注入 |
-| **组件层(D)** | 23/31/32 | `[HealthCheck]` / `Cannot receive heartbeat` | 进程故障注入 |
-| **SHM泄漏(PR652)** | 无 | `worker_shm_ref_table_bytes` | 内存泄漏场景 |
+```
+ ┌─ 用户层(A) ─────────────────────────────────────────┐
+ │  K_INVALID(2) / K_NOT_FOUND(3) / K_NOT_READY(8)     │
+ │  → 检查业务参数/Init顺序                              │
+ └─────────────────────────────────────────────────────┘
+ │
+┌─ 成功率↓/P99↑ ─┼─ OS层(B) ────────────────────────────────┐
+│                │  K_RPC_*(1001/1002) / K_TRY_AGAIN(19)     │
+│                │  → ZMQ/TCP标签 + metrics                    │
+│                └────────────────────────────────────────────┘
+│                              │
+└──────────────┼─ URMA层(C) ────────────────────────────────┐
+               │  K_URMA_*(1004/1006/1008/1010)              │
+               │  → URMA标签 + UB/TCP bytes                   │
+               └────────────────────────────────────────────┘
+                              │
+ ┌─ 组件层(D) ─────────────────────────────────────────┐
+ │  K_CLIENT_WORKER_DISCONNECT(23)                      │
+ │  K_SCALE_DOWN(31) / K_SCALING(32)                    │
+ │  SHM Leak (PR#652)                                   │
+ │  → Worker状态/etcd/memory                            │
+ └─────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -69,7 +87,7 @@ workspace/
 
 | 维度 | fema-analysis-filled | fema-final |
 |------|---------------------|------------|
-| 分析维度 | 单一大类(datasystem) | 五级分类(OS/URMA/业务/特殊/组件) |
+| 分析维度 | 单一大类(datasystem) | 四级分类(User/OS/URMA/Component) |
 | 条目数 | 48 | 65 |
 | 特色 | 详细的故障传播链路 | 按故障域分类，便于定界 |
 | 用途 | 开发参考 | 测试验收/运维定界 |
@@ -84,6 +102,6 @@ workspace/
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
-| v2.0 | 2026-04-21 | 新增 `11-fault-triage-flowcharts.md` Mermaid流程图 |
-| v2.0 | 2026-04-21 | 更新 `03-os-layer-faults.md` 增加代码验证汇总表 |
+| v2.0 | 2026-04-21 | 统一故障域为4类，简化路线图结构 |
+| v2.0 | 2026-04-21 | 新增 `11-fault-triage-flowcharts.md` 流程图 |
 | v1.0 | 2026-04-20 | 初始版本 |

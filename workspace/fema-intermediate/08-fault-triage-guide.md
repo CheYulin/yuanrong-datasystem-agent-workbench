@@ -63,33 +63,50 @@
 
 ---
 
+## 零、故障处理路线图
+
+```
+ ┌─ 用户层(A) ─────────────────────────────────────────┐
+ │  K_INVALID(2) / K_NOT_FOUND(3) / K_NOT_READY(8)     │
+ │  → 检查业务参数/Init顺序                              │
+ │  → respMsg关键字 / access log code                   │
+ └─────────────────────────────────────────────────────┘
+ │
+┌─ 成功率↓/P99↑ ─┼─ OS层(B) ────────────────────────────────┐
+│                │  K_RPC_*(1001/1002) / K_TRY_AGAIN(19)     │
+│                │  → ZMQ/TCP标签 + metrics                    │
+│                │  关注: [TCP_CONNECT_FAILED] / [RPC_RECV_   │
+│                │        TIMEOUT] / [ZMQ_SEND_FAILURE_TOTAL]  │
+│                └────────────────────────────────────────────┘
+│                              │
+└──────────────┼─ URMA层(C) ────────────────────────────────┐
+               │  K_URMA_*(1004/1006/1008/1010)              │
+               │  → URMA标签 + UB/TCP bytes                  │
+               │  关注: [URMA_NEED_CONNECT] / [URMA_RECREATE_ │
+               │        JFS] / fallback to TCP               │
+               └────────────────────────────────────────────┘
+                              │
+ ┌─ 组件层(D) ─────────────────────────────────────────┐
+ │  K_CLIENT_WORKER_DISCONNECT(23)                      │
+ │  K_SCALE_DOWN(31) / K_SCALING(32)                    │
+ │  SHM Leak (PR#652)                                   │
+ │  → Worker状态/etcd/memory                            │
+ │  关注: [HealthCheck] Worker is exiting now           │
+ │  关注: Cannot receive heartbeat / etcd is timeout    │
+ └─────────────────────────────────────────────────────┘
+```
+
+**说明**：
+- **A类(用户层)**：业务参数问题，直接看respMsg
+- **B类(OS层-控制面)**：RPC/ZMQ/网络问题，看结构化日志标签
+- **C类(URMA层)**：UB/URMA硬件问题，看URMA标签和降级指标
+- **D类(组件层)**：Worker/etcd/SHM问题，看HealthCheck和资源指标
+
+---
+
 ## 第一板斧：归类 — 按错误码判断大类
 
-### 1.1 错误码 → 故障域映射表（完整版）
-
-| 错误码 | 枚举名 | 故障域 | 优先怀疑方向 |
-|-------|--------|-------|-------------|
-| `0` | K_OK | ⚠️陷阱 | Get的NOT_FOUND被映射为0，需看respMsg |
-| `2` | K_INVALID | **用户层** | 入参校验失败、参数非法 |
-| `3` | K_NOT_FOUND | **用户层** | key不存在（非故障） |
-| `5/7` | K_RUNTIME_ERROR | **OS层** | mmap失败、IO错误、Dispatch异常 |
-| `6` | K_OUT_OF_MEMORY | **OS层** | 内存/shm池不足 |
-| `8` | K_NOT_READY | **用户层** | 未Init或正在ShutDown |
-| `13` | K_NO_SPACE | **OS层** | 磁盘空间满 |
-| `19` | K_TRY_AGAIN | **OS层/URMA** | 服务端忙、瞬时可恢复 |
-| `20` | K_FILE_LIMIT_REACHED | **OS层** | fd资源耗尽 |
-| `23` | K_CLIENT_WORKER_DISCONNECT | **OS层** | 心跳断开、Worker退出 |
-| `25` | K_MASTER_TIMEOUT | **OS层** | etcd不可用/节点超时 |
-| `31` | K_SCALE_DOWN | **组件层** | Worker退出中（非用户错误） |
-| `32` | K_SCALING | **组件层** | 扩缩容中（SDK已自动重试） |
-| `1001` | K_RPC_DEADLINE_EXCEEDED | **OS层** | RPC超时（网络/对端/拥塞） |
-| `1002` | K_RPC_UNAVAILABLE | **OS层** | RPC不可达（建连/传输失败） |
-| `1004` | K_URMA_ERROR | **URMA层** | UB/URMA硬件或驱动路径 |
-| `1006` | K_URMA_NEED_CONNECT | **URMA层** | URMA会话需重建 |
-| `1008` | K_URMA_TRY_AGAIN | **URMA层** | URMA瞬时可恢复错误 |
-| `1010` | K_URMA_WAIT_TIMEOUT | **URMA层** | URMA事件等待超时 |
-
-### 1.2 快速归类决策树
+### 1.1 快速归类决策树
 
 ```
 返回StatusCode →
@@ -110,8 +127,32 @@
  │    └─ → 组件层，查Worker状态/etcd
  │
  └─ 是 5/6/7/13/20/25 (OS资源/IO)？
-      └─ → OS层，查内存/磁盘/fd/etcd指标
+      └─ → OS层-资源面，查内存/磁盘/fd/etcd指标
 ```
+
+### 1.2 错误码 → 故障域映射表（完整版）
+
+| 错误码 | 枚举名 | 故障域 | 优先怀疑方向 |
+|-------|--------|-------|-------------|
+| `0` | K_OK | ⚠️陷阱 | Get的NOT_FOUND被映射为0，需看respMsg |
+| `2` | K_INVALID | **用户层** | 入参校验失败、参数非法 |
+| `3` | K_NOT_FOUND | **用户层** | key不存在（非故障） |
+| `5/7` | K_RUNTIME_ERROR | **OS层-资源面** | mmap失败、IO错误 |
+| `6` | K_OUT_OF_MEMORY | **OS层-资源面** | 内存/shm池不足 |
+| `8` | K_NOT_READY | **用户层** | 未Init或正在ShutDown |
+| `13` | K_NO_SPACE | **OS层-资源面** | 磁盘空间满 |
+| `19` | K_TRY_AGAIN | **OS层-控制面** | 服务端忙、瞬时可恢复 |
+| `20` | K_FILE_LIMIT_REACHED | **OS层-资源面** | fd资源耗尽 |
+| `23` | K_CLIENT_WORKER_DISCONNECT | **组件层** | 心跳断开/Worker退出 |
+| `25` | K_MASTER_TIMEOUT | **OS层-资源面** | etcd不可用/节点超时 |
+| `31` | K_SCALE_DOWN | **组件层** | Worker退出中（非用户错误） |
+| `32` | K_SCALING | **组件层** | 扩缩容中（SDK已自动重试） |
+| `1001` | K_RPC_DEADLINE_EXCEEDED | **OS层-控制面** | RPC超时（网络/对端/拥塞） |
+| `1002` | K_RPC_UNAVAILABLE | **OS层-控制面** | RPC不可达（建连/传输失败） |
+| `1004` | K_URMA_ERROR | **URMA层** | UB/URMA硬件或驱动路径 |
+| `1006` | K_URMA_NEED_CONNECT | **URMA层** | URMA会话需重建 |
+| `1008` | K_URMA_TRY_AGAIN | **URMA层** | URMA瞬时可恢复错误 |
+| `1010` | K_URMA_WAIT_TIMEOUT | **URMA层** | URMA事件等待超时 |
 
 ---
 
