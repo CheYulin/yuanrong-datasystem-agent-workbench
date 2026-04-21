@@ -309,3 +309,15 @@ if (ubUnavailable) {
 | UB初始化失败 | 1004 | 降级到TCP | fast_transport_manager_wrapper.cpp |
 | CQ poll失败 | 1004 | 重建CQ | urma_manager.cpp |
 | UB直发失败 | - | 自动降级TCP | fast_transport_manager_wrapper.cpp |
+
+---
+
+## 7. 代码验证汇总
+
+| 故障检测点 | 文件位置 | 行号 | 验证状态 | 日志关键字 |
+|-----------|---------|------|---------|-----------|
+| CheckUrmaConnectionStable | urma_manager.cpp | 1385-1413 | ✅ 已验证 | `[URMA_NEED_CONNECT] No existing connection` |
+| TryReconnectRemoteWorker | worker_oc_service_get_impl.cpp | 933-967 | ✅ 已验证 | `[URMA_NEED_CONNECT] TryReconnectRemoteWorker triggered` |
+| OnUrmaSendEvent | urma_manager.cpp | 760-790 | ✅ 已验证 | `[URMA_RECREATE_JFS] cqeStatus=9` |
+| GetUrmaErrorHandlePolicy | urma_manager.cpp | 62-73 | ✅ 已验证 | cqeStatus=9 → RECREATE_JFS |
+| UB fallback | client_worker_base_api.cpp | 118, 132 | ✅ 已验证 | `fallback to TCP/IP payload` |

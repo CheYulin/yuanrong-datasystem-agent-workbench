@@ -243,3 +243,16 @@ RunAllCallback();  // 执行所有回调，包括 ProcessWorkerLost
 | `node_timeout_s` | 60s | Worker节点超时时间 |
 | `client_dead_timeout_s` | 120s | Client死亡超时时间 |
 | `connectTimeoutMs` | - | 建链超时时间 |
+
+---
+
+## 7. 代码验证汇总
+
+| 故障检测点 | 文件位置 | 行号 | 验证状态 | 日志关键字 |
+|-----------|---------|------|---------|-----------|
+| StartListenWorker | listen_worker.cpp | 100-118 | ✅ 已验证 | `Cannot receive heartbeat from worker` |
+| CheckHeartbeat | listen_worker.cpp | 192-200 | ✅ 已验证 | `Heartbeat timeout, clientDeadTimeoutMs` |
+| HealthCheck | worker_oc_service_impl.cpp | 355-375 | ✅ 已验证 | `[HealthCheck] Worker is exiting now` |
+| CheckLocalNodeIsExiting | worker_oc_service_impl.cpp | 369-372 | ✅ 已验证 | `K_SCALE_DOWN, Worker is exiting now` |
+| etcd超时检测 | replica_manager.cpp | 1190 | ✅ 已验证 | `etcd is timeout` |
+| 节点断开检测 | etcd_cluster_manager.cpp | 897 | ✅ 已验证 | `Disconnected from remote node` |

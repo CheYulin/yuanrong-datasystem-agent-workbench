@@ -245,3 +245,19 @@ Status UrmaManager::CheckUrmaConnectionStable(const std::string &hostAddress, co
 | **URMA层** | 1004, 1006, 1008 | `[URMA_NEED_CONNECT]` / `[URMA_RECREATE_JFS]` / `Failed to urma init` |
 | **组件层** | 23, 31, 32 | `Cannot receive heartbeat` / `Worker is exiting now` / `The cluster is scaling` |
 | **内部错误** | 19 | `data inconsistent` / `UB payload overflow` |
+
+---
+
+## 9. 代码验证汇总
+
+| 故障检测点 | 文件位置 | 行号 | 验证状态 | 日志关键字 |
+|-----------|---------|------|---------|-----------|
+| etcd超时 | replica_manager.cpp | 1190 | ✅ 已验证 | `etcd is timeout` |
+| 节点断开 | etcd_cluster_manager.cpp | 897 | ✅ 已验证 | `Disconnected from remote node` |
+| mmap失败 | object_client_impl.cpp | 1509, 1807, 2150 | ✅ 已验证 | `Get mmap entry failed` |
+| 首心跳超时 | listen_worker.cpp | 114 | ✅ 已验证 | `Cannot receive heartbeat from worker` |
+| Worker退出 | worker_oc_service_impl.cpp | 371 | ✅ 已验证 | `[HealthCheck] Worker is exiting now` |
+| URMA_NEED_CONNECT | urma_manager.cpp | 1385-1413 | ✅ 已验证 | `[URMA_NEED_CONNECT] No existing connection` |
+| TryReconnect | worker_oc_service_get_impl.cpp | 947 | ✅ 已验证 | `[URMA_NEED_CONNECT] TryReconnectRemoteWorker triggered` |
+| UB降级TCP | client_worker_base_api.cpp | 118, 132 | ✅ 已验证 | `fallback to TCP/IP payload` |
+| SHM_metrics | kv_metrics.cpp | 70 | ✅ 已验证 | `worker_shm_ref_table_bytes` |
