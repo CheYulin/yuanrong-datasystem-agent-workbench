@@ -29,7 +29,8 @@
 | 06 | [06-dependencies/](06-dependencies/README.md) | 外部/三方件依赖：URMA、OS syscall、etcd、二级存储 | — |
 | 07 | [07-pr-metrics-fault-localization.md](07-pr-metrics-fault-localization.md) | PR 串讲 (#583/#584/#586/#588) × 36 条 metric × 17 个日志标签 × 故障定界决策树，给测试/研发值班用 | `common/metrics/kv_metrics.cpp` / `zmq_socket_ref.cpp` / `urma_manager.cpp` |
 | 08 | [08-fault-triage-consolidated.md](08-fault-triage-consolidated.md) | **值班速查 + 附录参考**：从 access 日志看成功率/P99 → 归类 → 定界；五边界（用户/DS 进程内/三方 etcd/URMA/OS）；附录 A–F 速查卡 / 54 条 metrics / 结构化日志标签 / resource.log 字段 / 注入矩阵 / gflag | `kv_metrics` / `status.h` / `zmq` / `urma`（细节见 05/07） |
-| 09 | [09-observable-test-construction.md](09-observable-test-construction.md) | **可观测用例构造与验证指南**：把 08 的"看证据做定界"反向成"故障注入 → 期望证据 → 自动化判据"；给每个故障域提供 ST 骨架、`INJECT_POINT` / iptables / tc 注入手段、四维断言模板 | `tests/st/common/rpc/zmq/zmq_metrics_fault_test.cpp` / `common/inject/inject_point.h` / `scripts/testing/verify/*` |
+| 09 | [09-observable-test-construction.md](09-observable-test-construction.md) | **可观测用例构造与验证指南**：关键目标是验证**四类观测信号（错误码 / 错误日志 / 统计信息 / 节点·容器视图）** 能让值班与客户按 08/10 的流程定界到**五边界**（用户 / DS 进程内 / 三方 etcd / URMA / OS）并定位；提供五边界注入矩阵、四维断言模板、场景蓝图、验收 Checklist | `zmq_metrics_fault_test.cpp` / `common/inject/inject_point.h` / `scripts/testing/verify/*` |
+| 10 | [10-customer-fault-scenarios.md](10-customer-fault-scenarios.md) | **客户侧场景化故障定位定界手册**：7 个业务场景（Put/Get 失败、P99↑、Init/连接、SHM、扩缩容、机器故障）；每场景含现象 / ASCII 定位流程图 / 自证清白 / 边界判定 / 自助恢复 / 华为证据包；让客户按流程自助排查，减少对华为支持的依赖 | 与 08 互补（客户视角，不依赖源码） | 
 
 ## 工具与产物
 
