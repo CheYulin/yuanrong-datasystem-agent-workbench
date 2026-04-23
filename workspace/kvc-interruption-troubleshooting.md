@@ -7,148 +7,272 @@
 
 ---
 
-## 快速定界
+## 故障树总纲
 
-### 第一步：抓错误码分布
-
-```bash
-grep "DS_KV_CLIENT_PUT" $LOG/ds_client_access_*.log | awk -F'|' '{print $1}' | sort | uniq -c
-grep "DS_KV_CLIENT_GET" $LOG/ds_client_access_*.log | awk -F'|' '{print $1}' | sort | uniq -c
-```
-
-### 第二步：直接出结论
-
-| 错误码 | 枚举 | 错误消息 | 责任方 | 结论 | 证据/日志 |
-|--------|------|----------|--------|------|-----------|
-| 0 | K_OK | OK | 用户 | key不存在 | respMsg含"NOT_FOUND" |
-| 2 | K_INVALID | Invalid parameter | 用户 | 参数非法 | 空key/大小为0 |
-| 3 | K_NOT_FOUND | Key not found | 用户 | key不存在 | Get时 |
-| 6 | K_OUT_OF_MEMORY | Out of memory | OS | 内存不足 | `dmesg\|grep -i oom` |
-| 7 | K_IO_ERROR | IO error | OS | IO错误 | `dmesg`/磁盘smart |
-| 8 | K_NOT_READY | Not ready | 用户 | 未Init | |
-| 13 | K_NO_SPACE | No space available | OS | 磁盘满 | `df -h` |
-| 18 | K_FILE_LIMIT_REACHED | Limit on the number of open file descriptors reached | OS | fd耗尽 | `ulimit -n` |
-| 25 | K_MASTER_TIMEOUT | The master may timeout/dead | etcd | Master超时 | `etcdctl endpoint status` |
-| 29 | K_SERVER_FD_CLOSED | The server fd has been closed | 数据系统 | Worker退出 | `[HealthCheck] Worker is exiting` |
-| 31 | K_SCALE_DOWN | The worker is exiting | 数据系统 | 缩容中 | SDK自重试 |
-| 32 | K_SCALING | The cluster is scaling | 数据系统 | 扩容中 | SDK自重试 |
-| 1004 | K_URMA_ERROR | Urma operation failed | URMA | 驱动/硬件问题 | `dmesg\|grep ub`/`ibstat` |
-| 1009 | K_URMA_CONNECT_FAILED | Urma connect failed | URMA | UB端口down | `ifconfig ub0` |
-| 1010 | K_URMA_WAIT_TIMEOUT | Urma wait for completion timed out | 数据系统 | SDK自愈 | 无需处置 |
-
-### 第三步：需进一步分析
-
-| 错误码 | 枚举 | 错误消息 | 可能原因 | 进一步查看 |
-|--------|------|----------|----------|------------|
-| 5 | K_RUNTIME_ERROR | Runtime error | OS/etcd/URMA | `grep -E 'mmap\|etcd\|urma' $LOG/...` |
-| 19 | K_TRY_AGAIN | Try again | 数据系统/OS | ZMQ failure delta |
-| 23 | K_CLIENT_WORKER_DISCONNECT | Client and Worker disconnect | 数据系统/OS | 对端进程是否存在 |
-| 1001 | K_RPC_DEADLINE_EXCEEDED | RPC deadline exceeded | 数据系统/OS | ZMQ failure delta + 对端状态 |
-| 1002 | K_RPC_UNAVAILABLE | RPC unavailable | 数据系统/OS/etcd | 对端状态 + 日志前缀 |
-| 1006 | K_URMA_NEED_CONNECT | Urma needs to reconnet | 数据系统/URMA | remoteInstanceId是否变化 |
-| 1008 | K_URMA_TRY_AGAIN | Urma operation failed, try again | URMA | 是否有RECREATE_JFS_FAILED |
-
----
-
-## 故障树
-
-### 一、用户问题
+> **注**：以下错误码为**内部码，不返回SDK**（不出现在access log中）：K_NOT_LEADER_MASTER(16)、K_RECOVERY_ERROR(17)、K_RECOVERY_IN_PROGRESS(18)、K_SHUTTING_DOWN(23)、K_WORKER_ABNORMAL(24)、K_SCALING(32在重试中)、K_RPC_STREAM_END(43)、K_SC_WORKER_WAS_LOST(62)、K_RDMA_NEED_CONNECT(73)
 
 ```
-【用户】
-├─ code=0 + respMsg含"NOT_FOUND" ── K_NOT_FOUND ── key不存在
-├─ code=2 ── K_INVALID ── 参数非法
-├─ code=3 ── K_NOT_FOUND ── key不存在
-└─ code=8 ── K_NOT_READY ── 未Init
-```
-
----
-
-### 二、OS问题
-
-```
-【OS】
-├─ code=5 + "Get mmap entry failed"
-│   └─ mlock限制 ── 处置: ulimit -l unlimited
-├─ code=6 ── 内存不足 ── 处置: dmesg|grep -i oom
-├─ code=7 ── IO错误 ── 处置: dmesg/磁盘smart
-├─ code=13 ── 磁盘满 ── 处置: df -h
-├─ code=18 ── fd耗尽 ── 处置: ulimit -n
-├─ code=1002 + "[UDS_CONNECT_FAILED]" ── UDS路径/权限
-├─ code=1002 + "[SHM_FD_TRANSFER_FAILED]" ── fd耗尽/权限 ── 处置: ulimit -n
-├─ ping不通 ── 防火墙/路由 ── 处置: iptables -L
-├─ code=1002 + "[TCP_CONNECT_FAILED]" + 对端存活 ── 端口/防火墙 ── 处置: ss -tnlp
-├─ code=1002 + "[TCP_CONNECT_RESET]" ── 网络闪断 ── 处置: dmesg
-└─ ZMQ failure delta>0 ── 网络丢包/断连
-    证据: zmq_send/receive_failure_total delta>0
-    日志: [ZMQ_SEND_FAILURE_TOTAL] errno=...
-```
-
----
-
-### 三、etcd问题
-
-```
-【etcd】
-├─ code=5 + "etcd is timeout/unavailable"
-│   └─ 处置: etcdctl endpoint status
-├─ code=25 ── K_MASTER_TIMEOUT ── Master超时 ── 处置: etcdctl endpoint status
-└─ code=1002 + "etcd is ..."
-    └─ 处置: etcdctl endpoint status
-```
-
----
-
-### 四、URMA问题
-
-```
-【URMA】
-├─ code=5 + "urma ... payload ..." ── UB传输失败
-├─ code=1004 ── K_URMA_ERROR ── 驱动/硬件 ── 处置: dmesg|grep ub / ibstat
-├─ code=1006 ── K_URMA_NEED_CONNECT
-│   ├─ remoteInstanceId变化 ── 对端Worker重启（正常，SDK自重连）
-│   └─ instanceId不变 ── UB链路不稳 ── 查: [URMA_POLL_ERROR]
-├─ code=1008 ── K_URMA_TRY_AGAIN
-│   ├─ [URMA_RECREATE_JFS_FAILED]连续 ── JFS重建失败 ── 查UMDK/驱动
-│   └─ 无FAILED ── 自愈，无需处置
-├─ code=1009 ── K_URMA_CONNECT_FAILED ── UB端口down ── 处置: ifconfig ub0 / ubinfo
-├─ code=1010 ── K_URMA_WAIT_TIMEOUT ── SDK重试白名单自愈
-└─ "fallback to TCP/IP payload" ── UB降级到TCP（性能劣化，非通断）
-```
-
----
-
-### 五、数据系统问题
-
-```
-【数据系统】
-├─ code=19 ── K_TRY_AGAIN
-│   └─ ZMQ failure delta=0 ── 对端处理慢 ── 查: WAITING_TASK_NUM/CPU/锁
-│       代码: zmq_msg_queue.h:884（recv返回EAGAIN背压）
+错误码(枚举) ─ 条件/日志/指标 ─→ 责任方
 │
-├─ code=23 ── K_CLIENT_WORKER_DISCONNECT
-│   ├─ 对端进程不存在 ── Worker崩溃 ── 查: grep "Worker is exiting"
-│   └─ ping通 + 心跳超时 ── 对端负载高 ── 查: WAITING_TASK_NUM
-│       代码: listen_worker.cpp:114（心跳超时）
+├─ 0(K_OK) / 2(K_INVALID) / 3(K_NOT_FOUND) / 8(K_NOT_READY) ─→ 【用户】业务代码问题
 │
-├─ code=29 ── Worker退出 ── 查: [HealthCheck] Worker is exiting
-├─ code=31 ── 缩容中 ── SDK自重试
-├─ code=32 ── 扩容中 ── SDK自重试
+├─ 6(K_OUT_OF_MEMORY) / 7(K_IO_ERROR) / 13(K_NO_SPACE) / 18(K_FILE_LIMIT_REACHED) ─→ 【OS】资源问题
 │
-├─ code=1001 ── K_RPC_DEADLINE_EXCEEDED
-│   ├─ [RPC_SERVICE_UNAVAILABLE] ── 对端拒绝服务
-│   │   代码: zmq_stub_conn.cpp:224
-│   └─ ZMQ failure delta=0 + 对端存活 ── 对端处理慢
-│       代码: zmq_service.cpp:724（remainingTime<=0）
+├─ 5(K_RUNTIME_ERROR) ─ 含"etcd" ─→ 【etcd】三方依赖
+├─ 5(K_RUNTIME_ERROR) ─ 含"mmap" ─→ 【OS】内存锁定限制
+├─ 5(K_RUNTIME_ERROR) ─ 含"urma" ─→ 【URMA】UB传输失败
 │
-└─ code=1002 ── K_RPC_UNAVAILABLE
-    ├─ 对端进程不存在 ── Worker崩溃
-    ├─ [RPC_SERVICE_UNAVAILABLE] ── 对端主动拒绝
-    ├─ zmq_event_handshake_failure_total↑ ── TLS握手失败
-    │   代码: zmq_monitor.cpp:149,155,162
-    └─ ZMQ failure delta=0 + 对端存活 ── 对端处理慢/拒绝
-        代码: zmq_socket_ref.cpp:175,211（ZMQ真失败）
+├─ 25(K_MASTER_TIMEOUT) ─→ 【etcd】Master超时
+│
+├─ 29(K_SERVER_FD_CLOSED) ─→ 【数据系统】Worker退出（注：返回时转为K_TRY_AGAIN）
+├─ 31(K_SCALE_DOWN) ─→ 【数据系统】缩容中
+│
+├─ 1004(K_URMA_ERROR) / 1009(K_URMA_CONNECT_FAILED) ─→ 【URMA】硬件/端口down
+├─ 1006/1008/1010 ─ 见需进一步分析故障树
+│
+├─ 19(K_TRY_AGAIN) ─ ZMQ failure delta=0 ─→ 【数据系统】对端处理慢
+├─ 19(K_TRY_AGAIN) ─ ZMQ failure delta>0 ─→ 【OS/网络】网络丢包/断连
+│
+├─ 23(K_CLIENT_WORKER_DISCONNECT) ─ 对端进程不存在 ─→ 【数据系统】Worker崩溃
+├─ 23(K_CLIENT_WORKER_DISCONNECT) ─ ping不通 ─→ 【OS/网络】防火墙/路由
+├─ 23(K_CLIENT_WORKER_DISCONNECT) ─ ping通 ─→ 【OS/网络】对端负载高/网络抖
+│
+├─ 1001(K_RPC_DEADLINE_EXCEEDED) ─ 含"[RPC_SERVICE_UNAVAILABLE]" ─→ 【数据系统】对端拒绝
+├─ 1001(K_RPC_DEADLINE_EXCEEDED) ─ delta=0 + 对端在 ─→ 【数据系统】对端处理慢
+├─ 1001(K_RPC_DEADLINE_EXCEEDED) ─ delta>0 或对端不在 ─→ 【OS/网络】网络问题
+│
+├─ 1002(K_RPC_UNAVAILABLE) ─ 含"etcd" ─→ 【etcd】
+├─ 1002(K_RPC_UNAVAILABLE) ─ 含"TLS/handshake" ─→ 【数据系统】证书问题
+├─ 1002(K_RPC_UNAVAILABLE) ─ 含"TCP_CONNECT" + 对端不在 ─→ 【数据系统】Worker崩溃
+├─ 1002(K_RPC_UNAVAILABLE) ─ 含"TCP_CONNECT" + 对端在 ─→ 【OS/网络】防火墙/端口
+├─ 1002(K_RPC_UNAVAILABLE) ─ 含"TCP_CONNECT_RESET" ─→ 【OS/网络】网络闪断
+├─ 1002(K_RPC_UNAVAILABLE) ─ 含"UDS/SHM_FD" ─→ 【OS】UDS/权限/fd
+├─ 1002(K_RPC_UNAVAILABLE) ─ ZMQ failure delta>0 ─→ 【OS/网络】按errno细分
+└─ 1002(K_RPC_UNAVAILABLE) ─ delta=0 + 对端在 ─→ 【数据系统】对端慢/拒绝
 ```
+
+---
+
+## 需进一步分析的故障树
+
+### code=5 — K_RUNTIME_ERROR
+
+```
+code=5 K_RUNTIME_ERROR
+  │ 错误消息: "Runtime error"
+  │
+  ├─ 日志含"Get mmap entry failed"
+  │   ├─ 错误消息: "Get mmap entry failed"
+  │   ├─ errno: ENOMEM(mlock限制)
+  │   └─→ 【OS】内存锁定限制 ── 处置: ulimit -l unlimited
+  │
+  ├─ 日志含"etcd is timeout" / "etcd is unavailable"
+  │   ├─ 错误消息: "etcd is timeout/unavailable"
+  │   └─→ 【etcd】三方依赖 ── 处置: etcdctl endpoint status
+  │
+  └─ 日志含"urma ... payload ..."
+      ├─ 错误消息: "urma ... payload ..."
+      └─→ 【URMA】UB传输失败 ── 查: grep -E '\[URMA_' $LOG/*.INFO.log
+```
+
+---
+
+### code=19 — K_TRY_AGAIN
+
+```
+code=19 K_TRY_AGAIN
+  │ 错误消息: "Try again"
+  │ 代码: zmq_msg_queue.h:884（recv返回EAGAIN背压）
+  │
+  ├─ ZMQ failure delta=0
+  │   ├─ Metrics: zmq_send_failure_total delta=0
+  │   ├─ Metrics: zmq_receive_failure_total delta=0
+  │   └─→ 【数据系统】对端处理慢 ── 查: WAITING_TASK_NUM/CPU/锁
+  │
+  └─ ZMQ failure delta>0
+      ├─ Metrics: zmq_send_failure_total delta>0 或 zmq_receive_failure_total delta>0
+      ├─ 日志: [ZMQ_SEND_FAILURE_TOTAL] errno=...
+      └─→ 【OS/网络】网络丢包/断连 ── 按errno表细分
+```
+
+---
+
+### code=23 — K_CLIENT_WORKER_DISCONNECT
+
+```
+code=23 K_CLIENT_WORKER_DISCONNECT
+  │ 错误消息: "Client and Worker disconnect"
+  │ 代码: listen_worker.cpp:114（心跳超时）
+  │
+  ├─ 对端进程不存在
+  │   ├─ 证据: ssh <peer> "pgrep -af datasystem_worker" 无结果
+  │   ├─ 日志: [HealthCheck] Worker is exiting now
+  │   └─→ 【数据系统】Worker崩溃 ── 查: grep "Worker is exiting"日志
+  │
+  ├─ 对端存活 + ping不通
+  │   └─→ 【OS/网络】防火墙/路由 ── 处置: iptables -L / ping
+  │
+  └─ 对端存活 + ping通
+      ├─ 日志: "Cannot receive heartbeat from worker."
+      └─→ 【OS/网络】对端负载高/网络抖
+          查: WAITING_TASK_NUM / top / ping RTT
+```
+
+---
+
+### code=1001 — K_RPC_DEADLINE_EXCEEDED
+
+```
+code=1001 K_RPC_DEADLINE_EXCEEDED
+  │ 错误消息: "RPC deadline exceeded"
+  │ 代码: zmq_service.cpp:724（remainingTime<=0，服务端deadline到期）
+  │
+  ├─ 日志含"[RPC_SERVICE_UNAVAILABLE]"
+  │   ├─ 错误消息: "The service is currently unavailable!"
+  │   ├─ 代码: zmq_stub_conn.cpp:224
+  │   └─→ 【数据系统】对端拒绝服务 ── 查: 对端Worker状态
+  │
+  ├─ ZMQ failure delta=0 + 对端存活
+  │   ├─ Metrics: zmq_send_failure_total delta=0
+  │   └─→ 【数据系统】对端处理慢 ── 查: WAITING_TASK_NUM/CPU/锁
+  │
+  └─ ZMQ failure delta>0 或对端不在
+      ├─ Metrics: zmq_send_failure_total delta>0
+      └─→ 【OS/网络】网络问题 ── 按errno表细分
+```
+
+---
+
+### code=1002 — K_RPC_UNAVAILABLE
+
+```
+code=1002 K_RPC_UNAVAILABLE
+  │ 错误消息: "RPC unavailable"
+  │ 代码: zmq_socket_ref.cpp:175,211（ZMQ send/recv真失败）
+  │
+  ├─ 对端进程不存在
+  │   ├─ 日志: [HealthCheck] Worker is exiting now
+  │   └─→ 【数据系统】Worker崩溃
+  │
+  ├─ 日志含"[RPC_SERVICE_UNAVAILABLE]"
+  │   └─→ 【数据系统】对端主动拒绝
+  │
+  ├─ 日志含"zmq_event_handshake_failure_total"↑
+  │   ├─ 代码: zmq_monitor.cpp:149,155,162（TLS握手失败）
+  │   └─→ 【数据系统】TLS/证书问题
+  │
+  ├─ 日志含"etcd is ..."
+  │   └─→ 【etcd】─ 处置: etcdctl endpoint status
+  │
+  ├─ 日志含"[TCP_CONNECT_FAILED]" + 对端存活
+  │   ├─ 错误消息: "TCP connect failed"
+  │   └─→ 【OS/网络】防火墙/端口 ── 处置: ss -tnlp / iptables
+  │
+  ├─ 日志含"[TCP_CONNECT_RESET]" / "[TCP_NETWORK_UNREACHABLE]"
+  │   ├─ errno: ECONNRESET(104) / EPIPE
+  │   └─→ 【OS/网络】网络闪断 ── 处置: dmesg / netstat -s
+  │
+  ├─ 日志含"[UDS_CONNECT_FAILED]"
+  │   └─→ 【OS/网络】UDS路径/权限问题
+  │
+  ├─ 日志含"[SHM_FD_TRANSFER_FAILED]"
+  │   └─→ 【OS】fd耗尽/权限 ── 处置: ulimit -n
+  │
+  ├─ ZMQ failure delta>0
+  │   ├─ Metrics: zmq_send_failure_total delta>0
+  │   ├─ 日志: [ZMQ_SEND_FAILURE_TOTAL] errno=...
+  │   └─→ 【OS/网络】按errno表细分
+  │
+  └─ ZMQ failure delta=0 + 对端存活
+      └─→ 【数据系统】对端处理慢/拒绝 ── 查: WAITING_TASK_NUM
+```
+
+---
+
+### code=1006 — K_URMA_NEED_CONNECT
+
+```
+code=1006 K_URMA_NEED_CONNECT
+  │ 错误消息: "Urma needs to reconnet"
+  │
+  ├─ remoteInstanceId变化
+  │   ├─ 日志: [URMA_NEED_CONNECT] remoteInstanceId=X → remoteInstanceId=Y
+  │   └─→ 【数据系统】对端Worker重启（正常）─ SDK自重连
+  │
+  ├─ instanceId不变 + 连接断开
+  │   ├─ 日志: [URMA_NEED_CONNECT] Connection stale for remoteAddress: ...
+  │   └─→ 【URMA】连接断开需重建
+  │
+  └─ instanceId不变 + 持续出现 + [URMA_POLL_ERROR]并存
+      ├─ 日志: [URMA_NEED_CONNECT] Connection unstable for remoteAddress: ...
+      ├─ 日志: [URMA_POLL_ERROR] PollJfcWait failed: ...
+      └─→ 【URMA】UB链路不稳 ── 查: 交换机端口状态
+```
+
+---
+
+### code=1008 — K_URMA_TRY_AGAIN
+
+```
+code=1008 K_URMA_TRY_AGAIN
+  │ 错误消息: "Urma operation failed, try again"
+  │
+  ├─ [URMA_RECREATE_JFS] + cqeStatus=9(ACK TIMEOUT)
+  │   └─→ 自动重建中（继续观察是否有FAILED）
+  │
+  ├─ [URMA_RECREATE_JFS_FAILED]连续
+  │   ├─ 日志: [URMA_RECREATE_JFS_FAILED] requestId=..., op=..., ret=%d
+  │   ├─ ret=URMA错误码
+  │   └─→ 【URMA】JFS重建失败 ── 查: UMDK/驱动日志
+  │
+  ├─ [URMA_RECREATE_JFS_SKIP]
+  │   └─→ 连接过期跳过，正常 ── 无需处置
+  │
+  └─ 无FAILED（仅有[URMA_RECREATE_JFS]）
+      └─→ 自愈（无需处置）
+```
+
+---
+
+## OS/ZMQ/URMA 日志关键字
+
+### OS/ZMQ 日志关键字
+
+| 日志关键字 | 错误消息 | errno/ret | 责任方 |
+|------------|----------|-----------|--------|
+| `[TCP_CONNECT_FAILED]` | TCP connect failed | errno | OS/网络 |
+| `[TCP_CONNECT_RESET]` | Connect reset | errno | OS/网络 |
+| `[TCP_NETWORK_UNREACHABLE]` | Network unreachable | - | OS/网络 |
+| `[UDS_CONNECT_FAILED]` | UDS connect failed | - | OS/网络 |
+| `[SHM_FD_TRANSFER_FAILED]` | SHM fd transfer failed | - | OS |
+| `[ZMQ_SEND_FAILURE_TOTAL]` | ZMQ send failed | errno | OS/网络 |
+| `[ZMQ_RECEIVE_FAILURE_TOTAL]` | ZMQ recv failed | errno | OS/网络 |
+| `[ZMQ_RECV_TIMEOUT]` | ZMQ recv timeout | - | 数据系统 |
+| `[RPC_RECV_TIMEOUT]` | RPC recv timeout | - | 数据系统/OS |
+| `[RPC_SERVICE_UNAVAILABLE]` | Service unavailable | - | 数据系统 |
+| `[SOCK_CONN_WAIT_TIMEOUT]` | Sock conn wait timeout | - | OS/网络 |
+| `zmq_event_handshake_failure_total`↑ | TLS handshake failed | - | 数据系统 |
+
+### URMA 日志关键字
+
+| 日志关键字 | 错误消息 | errno/ret | 责任方 |
+|------------|----------|-----------|--------|
+| `[URMA_NEED_CONNECT]` | Urma needs to reconnet | remoteInstanceId/instanceId | 数据系统/URMA |
+| `[URMA_POLL_ERROR]` | PollJfcWait failed | ret | URMA |
+| `[URMA_WAIT_TIMEOUT]` | timedout waiting for request | requestId | 数据系统 |
+| `[URMA_RECREATE_JFS]` | JFS recreating | cqeStatus=9 | URMA |
+| `[URMA_RECREATE_JFS_FAILED]` | JFS recreate failed | ret | URMA |
+| `[URMA_RECREATE_JFS_SKIP]` | JFS skip (connection expired) | - | 正常 |
+| `fallback to TCP/IP payload` | UB降级TCP | - | URMA |
+
+### OS 系统错误（dmesg/ulimit/df）
+
+| 系统调用 | 错误消息 | errno | 责任方 |
+|----------|----------|-------|--------|
+| mlock/mlockall | Get mmap entry failed | ENOMEM | OS |
+| open/creat | No space available | ENOSPC | OS |
+| open/accept | Limit on file descriptors reached | EMFILE/ENFILE | OS |
+| read/write | IO error | EIO | OS |
 
 ---
 
@@ -192,6 +316,38 @@ ECONNREFUSED / ECONNRESET / ECONNABORTED / EHOSTUNREACH / ENETUNREACH / ENETDOWN
 | 110 | ETIMEDOUT | TCP超时 | 网络慢/防火墙丢包 |
 | 111 | ECONNREFUSED | 端口无监听 | Worker未启动/端口未开 |
 | 113 | EHOSTUNREACH | 主机不可达 | 主机层面网络不通 |
+
+---
+
+## 快速定界
+
+### 第一步：抓错误码分布
+
+```bash
+grep "DS_KV_CLIENT_PUT" $LOG/ds_client_access_*.log | awk -F'|' '{print $1}' | sort | uniq -c
+grep "DS_KV_CLIENT_GET" $LOG/ds_client_access_*.log | awk -F'|' '{print $1}' | sort | uniq -c
+```
+
+### 第二步：直接出结论
+
+| 错误码 | 枚举 | 错误消息 | 责任方 | 证据/日志 |
+|--------|------|----------|--------|-----------|
+| 0 | K_OK | OK | 用户 | respMsg含"NOT_FOUND" |
+| 2 | K_INVALID | Invalid parameter | 用户 | 空key/大小为0 |
+| 3 | K_NOT_FOUND | Key not found | 用户 | Get时 |
+| 6 | K_OUT_OF_MEMORY | Out of memory | OS | `dmesg\|grep -i oom` |
+| 7 | K_IO_ERROR | IO error | OS | `dmesg`/磁盘smart |
+| 8 | K_NOT_READY | Not ready | 用户 | 未Init |
+| 13 | K_NO_SPACE | No space available | OS | `df -h` |
+| 18 | K_FILE_LIMIT_REACHED | Limit on file descriptors reached | OS | `ulimit -n` |
+| 25 | K_MASTER_TIMEOUT | The master may timeout/dead | etcd | `etcdctl endpoint status` |
+| 29 | K_SERVER_FD_CLOSED | The server fd has been closed | 数据系统 | 返回时转为K_TRY_AGAIN |
+| 31 | K_SCALE_DOWN | The worker is exiting | 数据系统 | SDK自重试 |
+| 1004 | K_URMA_ERROR | Urma operation failed | URMA | `dmesg\|grep ub`/`ibstat`；ret=%d |
+| 1009 | K_URMA_CONNECT_FAILED | Urma connect failed | URMA | `ifconfig ub0` |
+| 1010 | K_URMA_WAIT_TIMEOUT | Urma wait for completion timed out | 数据系统 | 无需处置 |
+
+> 注：K_SCALING(32)为内部码，不出现在access log中
 
 ---
 
