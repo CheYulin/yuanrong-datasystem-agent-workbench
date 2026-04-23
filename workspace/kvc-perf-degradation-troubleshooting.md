@@ -68,11 +68,17 @@ grep 'Compare with' $LOG/datasystem_worker.INFO.log | tail -3
 # 检查降级日志
 grep 'fallback to TCP/IP payload' $LOG/datasystem_worker.INFO.log
 
-# 检查URMA/TCP字节统计
+# 检查Client侧URMA/TCP字节统计
 grep 'client_put_urma_write_total_bytes' $LOG/ds_client_*.INFO.log | tail -3
 grep 'client_put_tcp_write_total_bytes' $LOG/ds_client_*.INFO.log | tail -3
 grep 'client_get_urma_read_total_bytes' $LOG/ds_client_*.INFO.log | tail -3
 grep 'client_get_tcp_read_total_bytes' $LOG/ds_client_*.INFO.log | tail -3
+
+# 检查Worker侧URMA/TCP字节统计
+grep 'worker_put_urma_write_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_put_tcp_write_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_get_urma_read_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_get_tcp_read_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
 ```
 
 | 数据字段 | 名称 | 单位 | 日志位置 | 判定方法 | 结论 | 责任主体 | 解决措施 |
@@ -82,6 +88,10 @@ grep 'client_get_tcp_read_total_bytes' $LOG/ds_client_*.INFO.log | tail -3
 | `client_put_tcp_write_total_bytes` | Client TCP写入字节 | bytes | 运行日志-metrics | delta>0 且 urma_delta=0 | TCP降级 | **URMA** | 联系URMA和底软团队 |
 | `client_get_urma_read_total_bytes` | Client URMA读取字节 | bytes | 运行日志-metrics | delta=0 | URMA通道未使用 | **URMA** | 检查UB连接 |
 | `client_get_tcp_read_total_bytes` | Client TCP读取字节 | bytes | 运行日志-metrics | delta>0 且 urma_delta=0 | TCP降级 | **URMA** | 联系URMA和底软团队 |
+| `worker_put_urma_write_total_bytes` | Worker URMA写入字节 | bytes | 运行日志-metrics | delta=0 | URMA通道未使用 | **URMA** | 检查UB连接 |
+| `worker_put_tcp_write_total_bytes` | Worker TCP写入字节 | bytes | 运行日志-metrics | delta>0 且 urma_delta=0 | TCP降级 | **URMA** | 联系URMA和底软团队 |
+| `worker_get_urma_read_total_bytes` | Worker URMA读取字节 | bytes | 运行日志-metrics | delta=0 | URMA通道未使用 | **URMA** | 检查UB连接 |
+| `worker_get_tcp_read_total_bytes` | Worker TCP读取字节 | bytes | 运行日志-metrics | delta>0 且 urma_delta=0 | TCP降级 | **URMA** | 联系URMA和底软团队 |
 
 ---
 
@@ -168,9 +178,15 @@ grep 'worker_rpc_create_meta_latency' $LOG/datasystem_worker.INFO.log | tail -3
 grep 'worker_rpc_query_meta_latency' $LOG/datasystem_worker.INFO.log | tail -3
 grep 'worker_rpc_get_remote_object_latency' $LOG/datasystem_worker.INFO.log | tail -3
 
-# ④ 数据访问
+# ④ 数据访问（时延）
 grep 'worker_urma_write_latency' $LOG/datasystem_worker.INFO.log | tail -3
 grep 'worker_tcp_write_latency' $LOG/datasystem_worker.INFO.log | tail -3
+
+# ④ 数据访问（数据量）
+grep 'worker_put_urma_write_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_put_tcp_write_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_get_urma_read_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_get_tcp_read_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
 ```
 
 **判断**：哪个分段max最高，哪个就是瓶颈；②和④需自证清白区分KVC vs 外部问题
@@ -189,6 +205,10 @@ grep 'worker_tcp_write_latency' $LOG/datasystem_worker.INFO.log | tail -3
 | `worker_rpc_get_remote_object_latency` | 跨Worker获取延迟 | us | 运行日志-metrics | 值高 | ③/④ 跨Worker | 跨Worker慢 | **KVC** | 步骤6自证清白 |
 | `worker_urma_write_latency` | URMA写入延迟 | us | 运行日志-metrics | 值高 | ④ 数据访问 | URMA慢 | **URMA** | 联系URMA团队 |
 | `worker_tcp_write_latency` | TCP写入延迟 | us | 运行日志-metrics | 值高 | ④ 数据访问 | TCP降级慢 | **URMA** | 检查URMA状态 |
+| `worker_put_urma_write_total_bytes` | Worker URMA写入字节 | bytes | 运行日志-metrics | delta=0 | ④ 数据访问 | URMA通道未使用 | **URMA** | 检查UB连接 |
+| `worker_put_tcp_write_total_bytes` | Worker TCP写入字节 | bytes | 运行日志-metrics | delta>0 且 urma_delta=0 | ④ 数据访问 | TCP降级 | **URMA** | 联系URMA团队 |
+| `worker_get_urma_read_total_bytes` | Worker URMA读取字节 | bytes | 运行日志-metrics | delta=0 | ④ 数据访问 | URMA通道未使用 | **URMA** | 检查UB连接 |
+| `worker_get_tcp_read_total_bytes` | Worker TCP读取字节 | bytes | 运行日志-metrics | delta>0 且 urma_delta=0 | ④ 数据访问 | TCP降级 | **URMA** | 联系URMA团队 |
 
 **跨Worker自证清白**：当③或④涉及跨Worker操作时，通过步骤6的ZMQ RPC指标判断是本端Worker问题还是远端Worker/网络问题
 
@@ -314,10 +334,14 @@ grep 'DS_KV_CLIENT_PUT' $LOG/ds_client_access_*.log | awk -F'|' '{print $3}' | s
 
 | 数据字段 | 名称 | 单位 | 指标说明 | 判定方法 | 解决措施 |
 |----------|------|------|----------|----------|----------|
-| `client_put_urma_write_total_bytes` | URMA写入字节 | bytes | Client通过URMA写入的总字节数 | delta=0表示URMA通道未使用 | 检查URMA连接 |
-| `client_put_tcp_write_total_bytes` | TCP写入字节 | bytes | Client通过TCP写入的总字节数 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
-| `client_get_urma_read_total_bytes` | URMA读取字节 | bytes | Client通过URMA读取的总字节数 | delta=0表示URMA通道未使用 | 检查URMA连接 |
-| `client_get_tcp_read_total_bytes` | TCP读取字节 | bytes | Client通过TCP读取的总字节数 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
+| `client_put_urma_write_total_bytes` | Client URMA写入字节 | bytes | Client通过URMA写入的总字节数 | delta=0表示URMA通道未使用 | 检查URMA连接 |
+| `client_put_tcp_write_total_bytes` | Client TCP写入字节 | bytes | Client通过TCP写入的总字节数 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
+| `client_get_urma_read_total_bytes` | Client URMA读取字节 | bytes | Client通过URMA读取的总字节数 | delta=0表示URMA通道未使用 | 检查URMA连接 |
+| `client_get_tcp_read_total_bytes` | Client TCP读取字节 | bytes | Client通过TCP读取的总字节数 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
+| `worker_put_urma_write_total_bytes` | Worker URMA写入字节 | bytes | Worker通过URMA写入的总字节数 | delta=0表示URMA通道未使用 | 检查UB连接 |
+| `worker_put_tcp_write_total_bytes` | Worker TCP写入字节 | bytes | Worker通过TCP写入的总字节数 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
+| `worker_get_urma_read_total_bytes` | Worker URMA读取字节 | bytes | Worker通过URMA读取的总字节数 | delta=0表示URMA通道未使用 | 检查UB连接 |
+| `worker_get_tcp_read_total_bytes` | Worker TCP读取字节 | bytes | Worker通过TCP读取的总字节数 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
 
 ### ZMQ RPC队列时延（us）
 
