@@ -177,7 +177,7 @@ cd build-urma/tests/ut
 可直接执行：
 
 ```bash
-cd /path/to/vibe-coding-files
+cd /path/to/yuanrong-datasystem-agent-workbench
 ./ops test.urma_tcp_logs /path/to/logs
 ```
 

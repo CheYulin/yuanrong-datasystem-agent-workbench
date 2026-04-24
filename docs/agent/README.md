@@ -1,6 +1,6 @@
 # 指导 Agent 使用本仓库
 
-本目录说明：**何时改 `yuanrong-datasystem`，何时用 `vibe-coding-files` 的脚本与文档**，避免在错误仓库里找工具或重复造轮子。
+本目录说明：**何时改 `yuanrong-datasystem`，何时用 `yuanrong-datasystem-agent-workbench` 的脚本与文档**，避免在错误仓库里找工具或重复造轮子。
 
 ## 0. Agent 角色（Open Yuanrong DataSystem）
 
@@ -11,7 +11,7 @@
 ## 1. 仓库分工（必读）
 
 - **`yuanrong-datasystem`**：C/C++ 等**产品源码**、`build.sh`、与 CMake 强耦合的 `scripts/build_thirdparty.sh` 等。  
-- **`vibe-coding-files`**：**开发载体**——验证 KV executor、锁、brpc ST、覆盖率门禁、URMA IDE 索引、bpftrace/strace 辅助；以及 `docs/`、`plans/`。
+- **`yuanrong-datasystem-agent-workbench`**：**开发载体**——验证 KV executor、锁、brpc ST、覆盖率门禁、URMA IDE 索引、bpftrace/strace 辅助；以及 `docs/`、`plans/`。
 
 打开 [`datasystem-dev.code-workspace`](../../datasystem-dev.code-workspace) 同时加载两个根目录。
 
@@ -57,4 +57,4 @@
 ## 4. 修改边界
 
 - **改业务逻辑 / CMake 目标 / 测试用例**：在 **yuanrong-datasystem**。  
-- **改验证流程、加新门禁脚本、更新操作说明**：在 **vibe-coding-files**（并更新 `docs/verification` 与本目录）。
+- **改验证流程、加新门禁脚本、更新操作说明**：在 **yuanrong-datasystem-agent-workbench**（并更新 `docs/verification` 与本目录）。

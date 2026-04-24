@@ -1,6 +1,6 @@
 # 文档索引
 
-路径相对于本仓库根目录 `vibe-coding-files/`。
+路径相对于本仓库根目录 `yuanrong-datasystem-agent-workbench/`。
 
 ## 主目录
 

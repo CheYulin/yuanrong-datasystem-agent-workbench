@@ -18,7 +18,7 @@ description: >-
 ## 采集基线
 
 ```bash
-ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.collect_lock_baseline'
+ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops analysis.collect_lock_baseline'
 ```
 
 产物落在 `results/` 下带时间戳的子目录。
@@ -26,7 +26,7 @@ ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.collect_l
 ## 对比两次运行
 
 ```bash
-ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.compare_lock_baseline <run-dir-1> <run-dir-2>'
+ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops analysis.compare_lock_baseline <run-dir-1> <run-dir-2>'
 ```
 
 输出差异摘要（耗时变化、锁竞争指标变化等）。
@@ -34,7 +34,7 @@ ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.compare_l
 ## Executor 性能曲线
 
 ```bash
-ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.kv_executor_perf'
+ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops analysis.kv_executor_perf'
 ```
 
 生成 inline vs injected 曲线与 CSV。
@@ -44,7 +44,7 @@ ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.kv_execut
 需要 root 权限，打印采集命令供用户手动执行：
 
 ```bash
-ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops analysis.lock_ebpf_workflow'
+ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops analysis.lock_ebpf_workflow'
 ```
 
 ## 报告格式

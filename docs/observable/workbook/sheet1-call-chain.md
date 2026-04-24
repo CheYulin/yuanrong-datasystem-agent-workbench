@@ -11,7 +11,7 @@
 > - 本页 **§2.1** 另含 Markdown 评审用的 **Init 分层表**（与 Excel 第 5～8 列互补对照）。
 
 **仓库**：`yuanrong-datasystem`（附录中的路径均相对该仓库根）  
-**时序图**：`vibe-coding-files/docs/flows/sequences/kv-client/`
+**时序图**：`yuanrong-datasystem-agent-workbench/docs/flows/sequences/kv-client/`
 
 **术语统一（Directory / 日志原文）**
 

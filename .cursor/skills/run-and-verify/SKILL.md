@@ -39,9 +39,9 @@ ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem && bash build.sh'
 
 | 目标 | 命令 |
 |------|------|
-| KV executor | `ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops test.kv_executor'` |
-| brpc 参考 | `ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops test.brpc_kv_executor'` |
-| 锁性能 | `ssh xqyun-32c32g 'cd <remote-path>/vibe-coding-files && ./ops runtime.lock_perf'` |
+| KV executor | `ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops test.kv_executor'` |
+| brpc 参考 | `ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops test.brpc_kv_executor'` |
+| 锁性能 | `ssh xqyun-32c32g 'cd <remote-path>/yuanrong-datasystem-agent-workbench && ./ops runtime.lock_perf'` |
 
 或直接用 ctest：
 

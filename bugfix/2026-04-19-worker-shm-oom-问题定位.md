@@ -382,7 +382,7 @@ bool ObjectClientImpl::IsBufferAlive(uint32_t version)
 
 #### Step A：worker 被动缩容触发 client 隔离
 
-被动缩容流程（参见 `src/datasystem/worker/cluster_manager/etcd_cluster_manager.cpp` 与 `vibe-coding-files/docs/observable/06-dependencies/etcd.md`）：
+被动缩容流程（参见 `src/datasystem/worker/cluster_manager/etcd_cluster_manager.cpp` 与 `yuanrong-datasystem-agent-workbench/docs/observable/06-dependencies/etcd.md`）：
 
 - `t = node_timeout_s`：etcd lease 到期，**故障隔离生效**（`CheckConnection` 开始 `IsTimedOut()`、客户端心跳失败）。
 - `t = node_dead_timeout_s`：master 写 `del_node_info`，节点 SIGKILL / 自杀。
@@ -545,7 +545,7 @@ Status SaveBinaryObjectToMemory(ObjectKV &objectKV, const std::vector<RpcMessage
 
 #### (ii) Retry + 多 client 集中切 → workerB 瞬时 N 倍负载
 
-`ClientWorkerRemoteApi::Publish` 的 `RetryOnError` 集合允许 `K_SCALING` / `K_OUT_OF_MEMORY` / `K_RPC_UNAVAILABLE` 等重试（`vibe-coding-files/docs/observable/workbook/sheet1-call-chain.md:117`）。切换瞬间业务侧的 Publish 大概率失败 → retry：
+`ClientWorkerRemoteApi::Publish` 的 `RetryOnError` 集合允许 `K_SCALING` / `K_OUT_OF_MEMORY` / `K_RPC_UNAVAILABLE` 等重试（`yuanrong-datasystem-agent-workbench/docs/observable/workbook/sheet1-call-chain.md:117`）。切换瞬间业务侧的 Publish 大概率失败 → retry：
 
 - 每次 retry 都会把同一份 8 MB payload **重发一次**到 workerB，workerB 端按 `bool szChanged` 决定是否复用旧 ShmUnit；如果中间发生过 `ClearObject` / version 跳变，重新分配；
 - workerA 上原本由 N 个 client 分担的写入，故障后**同一时刻**全部砸到同一台 standby workerB（standby 是 worker 注册时 master 选出来的，集群里 standby 通常 1～2 台），瞬时负载 N×；

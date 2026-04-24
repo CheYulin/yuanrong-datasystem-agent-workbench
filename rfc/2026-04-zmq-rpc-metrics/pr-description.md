@@ -85,10 +85,10 @@
 **测试与脚本/文档交付**
 
 - 脚本：
-  - `vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh`
-  - `vibe-coding-files/scripts/testing/verify/verify_zmq_metrics_fault.sh`
-  - `vibe-coding-files/scripts/testing/verify/run_zmq_metrics_ut_regression_remote.sh`
-  - `vibe-coding-files/scripts/testing/verify/run_zmq_metrics_fault_e2e_remote.sh`
+  - `yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh`
+  - `yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_metrics_fault.sh`
+  - `yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_zmq_metrics_ut_regression_remote.sh`
+  - `yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_zmq_metrics_fault_e2e_remote.sh`
 - 文档：
   - `.../RESULTS.md`（分阶段证据 + 复跑证据）
   - `.../ZMQ-metrics-故障注入与日志定界-测试串讲.md`

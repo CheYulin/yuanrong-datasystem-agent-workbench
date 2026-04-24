@@ -2,7 +2,7 @@
 
 **仓库**：`yuanrong-datasystem`
 **依赖框架**：`datasystem::metrics`（PR #584） + `KvMetricId` 枚举体系（PR #586）
-**关联背景**：[`vibe-coding-files/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
+**关联背景**：[`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
 
 ---
 

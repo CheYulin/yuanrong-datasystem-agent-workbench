@@ -1,6 +1,6 @@
 # CMake：构建、测试、perf、覆盖率、examples（yuanrong-datasystem）
 
-**约定**：`yuanrong-datasystem` 根目录执行 `build.sh`；`vibe-coding-files` 侧优先使用统一入口 `./ops` 执行验证/分析/文档脚本（见 [`scripts/README.md`](../../scripts/README.md)）。下文用 **`$DS`** 表示 datasystem 根目录，`$VIBE` 表示 `vibe-coding-files` 根目录（请按本机路径替换）。
+**约定**：`yuanrong-datasystem` 根目录执行 `build.sh`；`yuanrong-datasystem-agent-workbench` 侧优先使用统一入口 `./ops` 执行验证/分析/文档脚本（见 [`scripts/README.md`](../../scripts/README.md)）。下文用 **`$DS`** 表示 datasystem 根目录，`$VIBE` 表示 `yuanrong-datasystem-agent-workbench` 根目录（请按本机路径替换）。
 
 **第三方缓存、安装产物（Client/Worker/whl·dscli）、tests/example 与 CMake 生成物路径**：见 [**构建产物目录与可复现工作流.md**](构建产物目录与可复现工作流.md)。
 

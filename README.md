@@ -5,7 +5,7 @@
 > Source code lives in the sibling `yuanrong-datasystem` repo; this repo is where agents
 > **plan, run, verify, and document**.
 
-> 本仓的历史目录名仍为 `vibe-coding-files/`，文档与脚本中的相对路径不受影响；GitHub 上的仓名建议改为 `yuanrong-datasystem-agent-workbench`（或短名 `ds-agent-workbench`）。
+> 本仓的历史目录名仍为 `yuanrong-datasystem-agent-workbench/`，文档与脚本中的相对路径不受影响；GitHub 上的仓名建议改为 `yuanrong-datasystem-agent-workbench`（或短名 `ds-agent-workbench`）。
 
 与 **`yuanrong-datasystem`（Open Yuanrong DataSystem）** 配套的开发载体仓库：业务**源码**在同级仓库 **`yuanrong-datasystem`**；本仓承载脚本、文档、计划、RFC、验证产物与 Agent 工作流。
 

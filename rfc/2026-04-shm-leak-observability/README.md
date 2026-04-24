@@ -8,7 +8,7 @@
 - **Started**: 2026-04-19
 - **Owner**: 待指定
 - **Depends on**: PR #584（lightweight metrics framework）/ PR #586（KvMetricId 框架）
-- **关联背景**: [`vibe-coding-files/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
+- **关联背景**: [`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
 
 ---
 

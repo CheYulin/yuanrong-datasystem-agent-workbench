@@ -219,9 +219,9 @@ grep -E "\[FAULT INJECT\]|\[METRICS DUMP -|\[ISOLATION\]|\[SELF-PROOF( REPORT)?\
 
 仓库内已有自动化脚本可直接跑：
 
-- `vibe-coding-files/scripts/testing/verify/summarize_observability_log.sh <log>` —— **本次 PR 集的聚合表**：把 metrics 最近一次 delta + 所有结构化日志标签命中次数打成速查表，跑一次即拿到 §3 场景表所需全部信号。
-- `vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh <log>` —— ZMQ 故障四场景校验（来自 #588 的 ST）。
-- `vibe-coding-files/scripts/testing/verify/validate_urma_tcp_observability_logs.sh <log>` —— URMA/TCP 日志前缀数量校验（来自 #583 的验收，目标 ≥3 个前缀出现过）。
+- `yuanrong-datasystem-agent-workbench/scripts/testing/verify/summarize_observability_log.sh <log>` —— **本次 PR 集的聚合表**：把 metrics 最近一次 delta + 所有结构化日志标签命中次数打成速查表，跑一次即拿到 §3 场景表所需全部信号。
+- `yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh <log>` —— ZMQ 故障四场景校验（来自 #588 的 ST）。
+- `yuanrong-datasystem-agent-workbench/scripts/testing/verify/validate_urma_tcp_observability_logs.sh <log>` —— URMA/TCP 日志前缀数量校验（来自 #583 的验收，目标 ≥3 个前缀出现过）。
 
 ### 4.6 ST 跑 `ds_st_kv_cache`：mock OBS、`rootDir` 子进程日志、远端一键采集
 
@@ -240,10 +240,10 @@ grep -E "\[FAULT INJECT\]|\[METRICS DUMP -|\[ISOLATION\]|\[SELF-PROOF( REPORT)?\
 
 ```bash
 # 默认：bazel、xqyun-32c32g、MsetNtxSmallObj、LOG_MONITOR_MS=8000、拉 worker*/log + client
-bash vibe-coding-files/scripts/testing/verify/run_kv_rw_metrics_remote_capture.sh
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_kv_rw_metrics_remote_capture.sh
 
 # 仅远端已有树：SKIP_RSYNC=1；纯 CMake：BUILD_BACKEND=cmake
-# SKIP_RSYNC=1 BUILD_BACKEND=cmake bash vibe-coding-files/scripts/testing/verify/run_kv_rw_metrics_remote_capture.sh
+# SKIP_RSYNC=1 BUILD_BACKEND=cmake bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_kv_rw_metrics_remote_capture.sh
 ```
 
 产物：`results/kv_rw_metrics_<UTC>/` 下的 `ds_st_full.log`、`grep_metrics_summary.txt`（仅父日志）、`grep_metrics_summary_children.txt`（子目录 tar 后）、`cluster_logs/`、`summary.txt`（若存在 `summarize_observability_log.sh`）。一次真实跑法的说明与空 grep 排查见样例目录 [`../../results/kv_rw_metrics_20260418_160823/OBSERVABILITY.md`](../../results/kv_rw_metrics_20260418_160823/OBSERVABILITY.md)。
@@ -323,8 +323,8 @@ zmq_rpc_deserialize_latency,count=+5000,avg=8us,max=60us
 
 **故障注入验证**（至少通过一组）：
 
-- [ ] 执行 `bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh --remote`，`Mandatory RESULT: X matched | 0 missing`
-- [ ] 执行 `bash vibe-coding-files/scripts/testing/verify/validate_urma_tcp_observability_logs.sh <log-dir>`，`URMA_NEED_CONNECT count > 0` 且 1002 前缀命中 ≥ 3 种
+- [ ] 执行 `bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh --remote`，`Mandatory RESULT: X matched | 0 missing`
+- [ ] 执行 `bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/validate_urma_tcp_observability_logs.sh <log-dir>`，`URMA_NEED_CONNECT count > 0` 且 1002 前缀命中 ≥ 3 种
 
 **自证清白**（性能场景）：
 

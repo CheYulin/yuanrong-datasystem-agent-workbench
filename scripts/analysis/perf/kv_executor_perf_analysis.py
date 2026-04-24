@@ -16,7 +16,7 @@ def _vibe_coding_root() -> Path:
         if (p / "lib" / "datasystem_root.py").is_file():
             return p.parent
         p = p.parent
-    raise RuntimeError("Could not find vibe-coding-files root (scripts/lib marker missing)")
+    raise RuntimeError("Could not find yuanrong-datasystem-agent-workbench root (scripts/lib marker missing)")
 
 
 _VIBE_ROOT = _vibe_coding_root()
@@ -38,7 +38,7 @@ def parse_args():
     p.add_argument(
         "--output-dir",
         default=str(_DEFAULT_PERF_OUT),
-        help="Directory for csv and figures (default: workspace/observability/perf under vibe-coding-files).",
+        help="Directory for csv and figures (default: workspace/observability/perf under yuanrong-datasystem-agent-workbench).",
     )
     return p.parse_args()
 

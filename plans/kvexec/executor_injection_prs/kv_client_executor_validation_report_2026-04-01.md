@@ -5,13 +5,13 @@
 Quick one-command entry:
 
 ```bash
-bash /home/t14s/workspace/git-repos/vibe-coding-files/scripts/verify/validate_kv_executor.sh
+bash /home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/scripts/verify/validate_kv_executor.sh
 ```
 
 Optional: pass custom build directory:
 
 ```bash
-bash /home/t14s/workspace/git-repos/vibe-coding-files/scripts/verify/validate_kv_executor.sh /path/to/build
+bash /home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/scripts/verify/validate_kv_executor.sh /path/to/build
 ```
 
 1. Go to build directory:

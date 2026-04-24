@@ -32,10 +32,10 @@ KEYS_PER_CLIENT = 100
 VALUE_SIZE_LIST = [512 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024]  # 0.5MB, 2MB, 8MB
 ETCD_PORT = 2379
 ETCD_DATA_DIR = "/tmp/etcd-data-smoke"
-LOG_BASE = Path("/root/workspace/git-repos/vibe-coding-files/results")
-SCRIPT_DIR = Path("/root/workspace/git-repos/vibe-coding-files/scripts")
+LOG_BASE = Path("/root/workspace/git-repos/yuanrong-datasystem-agent-workbench/results")
+SCRIPT_DIR = Path("/root/workspace/git-repos/yuanrong-datasystem-agent-workbench/scripts")
 PYTHON_BIN = "/root/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/bin/python3.11"
-DS_HOME = "/root/workspace/git-repos/vibe-coding-files/datasystem"
+DS_HOME = "/root/workspace/git-repos/yuanrong-datasystem-agent-workbench/datasystem"
 # libds_client_py.so lives in uv cache (accessible from main mount namespace)
 LD_PRELOAD = "/root/.cache/uv/archive-v0/-X94UpqFRUv-WlFmY9UF-/yr/datasystem/lib/libds_client_py.so"
 # uv cache path is accessible across mount namespaces (unlike .venv which is bind-mounted)

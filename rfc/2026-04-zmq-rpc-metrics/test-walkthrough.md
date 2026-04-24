@@ -29,10 +29,10 @@
 
 ```bash
 # 本地：对已保存的完整日志做关键字验收
-bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh ./zmq_fault.log
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh ./zmq_fault.log
 
 # 远端直连跑 ds_st + 校验（需本机已配置 ssh）
-bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh --remote
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh --remote
 ```
 
 脚本检查项与下面 §4 四个场景一一对应；**全部 ✓ 且 exit 0** 即表示「关键日志链」完整。
@@ -230,7 +230,7 @@ grep -E "zmq\\.(send|recv|net|gw|evt|io|rpc)" zmq_fault.log
 | `yuanrong-datasystem/tests/st/common/rpc/zmq/zmq_metrics_fault_test.cpp` | 四场景故障注入与 `[FAULT INJECT]` / `[ISOLATION]` 日志 |
 | `yuanrong-datasystem/src/datasystem/common/rpc/zmq/zmq_socket_ref.cpp` | `[ZMQ_RECEIVE_FAILURE_TOTAL]` / `[ZMQ_SEND_FAILURE_TOTAL]` |
 | `yuanrong-datasystem/src/datasystem/common/rpc/zmq/zmq_socket.cpp` | `[ZMQ_RECV_TIMEOUT]` |
-| `vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh` | 日志关键字自动化验收 |
+| `yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh` | 日志关键字自动化验收 |
 
 ---
 

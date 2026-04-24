@@ -1,19 +1,19 @@
-# Agent 开发载体：`vibe-coding-files` 与 `yuanrong-datasystem` 分工
+# Agent 开发载体：`yuanrong-datasystem-agent-workbench` 与 `yuanrong-datasystem` 分工
 
 ## 1. 仓库职责（当前约定）
 
 | 仓库 | 承载内容 |
 |------|-----------|
 | **`yuanrong-datasystem`** | 产品/库**源码**、CMake/Bazel 工程、`build.sh`、与构建强绑定的脚本（如 `scripts/build_thirdparty.sh`、`scripts/modules/`、`stream_cache/` 等）。**不**再存放 KV 验证、锁分析、brpc 引导、URMA 索引等外围自动化脚本。 |
-| **`vibe-coding-files`** | **面向人与 Agent 的开发载体**：可执行脚本（build/perf/tests/examples/coverage/特性验证）、`docs/` 操作说明、`plans/` 分析与计划。脚本通过 `DATASYSTEM_ROOT` / 同级目录解析操作 **datasystem 的 `build/`、`plans/`、`example/`**。 |
+| **`yuanrong-datasystem-agent-workbench`** | **面向人与 Agent 的开发载体**：可执行脚本（build/perf/tests/examples/coverage/特性验证）、`docs/` 操作说明、`plans/` 分析与计划。脚本通过 `DATASYSTEM_ROOT` / 同级目录解析操作 **datasystem 的 `build/`、`plans/`、`example/`**。 |
 
-多根工作区：打开本仓库下的 [`datasystem-dev.code-workspace`](../datasystem-dev.code-workspace)（`vibe-coding-files` + `../yuanrong-datasystem`）。
+多根工作区：打开本仓库下的 [`datasystem-dev.code-workspace`](../datasystem-dev.code-workspace)（`yuanrong-datasystem-agent-workbench` + `../yuanrong-datasystem`）。
 
 ---
 
 ## 2. 本仓库脚本能做什么（概要）
 
-路径均为 **`vibe-coding-files/scripts/`**，按类分子目录（见 [`docs/agent/scripts-map.md`](../docs/agent/scripts-map.md)）：**`build/`**、**`index/`**、**`perf/`**、**`verify/`**，以及共享 **`lib/`**。
+路径均为 **`yuanrong-datasystem-agent-workbench/scripts/`**，按类分子目录（见 [`docs/agent/scripts-map.md`](../docs/agent/scripts-map.md)）：**`build/`**、**`index/`**、**`perf/`**、**`verify/`**，以及共享 **`lib/`**。
 
 | 目的 | 入口 |
 |------|------|
@@ -40,7 +40,7 @@
 Shell 脚本在设置 `SCRIPT_DIR`（脚本所在目录，如 `scripts/verify`）后 `source "${SCRIPT_DIR}/../lib/datasystem_root.sh"`，得到 **`ROOT_DIR` = yuanrong-datasystem 根目录**：
 
 1. `DATASYSTEM_ROOT` 或 `YUANRONG_DATASYSTEM_ROOT`（优先）  
-2. 否则若 **`vibe-coding-files` 根**（`scripts/` 的父目录）的同级存在 **`yuanrong-datasystem`**，则指向该目录  
+2. 否则若 **`yuanrong-datasystem-agent-workbench` 根**（`scripts/` 的父目录）的同级存在 **`yuanrong-datasystem`**，则指向该目录  
 3. 其它回退逻辑见 `lib/datasystem_root.sh`
 
 同类目录内链式调用使用 **`${SCRIPT_DIR}/...`**；跨类（如 verify 调 build）使用 **`${SCRIPT_DIR}/../build/...`**。
@@ -80,7 +80,7 @@ python3 scripts/index/refresh_urma_index_db.py
 
 `plans/` 下较早文档可能仍写「在 **yuanrong-datasystem** 根目录执行 `scripts/xxx`」。脚本已迁出后，应理解为：
 
-- **`vibe-coding-files/scripts/<类>/xxx`**（如 `scripts/verify/validate_kv_executor.sh`），或  
-- 在 datasystem 根目录时使用 **`../vibe-coding-files/scripts/<类>/xxx`**（按实际克隆路径调整）。
+- **`yuanrong-datasystem-agent-workbench/scripts/<类>/xxx`**（如 `scripts/verify/validate_kv_executor.sh`），或  
+- 在 datasystem 根目录时使用 **`../yuanrong-datasystem-agent-workbench/scripts/<类>/xxx`**（按实际克隆路径调整）。
 
 必要时设置 **`DATASYSTEM_ROOT`**。

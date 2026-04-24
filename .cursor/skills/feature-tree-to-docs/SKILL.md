@@ -10,7 +10,7 @@ description: >-
 
 # 特性树 → docs（本仓库约定）
 
-## 固定路径（相对 `vibe-coding-files/` 根）
+## 固定路径（相对 `yuanrong-datasystem-agent-workbench/` 根）
 
 | 角色 | 路径 |
 |------|------|

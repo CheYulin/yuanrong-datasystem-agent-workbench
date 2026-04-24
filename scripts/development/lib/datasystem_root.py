@@ -1,4 +1,4 @@
-"""Resolve yuanrong-datasystem repo root when scripts live under vibe-coding-files."""
+"""Resolve yuanrong-datasystem repo root when scripts live under yuanrong-datasystem-agent-workbench."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def scripts_root_from_here(caller_file: str | Path) -> Path:
-    """Return ``.../vibe-coding-files/scripts`` containing ``lib/datasystem_root.py``."""
+    """Return ``.../yuanrong-datasystem-agent-workbench/scripts`` containing ``lib/datasystem_root.py``."""
     p = Path(caller_file).resolve().parent
     while p != p.parent:
         if (p / "lib" / "datasystem_root.py").is_file():

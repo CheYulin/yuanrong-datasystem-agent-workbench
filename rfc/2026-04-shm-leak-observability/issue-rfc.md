@@ -4,7 +4,7 @@
 
 ### 现场触发
 
-2026-04-19 `kv2-jingpai-1` worker 出现 OOM：`shm.memUsage` 在 100 秒内从 3.58 GB 涨到 37.5 GB（`rate=0.999`），同期 `OBJECT_COUNT` 从 438 降到 37。详细分析见 [`vibe-coding-files/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)。
+2026-04-19 `kv2-jingpai-1` worker 出现 OOM：`shm.memUsage` 在 100 秒内从 3.58 GB 涨到 37.5 GB（`rate=0.999`），同期 `OBJECT_COUNT` 从 438 降到 37。详细分析见 [`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)。
 
 定位结论：**元数据已被 `objectTable_->Erase` 删除，但物理 shm 仍被 `memoryRefTable_` 钉着**（含 user-pin ref / `ShmOwner` 聚合 / Get 路径未释 ref / 被动缩容切 standby 后 client 主动 `memoryRefCount_.Clear()` 等多个原因叠加）。
 

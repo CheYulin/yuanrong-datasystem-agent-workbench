@@ -26,7 +26,7 @@
 
 ### 现场触发
 
-2026-04-19，worker `kv2-jingpai-1` 出现 OOM：`shm.memUsage` 100 s 内从 **3.58 GB → 37.5 GB**（rate=0.999），同期 `OBJECT_COUNT` 从 **438 → 37**。这条"OBJECT_COUNT 反向于 OBJECT_SIZE"曲线是**元数据已删但物理 shm 仍被 `memoryRefTable_` 钉住**的经典签名（详见 [`vibe-coding-files/bugfix/2026-04-19-worker-shm-oom-问题定位.md §3.2 d`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)）。
+2026-04-19，worker `kv2-jingpai-1` 出现 OOM：`shm.memUsage` 100 s 内从 **3.58 GB → 37.5 GB**（rate=0.999），同期 `OBJECT_COUNT` 从 **438 → 37**。这条"OBJECT_COUNT 反向于 OBJECT_SIZE"曲线是**元数据已删但物理 shm 仍被 `memoryRefTable_` 钉住**的经典签名（详见 [`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md §3.2 d`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)）。
 
 ### 既有 metric（PR #584/#586/#588 之后）的盲区
 
@@ -158,11 +158,11 @@
 
 ## 测试与脚本/文档交付
 
-- 脚本：`vibe-coding-files/scripts/testing/verify/run_shm_leak_metrics_remote.sh`
+- 脚本：`yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_shm_leak_metrics_remote.sh`
   - 一键远端 build + UT + 大文件清理 + 结果归档
   - 支持 `BUILD_BACKEND=bazel|cmake`、`BAZEL_UT`、`GTEST_FILTER` 覆盖
   - 自带 OOM-aware 重试 + 第三方库 `DS_OPENSOURCE_DIR` 缓存
-- 文档：`vibe-coding-files/rfc/2026-04-shm-leak-observability/`
+- 文档：`yuanrong-datasystem-agent-workbench/rfc/2026-04-shm-leak-observability/`
   - `README.md` — 状态 + 三阶段索引
   - `design.md` — 完整方案（设计约束 / 18 条 metric 详表 / 决策表 / 分阶段实施）
   - `issue-rfc.md` — Issue / RFC 文案
@@ -186,8 +186,8 @@
 
 ## 关联
 
-- RFC：[`vibe-coding-files/rfc/2026-04-shm-leak-observability/`](../../rfc/2026-04-shm-leak-observability/README.md)
-- 现场分析：[`vibe-coding-files/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
+- RFC：[`yuanrong-datasystem-agent-workbench/rfc/2026-04-shm-leak-observability/`](../../rfc/2026-04-shm-leak-observability/README.md)
+- 现场分析：[`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
 - 复用框架：PR #584（lightweight metrics framework） + PR #586（KvMetricId 体系）
 - 关联 PR：本组 PR **不依赖**任何尚未合入的提交
 

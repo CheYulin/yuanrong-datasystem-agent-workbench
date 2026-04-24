@@ -1,6 +1,6 @@
 # Claude Code Entry
 
-This is the **vibe-coding-files** companion repository for **yuanrong-datasystem** (Open Yuanrong DataSystem). Source code lives in the sibling repo; this repo carries scripts, docs, plans, and Agent workflows.
+This is the **yuanrong-datasystem-agent-workbench** companion repository for **yuanrong-datasystem** (Open Yuanrong DataSystem). Source code lives in the sibling repo; this repo carries scripts, docs, plans, and Agent workflows.
 
 ## Quick Start
 

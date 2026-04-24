@@ -398,7 +398,7 @@ cd build && ./tests/st/ds_st --gtest_filter='ZmqMetricsFaultTest.*' --alsologtos
 ### 9.2 日志脚本验收
 
 ```bash
-bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh /path/to/ds_st_zmq_fault.log
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh /path/to/ds_st_zmq_fault.log
 ```
 
 **本次跑出的摘要**（本地保存的 `/tmp/zmq_fault_injection_run.log`）：
@@ -461,7 +461,7 @@ echo "=== RUN ST: ZmqMetricsFaultTest ==="
 ### 10.5 日志脚本验收（针对本次完整复跑日志）
 
 ```bash
-bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh <full-rerun-log>
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh <full-rerun-log>
 ```
 
 **关键结果**：
@@ -572,7 +572,7 @@ ssh xqyun-32c32g 'cd /root/workspace/git-repos/yuanrong-datasystem && \
   cat bazel-testlogs/tests/st/common/rpc/zmq/zmq_metrics_fault_test/test.log' \
   > /tmp/zmq_metrics_fault_test.latest.log
 
-bash vibe-coding-files/scripts/testing/verify/verify_zmq_fault_injection_logs.sh \
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/verify_zmq_fault_injection_logs.sh \
   /tmp/zmq_metrics_fault_test.latest.log
 ```
 
