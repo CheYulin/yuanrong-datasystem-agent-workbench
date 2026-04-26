@@ -3,12 +3,25 @@
 DataSystem Smoke Test
 - 1 etcd
 - 4 workers (31501~31504) by default
-- Few client subprocesses (default: 2 tenants x 2 clients) — override with --tenants / --clients-per-tenant
-- Cross-tenant reads trigger remote worker pulls
+- **Cross-worker traffic**: by default, KVClient uses `enable_cross_node_connection=True` and each
+  (tenant, client) picks a **round-robin entry worker port** so requests often land on a non-primary
+  worker and follow redirect / worker↔worker paths (helps worker Get breakdown + remote ZMQ in logs).
+  Use `--no-cross-node` to force single-hop local routing only.
+- Cross-tenant read loop (default: long enough for ZMQ histogram **count** to reach --min-zmq-metric-count)
 - Value sizes: 0.5MB (default; optional multi-size in template)
+- On exit: **0** only if clients succeed **and** all 7 ZMQ flow metrics meet min histogram count
+  (parsing `count=` from metrics_summary JSON in logs; tiny counts are rejected).
 
 Usage:
-  python3 run_smoke.py [--workers <n>] [--tenants <n>] [--clients-per-tenant <n>] [--read-loop-sec <n>]
+  python3 run_smoke.py [--workers <n>] [--tenants <n>] [--clients-per-tenant <n>] \\
+      [--read-loop-sec <n>] [--keys <n>] [--min-zmq-metric-count <n>] \\
+      [--log-monitor-interval-ms <n>]
+
+Quick wall-clock ~30s (fewer RPCs; lower ZMQ gate): e.g.
+  --read-loop-sec 12 --keys 80 --tenants 2 --clients-per-tenant 2 --min-zmq-metric-count 5
+
+Metrics JSON: workers/clients get --log_monitor true; more frequent = more metrics_summary lines in
+glog (default interval 2000ms). Raise --read-loop-sec if the last JSON is still missing (need >= 1 tick).
 
 Paths are auto-discovered relative to this script's location.
 """
@@ -90,23 +103,33 @@ REQUIRED_ZMQ_FLOW_METRICS = [
     "ZMQ_RPC_E2E_LATENCY",
     "ZMQ_RPC_NETWORK_LATENCY",
 ]
+# Min histogram `count` (from metrics_summary JSON lines like count=NNN,avg_us=...) for each
+# of the 7 flow metrics. Too low = flaky / not a real E2E acceptance.
+MIN_ZMQ_METRIC_COUNT = 50
 
 # ============ Config ============
 WORKER_PORTS = [31501, 31502, 31503, 31504]
 WORKER_NUMS = 4
-# Fewer default clients and shorter work phase → faster smoke; scale up with CLI.
-NUM_TENANTS = 2
+# Defaults tuned for **statistically meaningful** ZMQ samples (not a 15s quick check).
+NUM_TENANTS = 3
 CLIENTS_PER_TENANT = 2
-KEYS_PER_CLIENT = 200
-# Cross-tenant read loop duration (seconds); lower = faster run, fewer RPC samples
-READ_LOOP_SEC = 15
+KEYS_PER_CLIENT = 400
+# Cross-tenant read loop: primary driver of RPC count for histograms
+READ_LOOP_SEC = 120
+# How many times to scan `sample` keys per while-loop iteration (amplifies get RPCs / sec)
+INNER_GET_PASS_REPEAT = 3
 # Cap lines printed per metric in metrics_summary.txt (parsing may still collect more; trim at write)
 MAX_METRIC_LINES_PER_NAME = 8
-# metrics::Tick() / LogSummary() cadence (replaces gflag default 10s in smoke runs)
-LOG_MONITOR_INTERVAL_MS = 5000
+# metrics::Tick() / LogSummary() cadence (replaces gflag default 10s in smoke runs).
+# 2000ms: enough cycles in short read-loop runs so glog is likely to show metrics_summary.
+LOG_MONITOR_INTERVAL_MS = 2000
+# After client deletes KVClient: wait for last metrics JSON in glog (>= one tick + IO); overridden in main().
+CLIENT_POST_READ_FLUSH_SLEEP_SEC = 8
 VALUE_SIZE_LIST = [512 * 1024]  # 0.5MB only
 ETCD_PORT = 2379
 ETCD_DATA_DIR = "/tmp/etcd-data-smoke"
+# Let client follow hash-ring to other workers (default on). Set False via --no-cross-node.
+ENABLE_CROSS_NODE = True
 
 # ============ Environment Discovery ============
 def find_python_bin():
@@ -355,7 +378,14 @@ def stop_workers():
 
 # ============ Client ============
 def client_task(tenant_id, client_id, worker_ports, log_dir):
-    port = random.choice(worker_ports)
+    global ENABLE_CROSS_NODE
+    # Spread entry points across workers (not random): improves chance key primary != this worker.
+    n_ports = len(worker_ports)
+    port = worker_ports[(tenant_id * CLIENTS_PER_TENANT + client_id) % n_ports]
+    log(
+        f"  client T{tenant_id}C{client_id}: entry 127.0.0.1:{port} "
+        f"enable_cross_node={ENABLE_CROSS_NODE}"
+    )
     log_file = log_dir / f"client_t{tenant_id}_c{client_id}.log"
     # C++ glog + metrics_summary land under GOOGLE_LOG_DIR, not in Python stdout.
     glog_dir = log_dir / f"glog_t{tenant_id}_c{client_id}"
@@ -380,7 +410,12 @@ PORT = {port}
 KEYS = {KEYS_PER_CLIENT}
 VALUE_SIZES = {sizes_json}
 
-client = KVClient(host="127.0.0.1", port=PORT)
+client = KVClient(
+    host="127.0.0.1",
+    port=PORT,
+    connect_timeout_ms=60000,
+    enable_cross_node_connection={ENABLE_CROSS_NODE},
+)
 try:
     client.init()
 except Exception as e:
@@ -397,7 +432,7 @@ except Exception as e:
     print(f"WRITE ERROR: {{e}}", flush=True)
     sys.exit(1)
 
-# Cross-tenant reads (loop for 30-60 seconds)
+# Cross-tenant reads (duration ~= READ_LOOP_SEC from smoke driver)
 import time
 all_other_keys = [
     f"tenant_{{t}}_client_{{c}}_key_{{i}}"
@@ -414,16 +449,20 @@ else:
 
 start_time = time.time()
 loop_count = 0
+_ok_total = 0
+_repeat = {INNER_GET_PASS_REPEAT}
 while time.time() - start_time < {READ_LOOP_SEC}:
     ok, fail = 0, 0
-    for key in sample:
-        try:
-            r = client.get_buffers([key])
-            ok += 1 if r and r[0] else 0
-        except:
-            fail += 1
+    for _r in range(_repeat):
+        for key in sample:
+            try:
+                r = client.get_buffers([key])
+                ok += 1 if r and r[0] else 0
+            except:
+                fail += 1
+    _ok_total += ok
     loop_count += 1
-print(f"[T{{TENANT}}C{{CLIENT}}] Remote read: {{ok}} ok, {{fail}} fail, loops={{loop_count}}", flush=True)
+print(f"[T{{TENANT}}C{{CLIENT}}] Remote read: last_iter ok={{ok}} fail={{fail}}, loops={{loop_count}}, total_ok={{_ok_total}}", flush=True)
 
 # Local read
 local_ok = sum(1 for k in my_keys[:10] if client.get_buffers([k]) and client.get_buffers([k])[0])
@@ -435,8 +474,8 @@ try:
   gc.collect()
 except Exception as e:
   print(f"SHUTDOWN HINT: {{e}}", flush=True)
-# Async glog/buffer: give time for metrics line to land in ds_client*.INFO.log
-time.sleep(2)
+# Wait for last metrics_summary JSON (log_monitor interval) to flush to glog
+time.sleep({CLIENT_POST_READ_FLUSH_SLEEP_SEC})
 print(f"[T{{TENANT}}C{{CLIENT}}] DONE", flush=True)
 """
 
@@ -453,6 +492,9 @@ print(f"[T{{TENANT}}C{{CLIENT}}] DONE", flush=True)
     # Wheel / embedded client may not enable metrics JSON unless gflags are set; use same
     # 5s cadence as workers (global default in res_metric_collector.cpp is 10s if unset).
     _lim = str(LOG_MONITOR_INTERVAL_MS)
+    # C++ Logging::InitClientAdvancedConfig() reads this (not GFLAGS_*). Inherited env
+    # may set false and suppress metrics_summary JSON; force on for the smoke client.
+    env["DATASYSTEM_LOG_MONITOR_ENABLE"] = "true"
     env["GFLAGS_log_monitor"] = "true"
     env["GFLAGS_log_monitor_interval_ms"] = _lim
     # C++: KVClient::Init() → ApplyDatasystemSmokeClientLogMonitorFromEnv() reads this.
@@ -623,7 +665,41 @@ def parse_zmq_metrics(log_dir):
 
     return {k: v for k, v in results.items() if v}
 
-def write_metrics_summary(log_dir, metrics_data):
+
+def _max_histogram_count_from_occurrences(occurrences):
+    """Best `count=NNN` from metrics_summary JSON lines; 0 if only regex/diag lines."""
+    best = 0
+    for _, val in occurrences:
+        m = re.search(r"count=(\d+)", str(val))
+        if m:
+            best = max(best, int(m.group(1), 10))
+    return best
+
+
+def validate_zmq_flow_metrics(metrics_data, min_count):
+    """
+    E2E acceptance: each of the 7 flow histograms must have been updated at least
+    `min_count` times (LogSummary JSON: count=...). Single-digit or missing counts
+    are treated as FAIL.
+    """
+    if not isinstance(metrics_data, dict):
+        metrics_data = {}
+    errors = []
+    for name in REQUIRED_ZMQ_FLOW_METRICS:
+        occ = metrics_data.get(name) or []
+        if not occ:
+            errors.append(f"{name}: MISSING (no log line)")
+            continue
+        mc = _max_histogram_count_from_occurrences(occ)
+        if mc < min_count:
+            errors.append(
+                f"{name}: histogram count={mc} < min {min_count} "
+                f"(increase --read-loop-sec / --keys / clients; check metrics JSON in glog)"
+            )
+    return (len(errors) == 0, errors)
+
+
+def write_metrics_summary(log_dir, metrics_data, min_count):
     """Write ZMQ metrics summary to metrics_summary.txt."""
     lines = [
         "=" * 60,
@@ -653,22 +729,26 @@ def write_metrics_summary(log_dir, metrics_data):
                 if key not in seen:
                     lines.append(f"  {val}  (from {fname})")
                     seen.add(key)
-        lines.append("\nValidation checklist (non-zero evidence):")
+        lines.append("\nPer-metric max histogram count= (from metrics_summary JSON):")
         for metric in REQUIRED_ZMQ_FLOW_METRICS:
             occurrences = metrics_data.get(metric, [])
-            nonzero = False
-            for _, val in occurrences:
-                numbers = [int(x) for x in re.findall(r"\d+", val)]
-                if any(x > 0 for x in numbers):
-                    nonzero = True
-                    break
-            status = "PASS" if nonzero else "MISSING_OR_ZERO"
-            lines.append(f"  {metric}: {status}")
+            mc = _max_histogram_count_from_occurrences(occurrences)
+            lines.append(f"  {metric}: max_count={mc}")
+
+    passed, err_list = validate_zmq_flow_metrics(metrics_data, min_count)
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append(f"ZMQ flow metrics gate (min histogram count = {min_count})")
+    lines.append("=" * 60)
+    lines.append("RESULT: PASS" if passed else "RESULT: FAIL")
+    if not passed:
+        for e in err_list:
+            lines.append(f"  {e}")
 
     summary = "\n".join(lines) + "\n"
     out_path = log_dir / "metrics_summary.txt"
     out_path.write_text(summary)
-    log(f"ZMQ metrics summary written to metrics_summary.txt")
+    log(f"ZMQ metrics summary written to metrics_summary.txt ({'PASS' if passed else 'FAIL'})")
 
     # Also print key metrics to stdout
     log("\n=== ZMQ Metrics (sample) ===")
@@ -679,7 +759,9 @@ def write_metrics_summary(log_dir, metrics_data):
             uniq_vals = list(dict.fromkeys(v for _, v in occurrences))
             log(f"  {name}: {', '.join(uniq_vals[:3])}")
 
-    return out_path
+    if not passed:
+        log("ZMQ flow metrics gate FAILED — see metrics_summary.txt")
+    return out_path, passed
 
 # ============ Post-process ============
 def collect_and_summarize(log_dir, workers):
@@ -715,7 +797,11 @@ def collect_and_summarize(log_dir, workers):
         "tenants": NUM_TENANTS,
         "clients_per_tenant": CLIENTS_PER_TENANT,
         "keys_per_client": KEYS_PER_CLIENT,
-        "value_sizes": ["0.5MB", "2MB", "8MB"],
+        "value_sizes": ["0.5MB (default batch)"],
+        "read_loop_sec": READ_LOOP_SEC,
+        "inner_get_pass_repeat": INNER_GET_PASS_REPEAT,
+        "min_zmq_metric_count": MIN_ZMQ_METRIC_COUNT,
+        "enable_cross_node_connection": ENABLE_CROSS_NODE,
         "worker_binary": WORKER_BIN,
         "python_bin": PYTHON_BIN,
         "ds_root": str(DS_ROOT),
@@ -725,10 +811,17 @@ def collect_and_summarize(log_dir, workers):
 
     # Parse and write ZMQ metrics
     log("=== Parsing ZMQ metrics ===")
-    zmq_data = parse_zmq_metrics(log_dir)
-    write_metrics_summary(log_dir, zmq_data)
+    time.sleep(3)
+    zmq_data = parse_zmq_metrics(log_dir) or {}
+    _, zmq_ok = write_metrics_summary(log_dir, zmq_data, MIN_ZMQ_METRIC_COUNT)
 
     log(f"Results at {log_dir}")
+    return zmq_ok
+
+def _client_subprocess_wait_seconds():
+    """mset + long read loop + glog flush; avoid false TIMEOUT on loaded hosts."""
+    return max(1200, READ_LOOP_SEC * 8 + max(1, KEYS_PER_CLIENT) * 4)
+
 
 # ============ Main test ============
 def run_smoke_test(log_dir):
@@ -755,18 +848,19 @@ def run_smoke_test(log_dir):
             time.sleep(0.3)
 
     # 4. Wait for clients
-    log("=== Step 4: Waiting for clients ===")
+    _wait = _client_subprocess_wait_seconds()
+    log(f"=== Step 4: Waiting for clients (timeout {_wait}s) ===")
     all_ok = True
     for tenant_id, client_id, proc, lf in clients:
         try:
-            proc.wait(timeout=120)
+            proc.wait(timeout=_wait)
             status = "OK" if proc.returncode == 0 else f"EXIT={proc.returncode}"
             log(f"  T{tenant_id}C{client_id}: {status}")
             if proc.returncode != 0:
                 all_ok = False
         except subprocess.TimeoutExpired:
             proc.kill()
-            log(f"  T{tenant_id}C{client_id}: TIMEOUT")
+            log(f"  T{tenant_id}C{client_id}: TIMEOUT (raise --read-loop-sec or timeout budget)")
             all_ok = False
 
     if not all_ok:
@@ -777,14 +871,16 @@ def run_smoke_test(log_dir):
     stop_workers()
     time.sleep(1)
     log("=== Step 6-7: Collecting logs & summarizing ===")
-    collect_and_summarize(log_dir, workers)
+    zmq_ok = collect_and_summarize(log_dir, workers)
 
-    return log_dir, workers, etcd_proc
+    return log_dir, workers, etcd_proc, all_ok, zmq_ok
 
 # ============ Entry ============
 def main():
     global WORKER_NUMS, NUM_TENANTS, CLIENTS_PER_TENANT, WORKER_PORTS
-    global KEYS_PER_CLIENT, READ_LOOP_SEC
+    global KEYS_PER_CLIENT, READ_LOOP_SEC, MIN_ZMQ_METRIC_COUNT, INNER_GET_PASS_REPEAT
+    global LOG_MONITOR_INTERVAL_MS, CLIENT_POST_READ_FLUSH_SLEEP_SEC
+    global ENABLE_CROSS_NODE
     global PYTHON_BIN, YR_SITE_PACKAGES, LD_PRELOAD, WORKER_BIN
 
     # 1. Parse args FIRST (--help exits here before binary discovery)
@@ -807,6 +903,35 @@ def main():
         default=KEYS_PER_CLIENT,
         help=f"Keys per client for mset phase (default: {KEYS_PER_CLIENT})",
     )
+    parser.add_argument(
+        "--min-zmq-metric-count",
+        type=int,
+        default=MIN_ZMQ_METRIC_COUNT,
+        help=(
+            f"Min histogram `count` (from metrics JSON) for each of the 7 ZMQ flow metrics "
+            f"(default: {MIN_ZMQ_METRIC_COUNT})"
+        ),
+    )
+    parser.add_argument(
+        "--inner-get-repeat",
+        type=int,
+        default=INNER_GET_PASS_REPEAT,
+        help=f"Get passes per read-loop iteration (default: {INNER_GET_PASS_REPEAT})",
+    )
+    parser.add_argument(
+        "--log-monitor-interval-ms",
+        type=int,
+        default=LOG_MONITOR_INTERVAL_MS,
+        help=(
+            f"Interval for metrics::Tick/LogSummary on workers and Python clients in ms "
+            f"(default: {LOG_MONITOR_INTERVAL_MS}, min 500). Lower = more metrics_summary lines in glog."
+        ),
+    )
+    parser.add_argument(
+        "--no-cross-node",
+        action="store_true",
+        help="Disable KVClient enable_cross_node_connection (no cross-worker redirect / follow).",
+    )
     args = parser.parse_args()
 
     # 2. Apply CLI overrides to globals
@@ -815,7 +940,14 @@ def main():
     CLIENTS_PER_TENANT = args.clients_per_tenant
     READ_LOOP_SEC = max(1, args.read_loop_sec)
     KEYS_PER_CLIENT = max(1, args.keys)
+    MIN_ZMQ_METRIC_COUNT = max(1, args.min_zmq_metric_count)
+    INNER_GET_PASS_REPEAT = max(1, args.inner_get_repeat)
+    LOG_MONITOR_INTERVAL_MS = min(3_000_000, max(500, int(args.log_monitor_interval_ms)))
+    # Wait long enough for at least one full interval after last client work (glog may lag at shutdown).
+    _sec = (LOG_MONITOR_INTERVAL_MS + 999) // 1000
+    CLIENT_POST_READ_FLUSH_SLEEP_SEC = max(8, _sec * 2 + 2)
     WORKER_PORTS = WORKER_PORTS[:WORKER_NUMS]
+    ENABLE_CROSS_NODE = not args.no_cross_node
 
     # 3. Discover binaries and paths (fail here if not found)
     PYTHON_BIN = find_python_bin()
@@ -834,7 +966,10 @@ def main():
     log(
         f"Workers: {WORKER_NUMS}, Tenants: {NUM_TENANTS}, "
         f"Clients/tenant: {CLIENTS_PER_TENANT}, read_loop_s: {READ_LOOP_SEC}, "
-        f"keys/client: {KEYS_PER_CLIENT}"
+        f"keys/client: {KEYS_PER_CLIENT}, min_zmq_count: {MIN_ZMQ_METRIC_COUNT}, "
+        f"inner_get_repeat: {INNER_GET_PASS_REPEAT}, "
+        f"log_monitor_ms: {LOG_MONITOR_INTERVAL_MS}, post_client_flush_s: {CLIENT_POST_READ_FLUSH_SLEEP_SEC}, "
+        f"enable_cross_node: {ENABLE_CROSS_NODE}"
     )
 
     cleanup_all()
@@ -842,13 +977,17 @@ def main():
 
     workers = []
     etcd_proc = None
+    clients_all_ok = True
+    zmq_metrics_ok = True
 
     try:
-        log_dir, workers, etcd_proc = run_smoke_test(log_dir)
+        log_dir, workers, etcd_proc, clients_all_ok, zmq_metrics_ok = run_smoke_test(log_dir)
     except Exception as e:
         log(f"SMOKE TEST FAILED: {e}")
         import traceback
         traceback.print_exc()
+        clients_all_ok = False
+        zmq_metrics_ok = False
     finally:
         if etcd_proc:
             try:
@@ -861,6 +1000,14 @@ def main():
         cleanup_all()
         subprocess.run(["rm", "-rf", ETCD_DATA_DIR], stderr=subprocess.DEVNULL)
         log(f"=== Smoke test DONE. Results at {log_dir} ===")
+
+    exit_code = 0 if (clients_all_ok and zmq_metrics_ok) else 1
+    if exit_code != 0:
+        log(
+            f"Exiting {exit_code} (clients_ok={clients_all_ok}, "
+            f"zmq_flow_metrics_ok={zmq_metrics_ok})"
+        )
+    raise SystemExit(exit_code)
 
 if __name__ == "__main__":
     main()

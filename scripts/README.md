@@ -48,6 +48,7 @@ scripts/
   testing/verify/
   │   ├── smoke/                      # 冒烟测试（< 5 分钟）
   │   │   ├── run_smoke.py           # Python 冒烟入口
+  │   │   ├── harness_zmq_metrics_e2e.sh  # Bazel+whl+run_smoke（ZMQ 分段 metrics E2E）
   │   │   ├── run_smoke_bazel.sh
   │   │   ├── run_smoke_cmake.sh
   │   │   └── run_smoke_remote.sh

@@ -4,6 +4,11 @@
 
 /kind feature（可观测性增强；不改错误码、不改对外接口、不改网络协议）
 
+**与发布分支（0.8.1）落地**
+
+- 变更来源对齐上游 [#706](https://gitcode.com/openeuler/yuanrong-datasystem/pull/706)；以 **cherry-pick 最小化** 为主。
+- 构建与验收取 **Bazel**（`build.sh -b bazel`）+ **Bazel 产出的 whl**；E2E 仅复用 workbench 的 `run_smoke.py`。
+
 ---
 
 **这个 PR 做了什么 / 为什么需要**
