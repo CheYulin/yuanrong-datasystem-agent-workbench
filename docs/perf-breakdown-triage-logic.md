@@ -157,7 +157,7 @@ Batch: URMA_GATHER_MEMSET、URMA_GATHER_WRITE_DO
 
 ## 六、辅助工具与日志
 
-- 从 glog 抽 metrics + 节选 Perf：`scripts/metrics/gen_kv_perf_report.py`（输出示例：`docs/yche-perf-report.md`）。`--ascii-tree` 会在 **metrics_summary 所在行附近** 解析 `[Perf Log]:` 块：图 1 末尾增加 **Perf 关键锚点**，图 2 开头为 **Perf 细化分组树**（与 metrics 两套数据勿混加）；无 Perf 时会有占位说明。
+- 从 glog 抽 metrics + 节选 Perf：[gen_kv_perf_report.py](../scripts/metrics/gen_kv_perf_report.py)（**[脚本使用说明](../scripts/metrics/README.md)**；输出示例：[yche-perf-report.md](yche-perf-report.md)）。`--ascii-tree` 会在 **metrics_summary 所在行附近** 解析 `[Perf Log]:` 块：图 1 末尾增加 **Perf 关键锚点**，图 2 开头为 **Perf 细化分组树**（与 metrics 两套数据勿混加）；无 Perf 时会有占位说明。
 - 同日志混有 `MASTER_*` 与 `WORKER_*` 时，确认是否 **同进程多角色** 或 **日志合并**。
 - **yche.log 类 Perf**：嵌套导致不可加；`ZMQ_NETWORK_TRANSFER_*`、`ZMQ_SVC_TO_ROUTER` 等极大 avg 多属 **tick/时钟异常**。
 
