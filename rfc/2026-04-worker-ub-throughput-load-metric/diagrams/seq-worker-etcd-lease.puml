@@ -1,0 +1,53 @@
+@startuml worker_etcd_lease
+skinparam sequenceMessageAlign center
+title Worker etcd lease and cluster row Put
+
+participant "EtcdClusterManager" as CM
+participant "EtcdStore" as Store
+participant "etcd Lease" as Lease
+participant "etcd KV" as KV
+participant "EtcdKeepAlive" as KA
+
+== start InitKeepAlive ==
+CM -> Store: InitKeepAlive
+Store -> Store: keepAliveValue init
+Store -> Store: LaunchKeepAliveThreads
+
+== lease and first Put ==
+Store -> Store: RunKeepAliveTask
+Store -> Lease: LeaseGrant
+Lease --> Store: leaseId
+Store -> KA: EtcdKeepAlive Init
+Store -> Store: AutoCreate
+Store -> Store: keepAliveValue timestamp
+Store -> KV: PutWithLeaseId
+note right of Store
+  value: timestamp;state;hostId
+  optional: client_count
+end note
+KV --> Store: OK
+
+== lease keepalive stream ==
+loop renew
+  KA -> Lease: LeaseKeepAlive
+  Lease --> KA: renew TTL
+end
+note right of KA: stream does not update key value. use explicit Put to change value
+
+== UpdateNodeState ==
+CM -> Store: UpdateNodeState
+Store -> Store: copy and set state
+Store -> KV: PutWithLeaseId new value
+KV --> Store: OK
+
+== extension client count note ==
+note over Store, KV
+  ClientManager counts clients
+  throttle then Put same lease
+  Client parses GetAll for Po2
+  RemoveClient/Disconnect on Worker also
+  tears down URMA/UB for that C↔W session
+  (see seq-urma-client-worker-lifecycle.puml)
+end note
+
+@enduml

@@ -173,3 +173,65 @@ bazel test //tests/ut/common/rpc:zmq_rpc_queue_latency_test
   1. Tick 名称命名是否合适
   2. Metric 划分是否满足定界需求
   3. 计算位置是否正确
+
+---
+
+## PR #707 合并后：设计 vs 实现 差异清单
+
+> 以下差异基于 `yuanrong-datasystem` master 分支（commit PR #707 合并后）的实际代码。
+
+### 1. `SERVER_EXEC_END` 记录位置
+
+| | 设计（issue-rfc.md） | 实现（PR #707） |
+|--|---------------------|----------------|
+| `SERVER_EXEC_END` 位置 | `WorkerEntryImpl()` SendStatus **之前** | `WorkerEntryImpl()` **返回之后** |
+
+**原因**：`WorkerEntryImpl` 内部调用 `ServiceToClient`，`SERVER_EXEC_END` 必须在调用 `ServiceToClient` 之前记录，才能在 reply meta 中正确追加 tick。
+
+### 2. `SERVER_EXEC_NS` 定义错误（Bug）
+
+| | 设计意图 | 实现（PR #707） |
+|--|---------|----------------|
+| `SERVER_EXEC_NS` | `SERVER_EXEC_END - SERVER_DEQUEUE`（纯业务执行时间） | `SERVER_EXEC_END - SERVER_RECV`（包含 SERVER_QUEUE_WAIT） |
+
+**影响**：`zmq_rpc_network_latency = E2E - SERVER_EXEC_NS` 实际上等于 `E2E - EXEC - QUEUE_WAIT`，不是纯网络耗时。
+
+**修复方案**：`zmq_service.cpp L81` 改为：
+```cpp
+uint64_t serverExecNs = (serverExecEndTs > serverDequeuTs) ? (serverExecEndTs - serverDequeuTs) : 0;
+```
+
+### 3. `NETWORK` 语义不准确
+
+设计说 `NETWORK = E2E - SERVER_EXEC`（纯网络耗时），但由于 Bug #2，实际 `NETWORK` 包含：
+- CLIENT_STUB_SEND 之后的全部时间（request 发送 + 网络传播 + server 处理 + reply 接收）
+
+### 4. offlineRpc 路径 tick 丢失（Bug）
+
+**位置**：`zmq_service.cpp` L1040-1061
+
+当 `offlineRpc = true` 时，`rpc2.first`（不含 `SERVER_SEND`）单独发送。不影响当前 metrics 计算（`RecordServerLatencyMetrics` 在 move 前调用），但 reply meta 诊断数据不完整。
+
+### 5. `GetTotalTicksTime` 假设
+
+```cpp
+// zmq_constants.h L72-79
+inline uint64_t GetTotalTicksTime(const MetaPb& meta) {
+    auto n = meta.ticks_size();
+    if (n > 1) {
+        return meta.ticks(n - 1).ts() - meta.ticks(0).ts();  // 假设 ticks[0]=ENQUEUE
+    }
+    return 0;
+}
+```
+
+正常流程下 `ticks[0]=CLIENT_ENQUEUE`、`ticks[n-1]=CLIENT_RECV` 成立。边界场景需验证。
+
+### 差异影响分析
+
+| 差异 | 严重程度 | 是否影响 metrics 正确性 |
+|------|---------|----------------------|
+| `SERVER_EXEC_END` 位置变更 | 低 | 不影响，语义不变 |
+| `SERVER_EXEC_NS` 包含 QUEUE_WAIT | **高** | `NETWORK` 指标含义不准确 |
+| offlineRpc tick 丢失 | 低 | 不影响 metrics，诊断数据不完整 |
+| `GetTotalTicksTime` 假设 | 低 | 正常流程成立，需边界验证 |

@@ -1,0 +1,80 @@
+@startuml client_init_and_failover_sd
+title Object Client: SD, URMA, and failover
+
+actor Client
+participant "ObjectClientImpl" as OCI
+participant "ServiceDiscovery" as SD
+participant "EtcdStore" as Etcd
+participant "ClientWorker\nRemoteApi" as CWA
+participant "UrmaManager\nprocess-local" as UM
+participant "Worker" as W
+
+== Construct and SD inject ==
+Client -> OCI: ConnectOptions with serviceDiscovery_
+note right of OCI
+  serviceDiscovery_ from ConnectOptions
+  for Init and failover
+end note
+
+== A First connect with SD ==
+Client -> OCI: Init
+OCI -> SD: Init
+SD -> Etcd: CreateTable
+OCI -> SD: SelectWorker
+SD -> Etcd: ObtainWorkers GetAll
+Etcd --> SD: key value list
+SD --> OCI: pick by affinity
+alt same node and remote
+  OCI -> OCI: InitPreferredRemoteFallback
+  OCI -> W: InitClientWorkerConnectAt
+else different path
+  OCI -> OCI: set ipAddress_
+  OCI -> W: InitClientWorkerConnect
+end
+W --> OCI: RegisterClient
+OCI -> CWA: holds worker RPC session\nand heartbeat
+OCI -> CWA: TryFastTransportAfterHeartbeat
+CWA -> CWA: FastTransportHandshake
+CWA -> CWA: InitializeFastTransportManager
+opt if USE_URMA and Urma enabled
+  CWA -> UM: local URMA init / warmup
+  CWA -> CWA: AsyncFirstUrmaHandshake
+  CWA -> W: TryUrmaHandshake (exchange / JFR)
+  W --> CWA: ok or error
+  alt handshake fails
+    CWA -> CWA: FLAGS_enable_urma=false\nfallback TCP
+    CWA -> CWA: optional ScheduleUrmaHandshakeRetry
+  end
+end
+note right of CWA
+  first URMA can finish after heartbeat starts
+  version + stopUrmaHandshakeRetry_ avoid stale retry
+  after new Worker
+end note
+
+== B Failover switch ==
+Client -> OCI: trigger
+OCI -> OCI: SwitchToStandbyWorkerImpl
+OCI -> OCI: GetStandbyWorkersForSwitch
+OCI -> SD: GetAllWorkers
+SD -> Etcd: GetAll cluster
+Etcd --> SD: KeepAlive values
+SD --> OCI: partition filter self
+note right of OCI
+  TrySwitchToCandidateList
+  Po2 may reorder
+  load in KV can lag behind URMA READY
+end note
+OCI -> CWA: Disconnect (RPC if session up)
+CWA -> W: Disconnect
+W -> W: RemoveClient\n+ URMA / UB release on W
+CWA -> CWA: dtor: stopUrmaHandshakeRetry_\nfd recv stop, reset handshake pools
+OCI -> W: TrySwitchToStandbyWorker\nnew Init, Register on Standby
+W --> OCI: RegisterClient Listen
+OCI -> CWA: new ClientWorker instance
+OCI -> CWA: TryFastTransportAfterHeartbeat
+CWA -> UM: may reuse process UrmaManager
+CWA -> W: URMA path as in A
+OCI -> OCI: CommitStandbySwitch
+
+@enduml

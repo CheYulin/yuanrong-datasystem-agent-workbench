@@ -1,0 +1,48 @@
+@startuml urma_cw_lifecycle
+title USE_URMA: C↔W build, retry, fallback, teardown (conceptual)
+
+participant "ObjectClient\n(entry)" as OC
+participant "ClientWorker\nRemoteApi" as CWA
+participant "UrmaManager" as UM
+participant "Worker" as W
+
+== After RegisterClient and heartbeat ==
+OC -> CWA: TryFastTransportAfterHeartbeat
+CWA -> CWA: FastTransportHandshake
+CWA -> CWA: InitializeFastTransportManager
+CWA -> UM: init local if needed
+UM --> CWA: OK
+CWA -> CWA: AsyncFirstUrmaHandshake
+CWA -> W: TryUrmaHandshake
+W --> CWA: peer info / JFR path
+
+== If first URMA is slow or fails ==
+alt success
+  CWA -> CWA: data path ready (UB/URMA)
+else fail or timeout
+  CWA -> CWA: set FLAGS_enable_urma false\nuse TCP
+  opt retry scheduled
+    loop while not stopUrmaHandshakeRetry_
+      CWA -> CWA: ScheduleUrmaHandshakeRetry
+      CWA -> W: retry handshake
+    end
+  end
+end
+
+== Teardown: normal exit or before switch Worker ==
+CWA -> CWA: stopUrmaHandshakeRetry_ = true
+CWA -> W: Disconnect when possible
+W -> W: RemoveClient, symmetric URMA cleanup
+CWA -> CWA: close socket, join recv thread\nreset urma_handshake pools
+note right of CWA
+  order matters on switch: finish Disconnect/dtor
+  on old API before new RegisterClient + new URMA
+  to avoid overlapping handshakes
+end note
+
+== Process shutdown (rare, separate from one CWA) ==
+OC -> UM: app shutdown path
+UM -> UM: Stop threads, clear maps
+UM -> UM: UrmaUninit, munmap, dl cleanup
+
+@enduml

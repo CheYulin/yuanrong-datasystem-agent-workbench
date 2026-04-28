@@ -33,6 +33,7 @@
 | [2026-04-zmq-rpc-queue-latency/](2026-04-zmq-rpc-queue-latency/README.md) | **Draft** | `common/metrics/kv_metrics.{h,cpp}`：新增 7 个 Histogram metric（`ZMQ_CLIENT_QUEUING_LATENCY`、`ZMQ_CLIENT_STUB_SEND_LATENCY`、`ZMQ_SERVER_QUEUE_WAIT_LATENCY`、`ZMQ_SERVER_EXEC_LATENCY`、`ZMQ_SERVER_REPLY_LATENCY`、`ZMQ_RPC_E2E_LATENCY`、`ZMQ_RPC_NETWORK_LATENCY`）；`zmq_constants.h`：新增 8 个 Tick 常量 |
 | [2026-04-zmq-rpc-metrics-0.8.1/](2026-04-zmq-rpc-metrics-0.8.1/README.md) | **Draft** | 0.8.1 与 PR #706 对齐说明 + Bazel/whl + `harness_zmq_metrics_e2e.sh` 复用 `run_smoke.py` |
 | [2026-04-worker-get-metrics-breakdown/](2026-04-worker-get-metrics-breakdown/README.md) | **Draft** | **性能定位/定界**：[issue-rfc](2026-04-worker-get-metrics-breakdown/issue-rfc.md) / [modification_plan](2026-04-worker-get-metrics-breakdown/modification_plan.md) / [design](2026-04-worker-get-metrics-breakdown/design.md)；`kv_metrics` 增量 + Get 分段；验收：Bazel `metrics_test` + 日志 + [`grep_get_breakdown`](../scripts/metrics/grep_get_latency_breakdown.sh) |
+| [2026-04-worker-ub-throughput-load-metric/](2026-04-worker-ub-throughput-load-metric/README.md) | **Draft** | **切流 + C↔W 连接均衡**：[issue-rfc](2026-04-worker-ub-throughput-load-metric/issue-rfc.md) / [design](2026-04-worker-ub-throughput-load-metric/design.md)；**A** Po2+连接数、[validation-po2](2026-04-worker-ub-throughput-load-metric/validation-po2-client-count.md)；**B** Po2+UB 字节；`CONTEXT.md` |
 
 ---
 
