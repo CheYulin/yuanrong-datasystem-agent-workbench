@@ -391,6 +391,35 @@ if (enableMsgQ_) {
 || `zmq_rpc_network_latency` | 1550 | 2,077,659 | 23,312,492 | Network ✓ |
 
 所有 tick 均已正确记录：`SERVER_RECV` → `SERVER_DEQUEUE` → `SERVER_EXEC_END` → `SERVER_SEND` → `CLIENT_RECV`，`SERVER_EXEC_NS` 有合理值（约 0.5ms）。
+
+---
+
+## Issue #11: `client_stub_send` metric 缺失（CLIENT_STUB_SEND tick 无法传递到 AsyncRead）
+
+### 问题描述
+
+`client_stub_send` metric（`ZMQ_CLIENT_STUB_SEND_LATENCY`）始终为 0。
+
+### 根因分析
+
+对于 `AsyncWrite`/`AsyncRead` 路径：客户端原始 `MetaPb` 中的 ticks 无法传递到响应路径。
+
+### 修复方案
+
+1. `AsyncWriteImpl` 在 `SendMsg` **之前**记录所有 client ticks，并 copy `p.first` 保存到 `AsyncCallBack::clientMeta_`
+2. `AsyncReadImpl` 收到响应后，从 `clientMeta_` 合并 ticks 到响应 MetaPb
+3. `RecordRpcLatencyMetrics` 中，`CLIENT_STUB_SEND = TO_STUB - STUB_SEND`
+
+### 验证结果（2026-04-29）
+
+| Metric | Count | Avg (µs) | Max (µs) |
+|--------|-------|-----------|-----------|
+| `zmq_client_queuing_latency` | 1515 | 239 | 11680 |
+| `zmq_client_stub_send_latency` | **1515** | **237** | **11678** ✓ |
+| `zmq_server_queue_wait_latency` | 1515 | 269 | 12253 |
+| `zmq_server_exec_latency` | 1515 | 236 | 13254 |
+| `zmq_rpc_e2e_latency` | 1515 | 2593 | 25706 |
+
 ## Issue #10：`SERVER_EXEC_NS=0`，server-side metrics 全部缺失（2026-04-29 新增）
 
 **文件**: `src/datasystem/common/rpc/zmq/zmq_server_stream_base.h`

@@ -1,173 +1,166 @@
-@startuml ZMQ RPC Metrics - PR#707 Ground Truth
+@startuml ZMQ RPC Metrics - PR#793 Ground Truth
 !pragma teoz true
 skinparam backgroundColor #FEFEFE
 skinparam actorBorderColor #666666
 skinparam lifelineBorderColor #666666
 skinparam lifelineBackgroundColor #F5F5F5
 
-title **ZMQ RPC Metrics - PR#707 代码实际打点位置**
+title **ZMQ RPC Metrics - PR#793 MetaPb 传递 & Tick 记录机制**
 
 participant "Client Thread" as C <<Client>>
-participant "ZmqStubImpl" as SI <<StubImpl>>
-participant "ZmqStubConnection" as SC <<StubConn>>
-participant "ZmqFrontend" as FE <<Frontend>>
+participant "ZmqStubImpl\nAsyncWriteImpl" as SI <<StubImpl>>
+participant "MsgQue\noutBound queue" as MQ <<MsgQue>>
+participant "MsgQueMgr\nPrefetcher" as PM <<Prefetcher>>
+participant "ZmqFrontend\nSendMsg" as FE <<Frontend>>
 database "Network" as Net
 participant "ZmqService" as S <<Server>>
 participant "WorkerEntry" as W <<Worker>>
-participant "ServerUnaryWriterReaderImpl" as SW <<ServerStream>>
+participant "ServerUnaryWriterReaderImpl\nWrite" as SW <<ServerStream>>
 participant "Business Handler" as H <<Handler>>
+participant "ZmqServerImpl\nServiceToClient" as SImpl <<ServerImpl>>
 
 note across
-  **Tick 定义** (zmq_constants.h)
-  - CLIENT_ENQUEUE: Client stub 入口，消息进入 stub (zmq_stub_impl.h L157)
-  - CLIENT_TO_STUB: 消息进入 frontend 发送队列 (zmq_stub_conn.cpp L403)
-  - CLIENT_SEND: SendAllFrames 完成，zmq_msg_send 返回 (zmq_stub_conn.cpp L124)
-  - CLIENT_RECV: 收到完整 reply (zmq_stub_impl.h L223)
-  - SERVER_RECV: zmq_msg_recv 返回 (zmq_service.cpp L1203)
-  - SERVER_DEQUEUE: 从 worker 队列取出 (zmq_service.cpp L735)
+  **Client Ticks** (zmq_constants.h)
+  - CLIENT_ENQUEUE: 消息放入 outBound queue (zmq_stub_impl.h L167)
+  - CLIENT_STUB_SEND: mQue->SendMsg() 返回后 (zmq_stub_impl.h L169)
+  - CLIENT_DEQUEUE: prefetcher 从队列取出消息 (zmq_msg_queue.h L682)
+  - CLIENT_ZMQ_SEND: zmq_msg_send 成功后 (zmq_msg_queue.h L728)
+
+  **Server Ticks**
+  - SERVER_RECV: zmq_msg_recv 返回后 (zmq_service.cpp L1198)
+  - SERVER_DEQUEUE: 从 worker 队列取出 (zmq_service.cpp L723)
   - SERVER_EXEC_END: 业务 handler 完成 (zmq_server_stream_base.h L374)
-  - SERVER_SEND: reply zmq_msg_send 返回 (zmq_server_stream_base.h L375)
+  - SERVER_ZMQ_SEND: zmq_msg_send 成功后 (zmq_server_impl.cpp L187) ✓ 已实现
+
+  **注意**: TICK_SERVER_SEND 已移除（被 SERVER_ZMQ_SEND 替代）
 end note
 
-== Client: Call Entry ==
+== Client: 发送请求 & MetaPb 构造 ==
 
 C -> SI : rpc_call(req)
 activate C
-note over SI: **Tick: CLIENT_ENQUEUE**\n(zmq_stub_impl.h L157)\nmQue->SendMsg() 之前
+note over SI: 1. 创建 **请求 MetaPb**\n包含 client ticks
+
+SI -> SI : RecordTick(meta, CLIENT_ENQUEUE)
+note over SI: **CLIENT_ENQUEUE** (L167)
+
+SI -> MQ : mQue->SendMsg(p)  // meta 被 moved 到 queue
+note over MQ: 2. **请求 meta 已在 outBound queue**\n**CLIENT_STUB_SEND** (L169)
+
+SI -> SI : clientMeta = meta  // 复制一份用于后续 merge
+note over SI: 3. **复制请求 MetaPb**\n存储在 AsyncCallBack 中
+
 deactivate C
 
-== Client: Queue & Send ==
+== Prefetcher: 异步发送 ==
 
-SI -> SC : SendMsg(p)  // p 被 move
-activate SC
+MQ -> PM : prefetcher 取消息
+activate PM
 
-SC -> FE : SendAllFrames(p, ...)
-activate FE
+note over PM: 4. **CLIENT_DEQUEUE** (L682)\n从队列取出
 
-note over FE: **Tick: CLIENT_TO_STUB**\n(zmq_stub_conn.cpp L403)\nZmqFrontend::SendMsg()\n进入 frontend 发送队列
+PM -> FE : routeFn_(msg)
+FE -> Net : zmq_msg_send()
+note over PM: 5. **CLIENT_ZMQ_SEND** (L728)\n但这个 tick 无法传回给 clientMeta！
 
-FE -> FE : zmq_msg_send()
-' note over FE: **Tick: CLIENT_SEND**\n(zmq_stub_conn.cpp L124)\nZmqStubConnection::SendReply()\nSendAllFrames() 完成后
-
-deactivate FE
-deactivate SC
+deactivate PM
 
 == Network Transport ==
 
-SC --> Net : TCP/UDS
-activate Net
 Net -> S : TCP/UDS
 
-== Server: Receive & Route ==
+== Server: 接收 & 处理 ==
 
 activate S
-note over S: **Tick: SERVER_RECV**\n(zmq_service.cpp L1203)\nzmq_msg_recv 返回后
-
-S -> S : RouteToRegBackend()
+note over S: 6. **SERVER_RECV** (L1198)
 deactivate S
-
-== Server: Worker Dequeue & Execute ==
 
 S -> W : WorkerEntry()
 activate S
-note over S: **Tick: SERVER_DEQUEUE**\n(zmq_service.cpp L735)\nWorkerEntry() 调用前，从队列取出
+note over S: 7. **SERVER_DEQUEUE** (L723)
 
 W -> H : handler(req)
 activate W
 
 H --> W : rsp
 deactivate H
-note over W: **Tick: SERVER_EXEC_END**\n(zmq_server_stream_base.h L374)\nServerUnaryWriterReaderImpl::Write()\n业务逻辑完成后
 
-W -> SW : Write(rsp)  // ServerUnaryWriterReaderImpl
+W -> SW : Write(rsp)
+deactivate W
 activate SW
 
-note over SW: **Tick: SERVER_SEND**\n(zmq_server_stream_base.h L375)\nSendAll() 之前
+note over SW: 8. **SERVER_EXEC_END** (L374)\n业务逻辑完成
 
 deactivate SW
 deactivate S
 
-' == Server: Reply ==
+== Server: 发送回复 & MetaPb 构造 ==
 
-activate S
-S --> Net : TCP/UDS
+note over SImpl: 9. **构造回复 MetaPb**\n使用**请求 MetaPb** (来自 WorkerEntry)
 
-== Client: Receive ==
+SImpl -> SImpl : RecordTick(meta, SERVER_ZMQ_SEND)
+note over SImpl: **SERVER_ZMQ_SEND** (L187)
 
-activate Net
-Net -> SC : TCP/UDS
-activate SC
+SImpl -> SImpl : RecordServerLatencyMetrics(meta)
+note over SImpl: 计算 SERVER_QUEUE_WAIT,\nSERVER_EXEC, SERVER_REPLY
 
-SC -> SI : RecvMsg(rsp)
-activate SI
+SImpl -> SImpl : PushFrontProtobufToFrames(meta, frames)
+note over SImpl: 10. **序列化 meta 到 frames**\nticks 被包含在序列化后的数据中
 
-note over SI: **Tick: CLIENT_RECV**\n(zmq_stub_impl.h L223)\n收到完整 reply 后
-deactivate SI
-deactivate SC
+SImpl -> Net : zmq_msg_send()
 
-SI --> C : rpc_response(rsp)
+== Client: 接收回复 & MetaPb Merge ==
+
+Net -> C : TCP/UDS
+activate C
+
+note over C: 11. **CLIENT_RECV** (zmq_stub_impl.h L238)
+
+C -> C : rsp.first (回复 MetaPb)
+note over C: 12. **回复 meta 包含:**\n- SERVER ticks (RECV, DEQUEUE, EXEC_END, ZMQ_SEND)\n- SERVER_EXEC_NS (计算后的值)\n- 但**没有** CLIENT_ZMQ_SEND！
+
+C -> C : asyncCall->GetClientMeta()
+note over C: 13. 获取存储的 **clientMeta**\n(包含 CLIENT_ENQUEUE, CLIENT_STUB_SEND, CLIENT_DEQUEUE)
+
+C -> C : Merge ticks
+note over C: 14. **合并 clientMeta ticks 到 rsp.first**\n然后计算 E2E/NETWORK metrics
+
 deactivate C
 
-== Metrics 计算位置 ==
-
-box "**Metrics 计算**" #E8F5E9
-participant "M" as M
-end box
-
-note over M
-  **Client 侧 (zmq_stub_impl.h L71-93)**:
-  RecordRpcLatencyMetrics(rsp.first)
-
-  **Server 侧 (zmq_constants.h L95)**:
-  RecordServerLatencyMetrics(meta)
-
-  **打点顺序**:
-  - CLIENT_ENQUEUE → CLIENT_SEND → CLIENT_TO_STUB
-  - SERVER_RECV → SERVER_DEQUEUE → SERVER_EXEC_END → SERVER_SEND
-  - SERVER_SEND → CLIENT_RECV
-end note
-
-== Metrics 公式 (代码实际) ==
+== Metrics 公式 (当前实现) ==
 
 note across
-  **Server 侧 RecordServerLatencyMetrics (zmq_constants.h L95):**
-  - QUEUE_WAIT = DEQUEUE - RECV
-  - EXEC = EXEC_END - DEQUEUE
-  - REPLY = SEND - EXEC_END
-  - SERVER_EXEC_NS = EXEC_END - RECV
+  **Client:**
+  - CLIENT_QUEUING = CLIENT_ZMQ_SEND - CLIENT_ENQUEUE ❌ **MISSING** (CLIENT_ZMQ_SEND 无法获取)
+  - CLIENT_STUB_SEND = CLIENT_DEQUEUE - CLIENT_STUB_SEND ✓
 
-  **Client 侧 RecordRpcLatencyMetrics (zmq_stub_impl.h L71-93):**
-  - QUEUING = TO_STUB - ENQUEUE
-  - STUB_SEND = SEND - TO_STUB
-  - E2E = CLIENT_RECV - CLIENT_ENQUEUE
-  - NETWORK = E2E - SERVER_EXEC_NS
-              = E2E - (EXEC_END - RECV)
-              = E2E - EXEC - QUEUE_WAIT
-              ★ 不等于纯网络时间
+  **Server:**
+  - SERVER_QUEUE_WAIT = SERVER_DEQUEUE - SERVER_RECV ✓
+  - SERVER_EXEC = SERVER_EXEC_END - SERVER_DEQUEUE ✓ (但值偏大，可能需检查)
+  - SERVER_REPLY = SERVER_ZMQ_SEND - SERVER_EXEC_END ✓
+
+  **E2E:**
+  - E2E = CLIENT_RECV - CLIENT_ENQUEUE ✓
+  - NETWORK = E2E - SERVER_EXEC ✓
 end note
 
-== 已修复的 Bug ==
+== 已知问题 ==
 
 note across
-  **Issue #6: CLIENT_SEND tick 在 move 后丢失**
-  位置: zmq_stub_impl.h L159 AsyncWriteImpl
-  原因: RecordTick 在 mQue->SendMsg() 之后调用，SendMsg(p) 将 p move 进去后 p 为空
-  修复: 将 RecordTick 移到 SendMsg 之前
+  **Issue #1: CLIENT_ZMQ_SEND 无法获取**
+  - 原因: SendDirect 在 prefetcher 线程运行，clientMeta 存储在 AsyncWriteImpl 线程
+  - 影响: CLIENT_QUEUING metric MISSING
+  - 状态: 架构限制，待重构
 
-  **Issue #7: SERVER_SEND tick 丢失**
-  位置: zmq_server_stream_base.h L375 ServerUnaryWriterReaderImpl::Write()
-  原因: Write() → SendAll() → ZmqService::SendAll() 完全绕过 ServiceToClient
-  修复: 在 SendAll() 之前手动 RecordTick(meta_, TICK_SERVER_SEND)
+  **Issue #2: SERVER_EXEC 值偏大 (930us)**
+  - 现状: 平均 930us，max 424ms
+  - 需检查: SERVER_EXEC_END 和 SERVER_DEQUEUE 是否在同一执行路径
+  - 状态: 需分析
 
-  **Issue #8: E2E / NETWORK 异常大**
-  位置: zmq_stub_impl.h L71-93 RecordRpcLatencyMetrics()
-  原因: GetTotalTicksTime(meta) = ticks[n-1] - ticks[0]，若 tick[0].ts()=0 则计算出错误值
-  修复: 显式用 FindTickTs(CLIENT_RECV) - FindTickTs(CLIENT_ENQUEUE)
-
-  **Issue #10: SERVER_EXEC_NS=0，server-side metrics 全部缺失**
-  位置: zmq_server_stream_base.h L374 ServerUnaryWriterReaderImpl::Write()
-  原因: RecordServerLatencyMetrics 只在 ServiceToClient 末尾调用，Write() 绕过了该路径
-  修复: 在 Write() 的 enableMsgQ_ 分支调用 RecordServerLatencyMetrics 并补记 SERVER_EXEC_END
+  **Issue #3: MetaPb 传递机制不清晰**
+  - 请求 meta 和回复 meta 是不同对象
+  - SERVER ticks 需要通过回复 meta 传递给 client
+  - 当前设计: 先记录 tick，再序列化 (在 ZmqServerImpl::ServiceToClient 中)
 end note
 
 @enduml

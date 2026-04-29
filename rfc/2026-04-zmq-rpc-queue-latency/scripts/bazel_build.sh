@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bazel build zmq_rpc_queue_latency_test and zmq_rpc_queue_latency_repl on remote
+# Bazel build zmq_rpc_queue_latency_repl on remote
 # Usage: ./bazel_build.sh
 set -euo pipefail
 
@@ -24,9 +24,6 @@ cd '/root/workspace/git-repos/yuanrong-datasystem'
 bazel info release 2>/dev/null || true
 bazel info bazel-bin
 bazel info output_path
-
-echo "=== Building zmq_rpc_queue_latency_test ==="
-bazel build '//tests/st/common/rpc/zmq:zmq_rpc_queue_latency_test' --jobs=32
 
 echo "=== Building zmq_rpc_queue_latency_repl ==="
 bazel build '//tests/st/common/rpc/zmq:zmq_rpc_queue_latency_repl' --jobs=32
