@@ -9,12 +9,15 @@
 
 ## 故障树总纲
 
-> **注**：以下错误码为**内部码，不返回SDK**（不出现在access log中）：K_NOT_LEADER_MASTER(16)、K_RECOVERY_ERROR(17)、K_RECOVERY_IN_PROGRESS(18)、K_SHUTTING_DOWN(23)、K_WORKER_ABNORMAL(24)、K_SCALING(32在重试中)、K_RPC_STREAM_END(43)、K_SC_WORKER_WAS_LOST(62)、K_RDMA_NEED_CONNECT(73)
+> **注**：以下错误码为**内部码，不返回SDK**（不出现在access log中）：K_NOT_LEADER_MASTER(14)、K_RECOVERY_ERROR(15)、K_RECOVERY_IN_PROGRESS(16)、K_SHUTTING_DOWN(21)、K_WORKER_ABNORMAL(22)、K_SCALING(32在重试中)、K_RPC_STREAM_END(1003)、K_SC_WORKER_WAS_LOST(3005)、K_RDMA_NEED_CONNECT(1007)
 
 ```
 错误码(枚举) ─ 条件/日志/指标 ─→ 责任方
 │
 ├─ 0(K_OK) / 2(K_INVALID) / 3(K_NOT_FOUND) / 8(K_NOT_READY) ─→ 【用户】业务代码问题
+│
+├─ 1(K_DUPLICATED) ─→ 【用户】重复操作
+├─ 9(K_NOT_AUTHORIZED) ─→ 【用户】权限问题
 │
 ├─ 6(K_OUT_OF_MEMORY) / 7(K_IO_ERROR) / 13(K_NO_SPACE) / 18(K_FILE_LIMIT_REACHED) ─→ 【OS】资源问题
 │
@@ -28,7 +31,7 @@
 ├─ 31(K_SCALE_DOWN) ─→ 【数据系统】缩容中
 │
 ├─ 1004(K_URMA_ERROR) / 1009(K_URMA_CONNECT_FAILED) ─→ 【URMA】硬件/端口down
-├─ 1006/1008/1010 ─ 见需进一步分析故障树
+├─ 1006/1008 ─ 见需进一步分析故障树
 │
 ├─ 19(K_TRY_AGAIN) ─ ZMQ failure delta=0 ─→ 【数据系统】对端处理慢
 ├─ 19(K_TRY_AGAIN) ─ ZMQ failure delta>0 ─→ 【OS/网络】网络丢包/断连
@@ -281,24 +284,26 @@ code=1006 K_URMA_NEED_CONNECT
 
 **查看命令**：
 ```bash
-grep -E '\[URMA_RECREATE_JFS\]|\[URMA_RECREATE_JFS_FAILED\]|\[URMA_RECREATE_JFS_SKIP\]' $LOG/datasystem_worker.INFO.log
+grep -E '\[URMA_RECREATE_JETTY\]|\[URMA_RECREATE_JETTY_FAILED\]|\[URMA_RECREATE_JETTY_SKIP\]' $LOG/datasystem_worker.INFO.log
 ```
+
+> **注意**：代码中实际日志前缀为 `URMA_RECREATE_JETTY`（非 JFS）
 
 ```
 code=1008 K_URMA_TRY_AGAIN
   │ 错误消息: "Urma operation failed, try again"
   │
-  ├─ [URMA_RECREATE_JFS] + cqeStatus=9(ACK TIMEOUT)
+  ├─ [URMA_RECREATE_JETTY] + cqeStatus=9(ACK TIMEOUT)
   │   └─→ 自动重建中（继续观察是否有FAILED）
   │
-  ├─ [URMA_RECREATE_JFS_FAILED]连续
-  │   └─→ 【URMA】JFS重建失败
-  │       证据: grep 'URMA_RECREATE_JFS_FAILED' $LOG/datasystem_worker.INFO.log
+  ├─ [URMA_RECREATE_JETTY_FAILED]连续
+  │   └─→ 【URMA】JETTY重建失败
+  │       证据: grep 'URMA_RECREATE_JETTY_FAILED' $LOG/datasystem_worker.INFO.log
   │
-  ├─ [URMA_RECREATE_JFS_SKIP]
+  ├─ [URMA_RECREATE_JETTY_SKIP]
   │   └─→ 连接过期跳过，正常 ── 无需处置
   │
-  └─ 无FAILED（仅有[URMA_RECREATE_JFS]）
+  └─ 无FAILED（仅有[URMA_RECREATE_JETTY]）
       └─→ 自愈（无需处置）
 ```
 
@@ -330,9 +335,12 @@ code=1008 K_URMA_TRY_AGAIN
 | `[URMA_NEED_CONNECT]` | Urma needs to reconnet | remoteInstanceId/instanceId | 数据系统/URMA |
 | `[URMA_POLL_ERROR]` | PollJfcWait failed | ret | URMA |
 | `[URMA_WAIT_TIMEOUT]` | timedout waiting for request | requestId | 数据系统 |
-| `[URMA_RECREATE_JFS]` | JFS recreating | cqeStatus=9 | URMA |
-| `[URMA_RECREATE_JFS_FAILED]` | JFS recreate failed | ret | URMA |
-| `[URMA_RECREATE_JFS_SKIP]` | JFS skip (connection expired) | - | 正常 |
+| `[URMA_RECREATE_JETTY]` | JETTY recreating | cqeStatus | URMA |
+| `[URMA_RECREATE_JETTY_FAILED]` | JETTY recreate failed | ret | URMA |
+| `[URMA_RECREATE_JETTY_SKIP]` | JETTY skip (connection expired) | - | 正常 |
+| `[URMA_AE]` | URMA async event | - | URMA |
+| `[URMA_AE_JETTY_ERR]` | URMA async event jetty error | - | URMA |
+| `[URMA_AE_JFC_ERR]` | URMA async event JFC error | - | URMA |
 | `fallback to TCP/IP payload` | UB降级TCP | - | URMA |
 
 ### OS 系统错误（dmesg/ulimit/df）
@@ -403,16 +411,20 @@ grep "DS_KV_CLIENT_GET" $LOG/ds_client_access_*.log | awk -F'|' '{print $1}' | s
 | 错误码 | 枚举 | 错误消息 | 责任方 | 证据/日志 |
 |--------|------|----------|--------|-----------|
 | 0 | K_OK | OK | 用户 | respMsg含"NOT_FOUND" |
+| 1 | K_DUPLICATED | Duplicated operation | 用户 | 重复操作 |
 | 2 | K_INVALID | Invalid parameter | 用户 | 空key/大小为0 |
 | 3 | K_NOT_FOUND | Key not found | 用户 | Get时 |
 | 6 | K_OUT_OF_MEMORY | Out of memory | OS | `dmesg\|grep -i oom` |
 | 7 | K_IO_ERROR | IO error | OS | `dmesg`/磁盘smart |
 | 8 | K_NOT_READY | Not ready | 用户 | 未Init |
+| 9 | K_NOT_AUTHORIZED | Not authorized | 用户 | 权限问题 |
 | 13 | K_NO_SPACE | No space available | OS | `df -h` |
 | 18 | K_FILE_LIMIT_REACHED | Limit on file descriptors reached | OS | `ulimit -n` |
 | 25 | K_MASTER_TIMEOUT | The master may timeout/dead | etcd | `etcdctl endpoint status` |
 | 29 | K_SERVER_FD_CLOSED | The server fd has been closed | 数据系统 | 返回时转为K_TRY_AGAIN |
 | 31 | K_SCALE_DOWN | The worker is exiting | 数据系统 | SDK自重试 |
+| 34 | K_LRU_HARD_LIMIT | LRU hard limit | OS/数据系统 | 内存限制 |
+| 35 | K_LRU_SOFT_LIMIT | LRU soft limit | OS/数据系统 | 内存限制 |
 | 1004 | K_URMA_ERROR | Urma operation failed | URMA | `dmesg\|grep ub`/`ibstat`；ret=%d |
 | 1009 | K_URMA_CONNECT_FAILED | Urma connect failed | URMA | `ifconfig ub0` |
 | 1010 | K_URMA_WAIT_TIMEOUT | Urma wait for completion timed out | 数据系统 | 无需处置 |
@@ -427,7 +439,7 @@ grep "DS_KV_CLIENT_GET" $LOG/ds_client_access_*.log | awk -F'|' '{print $1}' | s
 |--------|----------|
 | **数据系统** | fault delta=0+对端在运行 / 主动拒绝 / Worker崩溃退出 / TLS握手失败 |
 | **OS/网络** | fault delta>0 / ping不通 / 防火墙 / TCP reset / UDS失败 |
-| **用户** | code=0(respMsg异常)/2/3/8 |
+| **用户** | code=0(respMsg异常)/1/2/3/8/9 |
 | **URMA** | code=1004/1006/1008/1009/1010 / fallback to TCP |
 | **etcd** | code=25 / 日志含"etcd is ..." |
 

@@ -1,8 +1,9 @@
-# 08 · KV 故障定位定界手册（通断 × 时延）
+# 08 · 定位定界手册
 
-> **谁用**：值班 / 运维 / 测试 / 研发现场排障。
-> **怎么用**：接口日志看**成功率** / **P99** → **§2** 归类 → **§3 / §4** 定界 → **§5** 出工单。
-> **怎么判**：五边界 — **用户 / DS 进程内 / 三方(etcd 等) / URMA / OS**。凭据均与 `yuanrong-datasystem` 主干行为对齐；代码细节、全量 metric / 标签 / 注入矩阵见附录。
+> **谁用**：运维 / 测试 / 研发现场排障。
+> **怎么用**：接口日志看**成功率** / **P99** → **第2节** 归类 → **第3 / 第4节** 定界。其中"第X节"用符号 **§X** 表示，如 §2 表示"二、XXX"节。
+> **怎么判**：四边界 — **用户 / yuanrong-datasystem 进程内 / 三方(etcd 等) / URMA / OS**。凭据均与 `yuanrong-datasystem` 主干行为对齐；代码细节、全量 metric / 标签 / 注入矩阵见附录。
+> **客户侧补充**：[定位定界场景案例](customer_fault_scenarios.md)（责任边界、七类场景、证据包与 FAQ）。
 
 ---
 
@@ -16,7 +17,7 @@ code | handleName | microseconds | dataSize | reqMsg | respMsg
  错误码  接口名        耗时(μs)     数据大小   请求参数   响应信息
 ```
 
-- **成功率 / 通断** → `code`：`awk -F'|' '{print $1}' $LOG/ds_client_access_*.log | sort | uniq -c`
+- **成功率 / 失败** → `code`：`awk -F'|' '{print $1}' $LOG/ds_client_access_*.log | sort | uniq -c`
 - **时延 / P99** → `microseconds`：脚本或平台聚合 P99 / max 或对比基线
 - **注意陷阱**：`K_NOT_FOUND` 在 access log 会被记成 **`code=0`**；业务「查不到」场景需同时看 `respMsg` 是否含 `NOT_FOUND` / `Can't find object`，不能只数非 0。
 
@@ -33,6 +34,10 @@ code | handleName | microseconds | dataSize | reqMsg | respMsg
 
 ### 1.3 Metrics Summary 格式
 
+Metrics Summary 是 Worker/Client INFO log 中按周期（默认 10s）输出的关键指标聚合，包含请求计数、时延直方图和数据流量。
+
+**格式说明**：
+
 ```
 Metrics Summary, version=v0, cycle=<N>, interval=<intervalMs>ms
 
@@ -40,22 +45,38 @@ Total:
   <metric>=<value>
 
 Compare with <intervalMs>ms before:
-  <metric>=+<delta>                    ← Counter
-  <metric>,count=+<N>,avg=<us>,max=<us> ← Histogram
+  <metric>=+<delta>                    ← Counter（增量）
+  <metric>,count=+<N>,avg=<us>,max=<us> ← Histogram（直方图）
 ```
 
-读法：**先看 `cycle` 连续性** → **再看 `Compare with` delta 段** → **Histogram 看 `max`**（时延定界核心）。
+读法：**检查 Metrics Summary 是否每 10s 有输出（cycle 是否连续）** → **再看 `Compare with` delta 段** → **Histogram 看 `max`**（时延定界核心）。
+
+**输出示例**（摘自实际日志）：
+
+```
+client_put_request_total=120
+client_put_error_total=2
+client_get_request_total=85
+client_get_error_total=1
+client_put_urma_write_total_bytes=10485760B
+client_get_tcp_read_total_bytes=5242880B
+client_rpc_create_latency,count=120,avg=430us,max=2100us
+client_rpc_publish_latency,count=120,avg=180us,max=950us
+client_rpc_get_latency,count=85,avg=390us,max=1600us
+worker_process_get_latency,count=85,avg=520us,max=2600us
+worker_rpc_get_remote_object_latency,count=12,avg=1800us,max=6200us
+```
 
 ### 1.4 两类故障分流
 
 | 现象 | 走这一章 |
 |------|---------|
-| 接口大量失败、`code` 非 0 明显增多、进程挂、连接断 | **§3 通断** |
+| 接口大量失败、`code` 非 0 明显增多、进程挂、连接断 | **§3 失败** |
 | `code` 多为 0 但 **P99↑**、`microseconds` 右移、抖动 | **§4 时延** |
 
 ---
 
-## 二、五边界速记
+## 二、四边界速记
 
 ### 2.1 故障处理路线图
 
@@ -69,7 +90,7 @@ Compare with <intervalMs>ms before:
 └─────────────────────────────────────────────┘
                   │
                   ▼
-┌─ DS 进程内（Worker/Master/SDK） ──────────────┐
+┌─ yuanrong-datasystem 进程内（Worker/Master/SDK） ──────────────┐
 │  code ∈ {19,23,29,31,32}；[RPC_*] / [ZMQ 事件]  │
 │  线程池 WAITING_TASK_NUM 打满                   │
 │  → §3.5.2 子场景 (a)~(d)                       │
@@ -103,35 +124,35 @@ Compare with <intervalMs>ms before:
 
 ### 2.2 错误码 → 边界总表
 
-| 错误码 | 枚举 | 主责边界 | 备注 |
-|-------|------|---------|------|
-| 0 | `K_OK` | **用户** | 业务正常；**备注**：Get 查不到 key 时 `K_NOT_FOUND` 会被记成 `code=0`，要看 `respMsg` |
-| 2 / 3 / 8 | `K_INVALID` / `K_NOT_FOUND` / `K_NOT_READY` | **用户** | 业务参数 / Init 顺序 |
-| 5 | `K_RUNTIME_ERROR` | **OS / 三方 / URMA** | mmap→OS；`etcd is ...`→三方；payload→URMA |
-| 6 / 7 / 13 / 18 | `K_OUT_OF_MEMORY` / `K_IO_ERROR` / `K_NO_SPACE` / `K_FILE_LIMIT_REACHED` | **OS** | 内存 / IO / 磁盘 / fd |
-| 19 | `K_TRY_AGAIN` | **DS / OS** | 结合前缀；瞬时繁忙 |
-| 23 | `K_CLIENT_WORKER_DISCONNECT` | **DS / OS / 机器** | 先确认进程与节点 |
-| 25 | `K_MASTER_TIMEOUT` | **三方(etcd)** | 兼查 Master 与网络 |
-| 29 / 31 / 32 | `K_SERVER_FD_CLOSED` / `K_SCALE_DOWN` / `K_SCALING` | **DS 进程内** | 生命周期 / 扩缩容 |
-| 1001 / 1002 | `K_RPC_DEADLINE_EXCEEDED` / `K_RPC_UNAVAILABLE` | **DS / OS / 三方** | 桶码；必看日志前缀（§3.3） |
-| 1004 / 1006 / 1008 / 1009 / 1010 | `K_URMA_*` | **URMA** | UB 硬件 / 驱动 / 链路 |
+| 错误码（枚举） | 主责边界 | 备注 |
+|----------------|---------|------|
+| `K_OK`（0） | **用户** | 业务正常；**备注**：Get 查不到 key 时 `K_NOT_FOUND` 会被记成 `code=0`，要看 `respMsg` |
+| `K_INVALID`（2）/ `K_NOT_FOUND`（3）/ `K_NOT_READY`（8） | **用户** | 业务参数 / Init 顺序 |
+| `K_RUNTIME_ERROR`（5） | **OS / 三方 / URMA** | mmap→OS；`etcd is ...`→三方；payload→URMA |
+| `K_OUT_OF_MEMORY`（6）/ `K_IO_ERROR`（7）/ `K_NO_SPACE`（13）/ `K_FILE_LIMIT_REACHED`（18） | **OS** | 内存 / IO / 磁盘 / fd |
+| `K_TRY_AGAIN`（19） | **yuanrong-datasystem / OS** | 结合前缀；瞬时繁忙 |
+| `K_CLIENT_WORKER_DISCONNECT`（23） | **yuanrong-datasystem / OS / 机器** | 先确认进程与节点 |
+| `K_MASTER_TIMEOUT`（25） | **三方(etcd)** | 兼查 Master 与网络 |
+| `K_SERVER_FD_CLOSED`（29）/ `K_SCALE_DOWN`（31）/ `K_SCALING`（32） | **yuanrong-datasystem 进程内** | 生命周期 / 扩缩容 |
+| `K_RPC_DEADLINE_EXCEEDED`（1001）/ `K_RPC_UNAVAILABLE`（1002） | **yuanrong-datasystem / OS / 三方** | 桶码；必看日志前缀（第3.3节） |
+| `K_URMA_ERROR`（1004）/ `K_URMA_NEED_CONNECT`（1006）/ `K_URMA_TRY_AGAIN`（1008）/ `K_URMA_CONNECT_FAILED`（1009）/ `K_URMA_WAIT_TIMEOUT`（1010） | **URMA** | UB 硬件 / 驱动 / 链路 |
 
-> ⚠️ **1002 是桶码**：DS crash、OS 网络断、etcd 不可用都会给 1002，必须看 §3.3 前缀。
+> ⚠️ **1002 是桶码**：yuanrong-datasystem crash、OS 网络断、etcd 不可用都会给 1002，必须看 §3.3 前缀。
 > ⚠️ **0 ≠ 一切正常**：Get 的 NOT_FOUND 被记成 0，业务语义异常看 `respMsg`。
 
-### 2.3 五边界典型信号
+### 2.3 四边界典型信号
 
 | 边界 | 典型信号 | 核心凭据 |
 |------|---------|---------|
 | **用户** | code ∈ {2,3,8}；code=0 + `respMsg` 异常 | access log 的 `respMsg` |
-| **DS 进程内** | code ∈ {23,29,31,32}；`[RPC_RECV_TIMEOUT]` + ZMQ fault=0；`[RPC_SERVICE_UNAVAILABLE]`；`zmq_gateway_recreate/event_disconnect`↑；线程池 `WAITING_TASK_NUM` 堆积 | Worker/Client INFO log、`resource.log` |
+| **yuanrong-datasystem 进程内** | code ∈ {23,29,31,32}；`[RPC_RECV_TIMEOUT]` + ZMQ fault=0；`[RPC_SERVICE_UNAVAILABLE]`；`zmq_gateway_recreate/event_disconnect`↑；线程池 `WAITING_TASK_NUM` 堆积 | Worker/Client INFO log、`resource.log` |
 | **三方 etcd** | `etcd is timeout` / `etcd is unavailable`；`ETCD_QUEUE` 堆积、`ETCD_REQUEST_SUCCESS_RATE`↓；code=25 | `grep etcd`、`etcdctl endpoint status` |
 | **URMA** | code ∈ {1004,1006,1008,1009,1010}；`[URMA_*]`；`fallback to TCP/IP payload` | `[URMA_*]`、`*_urma_*_bytes` |
 | **OS** | code ∈ {6,7,13,18}；`K_RUNTIME_ERROR(5) + Get mmap entry failed`；`[TCP_*]` + 对端仍活；`[UDS_*]` / `[SHM_FD_TRANSFER_FAILED]`（同机 UDS / SCM_RIGHTS）；`[ZMQ_*_FAILURE_TOTAL]`（errno / 网络栈 / 资源） | `ulimit`/`ss`/`df`/`dmesg`/iptables；`zmq_last_error_number` |
 
 ---
 
-## 三、通断定界
+## 三、失败定界
 
 ### 3.1 定界流程
 
@@ -173,7 +194,7 @@ Status →
 │             "urma ... payload ..." → URMA
 ├─ 6/7/13/18 → OS（内存/IO/磁盘/fd）
 ├─ 25        → 三方(etcd) 为主
-├─ 19/23/29/31/32 → DS 进程内
+├─ 19/23/29/31/32 → yuanrong-datasystem 进程内
 ├─ 1001/1002 → 进 Step 2
 └─ 1004+     → URMA
 ```
@@ -195,7 +216,7 @@ Status →
 |---------------------|------|
 | `etcd is timeout` / `etcd is unavailable`（常同屏 1002/25） | etcd 集群或到 etcd 的网络 |
 
-**→ DS 进程内（Worker/Master/SDK 实现与状态）**
+**→ yuanrong-datasystem 进程内（Worker/Master/SDK 实现与状态）**
 
 | 最先出现的前缀 / 信号 | 原因 |
 |---------------------|------|
@@ -208,7 +229,7 @@ Status →
 
 | 前缀 / 信号 | 分叉 |
 |------------|------|
-| `[SOCK_CONN_WAIT_TIMEOUT]` / `[REMOTE_SERVICE_WAIT_TIMEOUT]` | 握手迟；看对端 Worker 存活 → 活=OS 网络慢，不活=DS |
+| `[SOCK_CONN_WAIT_TIMEOUT]` / `[REMOTE_SERVICE_WAIT_TIMEOUT]` | 握手迟；看对端 Worker 存活 → 活=OS 网络慢，不活=yuanrong-datasystem |
 
 > `zmq_last_error_number` 的 errno 对照见 §3.5.4 底部表。
 
@@ -230,10 +251,10 @@ Status →
 | `OBJECT_KEYS_MAX_SIZE_LIMIT` | 批次超限 | 拆 batch |
 | `Can't find object` / `K_NOT_FOUND` | 对象不存在 | 业务自查 key |
 
-#### 3.5.2 DS 进程内
+#### 3.5.2 yuanrong-datasystem 进程内
 
 ```
-             §3.2/3.3 已落到 DS 进程内
+             §3.2/3.3 已落到 yuanrong-datasystem 进程内
                        │
       ┌────────┬───────┼───────┬────────┐
       ▼        ▼       ▼       ▼
@@ -252,7 +273,7 @@ Status →
 | **(c) 三方 etcd** | Master `etcd is timeout`；Worker `etcd is unavailable`；`ETCD_QUEUE`↑ / 成功率↓；code=25 | **主责写三方**；`systemctl status etcd`；`etcdctl endpoint status`；查到 etcd 的网络 |
 | **(d) 心跳 / 生命周期 / 扩缩容** | `Cannot receive heartbeat from worker.`(code=23)；`[HealthCheck] Worker is exiting now`；`meta_is_moving`(31/32) | 心跳断 → `kill -CONT <pid>`；退出由编排拉起；扩缩容 SDK 自重试 |
 
-> (c) 实为三方 etcd，此处仅因信号出现在 DS 日志中一并列出；工单**主责写三方**。
+> (c) 实为三方 etcd，此处仅因信号出现在 yuanrong-datasystem 日志中一并列出；**主责写三方**。
 > `[SHM_FD_TRANSFER_FAILED]` / `Get mmap entry failed` 归 OS（同机 UDS / `ulimit -l` / fd / SCM_RIGHTS），见 §3.5.4。
 
 #### 3.5.3 URMA
@@ -282,7 +303,7 @@ Status →
 | `[URMA_WAIT_TIMEOUT]`（code=1010） | 等待 CQE 超时 | 看 `instanceId` 是否同期变动（是→与 (a) 合并）；单独出现则 SDK 重试白名单自愈 |
 | code=1009（`K_URMA_CONNECT_FAILED`） | URMA 建连失败 | `ifconfig ub0` / `ubinfo` 查端口 up/down；下 `ls /dev/ub*` 看设备节点 |
 
-> `fallback to TCP/IP payload` **非通断**，功能成功 → 归 §4.5 时延侧。
+> `fallback to TCP/IP payload` **非失败**（功能正常但性能降级），属于时延问题 → 归 §4.5 时延侧。
 
 #### 3.5.4 OS
 
@@ -302,9 +323,9 @@ Status →
           扩容                          UDS 路径 / 权限   对照 errno
 ```
 
-**证据 × 枚举 × 处置**（DS 错误码 = `K_*`；OS errno = `<errno.h>` 标准名）：
+**证据 × 枚举 × 处置**（yuanrong-datasystem 错误码 = `K_*`；OS errno = `<errno.h>` 标准名）：
 
-| 证据 | DS 枚举 | OS 枚举 | 处置 |
+| 证据 | yuanrong-datasystem 枚举 | OS 枚举 | 处置 |
 |------|--------|--------|------|
 | code=6 | `K_OUT_OF_MEMORY` | `ENOMEM` | `dmesg \| grep -i 'Out of memory'`；`free -h`；扩内存 / 调 cgroup |
 | code=7 | `K_IO_ERROR` | `EIO` | `dmesg`；查块设备 / 文件系统；**分布式网盘** POSIX 接口失败同样归此 |
@@ -369,7 +390,7 @@ Status →
 | 对比 | 结论 |
 |------|------|
 | `client_rpc_*_latency` max 显著 > `worker_process_*_latency` max | 中间链路慢 → Step 3 |
-| 两者同幅 max 飙升 | **DS 进程内** Worker 业务慢 |
+| 两者同幅 max 飙升 | **yuanrong-datasystem 进程内** Worker 业务慢 |
 | Worker 快 / Client 慢、`worker_to_client_total_bytes` 正常 | **用户 / SDK 本地**（反序列化、用户线程阻塞） |
 
 **Step 3**：拆中间链路
@@ -380,7 +401,7 @@ Status →
 - `zmq_*_io_latency` max↑ + fault=0 → 再看**框架占比**：
   - `(serialize + deserialize) / (send_io + recv_io + serialize + deserialize)`
   - **< 5%** → 中间网络或对端处理（看 `worker_process_*` 是否同幅）
-  - **≥ 5%** → **DS 进程内**框架（大 payload / protobuf）
+  - **≥ 5%** → **yuanrong-datasystem 进程内**框架（大 payload / protobuf）
 - `ping RTT 抖` / `tc qdisc` netem / `nstat` 丢包 → **OS**。
 
 ### 4.3 用户时延
@@ -389,17 +410,13 @@ Status →
 - SDK 调用线程被业务阻塞（metrics 仍滚动但 pstack 卡在 app 代码）。
 - 客户端 GC / 同步 IO。
 
-### 4.4 DS 进程内时延
+### 4.4 yuanrong-datasystem 进程内时延
 
 ```
             同幅飙升 / Worker 侧为主
                        │
      worker_rpc_get_remote_object_latency 单独突出？
          是 ───────────────────────────► (c) 跨 Worker Get
-         否
-                       │
-     create_meta_latency↑ 且 ETCD_* 差？
-         是 ───► **三方 etcd**（对照 §3.5.2(c)）
          否
                        │
      RPC 框架占比 ≥ 5%？
@@ -432,8 +449,8 @@ Status →
 ## 五、结论模板
 
 ```
-【故障类型】通断 / 时延
-【责任边界】用户 / DS 进程内 / 三方(etcd 等) / URMA / OS（必须给其一；跨界写"主责+协查"）
+【故障类型】失败 / 时延
+【责任边界】用户 / yuanrong-datasystem 进程内 / 三方(etcd 等) / URMA / OS（必须给其一；跨界写"主责+协查"）
 【错误码】<code> <枚举> + rc.GetMsg()（时延类写 "N/A, Status=K_OK"）
 【日志证据】
   - <SDK 一行，含 TraceID / 时间 / objectKey>
@@ -449,29 +466,29 @@ Status →
 
 ## 六、实战示例
 
-### 通断 / DS：1002 + 对端 Worker 正常
+### 失败 / yuanrong-datasystem：1002 + 对端 Worker 正常
 ```
 Step1：code=1002 → Step2
-Step2：[RPC_RECV_TIMEOUT]，ZMQ fault=0 → DS 对端处理慢
+Step2：[RPC_RECV_TIMEOUT]，ZMQ fault=0 → yuanrong-datasystem 对端处理慢
 Step3：resource.log 对端 WORKER_OC_SERVICE_THREAD_POOL.WAITING_TASK_NUM=128
-【边界】DS 进程内（线程池打满）；扩 oc_rpc_thread_num
+【边界】yuanrong-datasystem 进程内（线程池打满）；扩 oc_rpc_thread_num
 ```
 
-### 通断 / OS：1002 + iptables 注入
+### 失败 / OS：1002 + iptables 注入
 ```
 Step2：[ZMQ_SEND_FAILURE_TOTAL] + zmq_last_error_number=113(EHOSTUNREACH)
 Step3：iptables -L -n 有 DROP
 【边界】OS；iptables -D ...；zmq_send_failure_total 归零即恢复
 ```
 
-### 通断 / 三方：1002 + etcd 不可用
+### 失败 / 三方：1002 + etcd 不可用
 ```
 Step2：Master/Worker 同时打 "etcd is timeout" / "etcd is unavailable"
        resource.log ETCD_REQUEST_SUCCESS_RATE 断崖
 【边界】三方(etcd)；修 etcd 集群或到 etcd 的网络
 ```
 
-### 通断 / URMA：Put 返回 1009
+### 失败 / URMA：Put 返回 1009
 ```
 Step1：code=1009 → URMA
 Step3：[URMA_NEED_CONNECT] 高频 + [URMA_RECREATE_JFS_FAILED] 连续
@@ -496,12 +513,12 @@ Step3：ping RTT 抖动；tc qdisc 有 netem
 【边界】OS；tc qdisc del ...
 ```
 
-### 通断 / DS：SHM 钉住泄漏
+### 失败 / yuanrong-datasystem：SHM 钉住泄漏
 ```
 无错误码；SHARED_MEMORY 3.58GB→37.5GB
 worker_shm_ref_table_bytes↑，worker_object_count 持平
 worker_allocator_alloc_bytes_total delta > free delta
-【边界】DS 进程内（SHM ref 未释放）；查 client DecRef
+【边界】yuanrong-datasystem 进程内（SHM ref 未释放）；查 client DecRef
 ```
 
 ---
@@ -515,7 +532,7 @@ worker_allocator_alloc_bytes_total delta > free delta
 ```bash
 LOG=${log_dir:-/var/log/datasystem}
 
-# 结构化日志前缀（通断主抓手）
+# 结构化日志前缀（失败主抓手）
 grep -E '\[(TCP|UDS|ZMQ|RPC|SOCK|REMOTE|SHM_FD|URMA)_' \
   $LOG/datasystem_worker.INFO.log $LOG/ds_client_*.INFO.log
 
@@ -553,7 +570,7 @@ iptables -L -n; tc qdisc show dev eth0
 # URMA
 ibstat 2>/dev/null || ubinfo 2>/dev/null; ifconfig ub0; ls /dev/ub*
 
-# DS 进程
+# yuanrong-datasystem 进程
 pgrep -af datasystem_worker; pidstat -p <pid> 1; gstack <pid>
 
 # etcd
@@ -604,7 +621,7 @@ systemctl status etcd; etcdctl endpoint status -w table
 | `[URMA_RECREATE_JFS_SKIP]` | connection 已过期跳过重建 |
 | `[URMA_POLL_ERROR]` | `PollJfcWait` 报错 |
 | `[URMA_WAIT_TIMEOUT]` | URMA 事件等待超时 |
-| `fallback to TCP/IP payload` | **降级**（非通断）→ 时延观测 |
+| `fallback to TCP/IP payload` | **非失败**（功能正常但性能降级）→ 时延观测 |
 
 ### B.3 组件 / 生命周期 / etcd
 
@@ -633,7 +650,7 @@ systemctl status etcd; etcdctl endpoint status -w table
 | 4 | `OBJECT_COUNT` | — | 对象数；与 `worker_object_count` 交叉；断崖→Worker 重启 |
 | 5 | `OBJECT_SIZE` | — | 对象总大小；与 OBJECT_COUNT 反向看 SHM 钉住 |
 
-### C.2 线程池（排队 / 打满 → DS 对端慢）
+### C.2 线程池（排队 / 打满 → yuanrong-datasystem 对端慢）
 
 | # | 字段 | 子项（五元组） |
 |---|------|---------------|
@@ -707,7 +724,7 @@ systemctl status etcd; etcdctl endpoint status -w table
 | 17 | `worker_urma_write_latency` | Histogram | us |
 | 18 | `worker_tcp_write_latency` | Histogram | us |
 
-> `rpc_create_meta` 单飙 + `ETCD_*` 差 → **三方 etcd**；`process_*` 同幅飙 → **DS 业务慢**（§4.4）；`urma_write` vs `tcp_write` 看 URMA 降级（§4.5）。
+> `process_*` 同幅飙 → **yuanrong-datasystem 业务慢**（§4.4）；`urma_write` vs `tcp_write` 看 URMA 降级（§4.5）。
 
 ### D.4 数据面字节（URMA vs TCP，降级判断）
 
@@ -745,7 +762,7 @@ systemctl status etcd; etcdctl endpoint status -w table
 | 30 | `zmq_event_disconnect_total` | Counter | count |
 | 31 | `zmq_event_handshake_failure_total` | Counter | count |
 
-> **fault = 0** 排除 ZMQ/网络故障（→ DS 对端处理慢，§3.3）；`last_error_number` 按 errno 对照；`try_again` 涨 → HWM 背压（§4.4(d)）。
+> **fault = 0** 排除 ZMQ/网络故障（→ yuanrong-datasystem 对端处理慢，§3.3）；`last_error_number` 按 errno 对照；`try_again` 涨 → HWM 背压（§4.4(d)）。
 
 ### D.7 ZMQ 延迟（IO / 序列化，框架占比分析）
 
@@ -799,42 +816,7 @@ systemctl status etcd; etcdctl endpoint status -w table
 
 ---
 
-## 附录 E · 故障注入矩阵 & 验收 Checklist（测试用）
-
-### E.1 注入矩阵
-
-| 故障类型 | 注入方法 | 预期 metric | 预期日志 |
-|---------|---------|------------|---------|
-| ZMQ 发送失败 | `iptables -I OUTPUT ... -j DROP` | `zmq_send_failure_total`↑ | `[ZMQ_SEND_FAILURE_TOTAL]` |
-| RPC 超时 | `tc qdisc add ... netem delay` | `client_rpc_get_latency` max↑ | `[RPC_RECV_TIMEOUT]` |
-| TCP 建连失败 | `iptables -I INPUT ... -j REJECT` | — | `[TCP_CONNECT_FAILED]` |
-| URMA 连接断 | kill 远端 Worker | `zmq_gateway_recreate_total`↑ | `[URMA_NEED_CONNECT]` |
-| UB 降级 TCP | `ifconfig ub0 down` | TCP bytes↑、URMA bytes=0 | `fallback to TCP/IP payload` |
-| JFS 重建 | 触发 `cqeStatus=9` | `worker_urma_write_latency` max↑ | `[URMA_RECREATE_JFS]` |
-| etcd 不可用 | `systemctl stop etcd` | `K_MASTER_TIMEOUT`(25) | `etcd is timeout/unavailable` |
-| 内存泄漏 | 模拟 ref_table 钉住 | `worker_shm_ref_table_bytes`↑ | — |
-| Worker 退出 | `kill -9 <worker>` | `worker_object_count`↓ | `[HealthCheck] Worker is exiting now` |
-| 心跳超时 | `kill -STOP <worker>` | — | `Cannot receive heartbeat from worker.` |
-| mmap 失败 | `ulimit -l 0` + 触发 | — | `Get mmap entry failed` |
-
-### E.2 验收 Checklist
-
-**基础观测**：
-- [ ] Worker / Client INFO log 有 `Metrics Summary, version=v0, cycle=...`
-- [ ] `resource.log` 周期输出，含 `SHARED_MEMORY` / `ETCD_*` / `*_THREAD_POOL`
-- [ ] access log 字段六列齐全，`handleName` 与接口对应
-
-**故障注入**（每条可独立跑）：
-- [ ] ZMQ：`zmq_send_failure_total` delta>0 + `[ZMQ_SEND_FAILURE_TOTAL]`
-- [ ] URMA 重连：`[URMA_NEED_CONNECT]` 或 `[URMA_RECREATE_JFS]`
-- [ ] UB 降级：`client_get_tcp_read_total_bytes`↑ 且 `urma_*_bytes` 不涨
-- [ ] etcd：`etcd is (timeout|unavailable)` + code=25
-- [ ] 心跳：`Cannot receive heartbeat from worker.` + code=23
-- [ ] SHM 泄漏：`worker_shm_ref_table_bytes` 持续涨、`worker_object_count` 持平
-
----
-
-## 附录 F · 日志路径与 gflag 开关
+## 附录 E · 日志路径与 gflag 开关
 
 | 项 | 说明 |
 |----|------|

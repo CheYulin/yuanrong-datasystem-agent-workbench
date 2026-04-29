@@ -78,8 +78,7 @@ grep 'client_put_urma_write_total_bytes\|client_put_tcp_write_total_bytes' $LOG/
 grep 'client_get_urma_read_total_bytes\|client_get_tcp_read_total_bytes' $LOG/ds_client_*.INFO.log | tail -3
 
 # Worker侧 URMA/TCP 字节
-grep 'worker_put_urma_write_total_bytes\|worker_put_tcp_write_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
-grep 'worker_get_urma_read_total_bytes\|worker_get_tcp_read_total_bytes' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_urma_write_latency\|worker_tcp_write_latency' $LOG/datasystem_worker.INFO.log | tail -3
 ```
 
 **判定**：
@@ -133,7 +132,7 @@ grep 'ACTIVE_CLIENT_COUNT' $LOG/resource.log | tail -3
        ↓                 ↓                  ↓               ↓
   client_rpc_*      zmq_client_*       worker_rpc_*    worker_urma_*
   get_latency       queuing_latency    query_meta_*   write_latency
-  publish_latency   stub_send_latency create_meta_*  tcp_write_latency
+  publish_latency    stub_send_latency create_meta_*  tcp_write_latency
 ```
 
 **判定规则**：哪个分段 max 最高，哪个就是瓶颈。
@@ -241,17 +240,17 @@ grep 'DS_KV_CLIENT_PUT' $LOG/ds_client_access_*.log | awk -F'|' '{print $3}' | s
 
 | 分段 | 指标 | 正常范围 | 耗时高时归责 |
 |------|------|---------|------------|
-| ① Client SDK | `client_rpc_get_latency` / `client_rpc_publish_latency` | < 1ms | **客户业务侧**：业务代码/prefetcher |
+| ① Client SDK | `client_rpc_get_latency` / `client_rpc_publish_latency` / `client_rpc_create_latency` | < 1ms | **客户业务侧**：业务代码/prefetcher |
 | ② Client→Worker | `zmq_client_queuing_latency` + `zmq_server_queue_wait_latency` | < 500μs | 自证清白后归 **KVC** 或 **客户运维侧** |
 | ③ 元数据访问 | `worker_rpc_create_meta_latency` / `worker_rpc_query_meta_latency` | < 100μs | **KVC**：元数据服务/锁冲突 |
-| ④ 数据访问 | `worker_urma_write_latency` / `worker_tcp_write_latency` | URMA<10μs，TCP<100μs | 自证清白后归 **URMA** 或 **客户运维侧** |
+| ④ 数据访问 | `worker_urma_write_latency` / `worker_urma_wait_latency` / `worker_tcp_write_latency` | URMA<10μs，TCP<100μs | 自证清白后归 **URMA** 或 **客户运维侧** |
 
 ### A.2 跨Worker自证清白
 
 当③或④涉及跨 Worker 操作时，通过以下公式区分本端 Worker 问题还是远端 Worker/网络问题：
 
 ```
-远端贡献 = zmq_rpc_get_remote_object_latency - (本地Worker处理时延 + 网络时延)
+远端贡献 = worker_rpc_remote_get_outbound_latency - (本地Worker处理时延 + 网络时延)
 ```
 
 - 远端贡献占比 > 50% → 远端 Worker 或网络问题
@@ -259,7 +258,7 @@ grep 'DS_KV_CLIENT_PUT' $LOG/ds_client_access_*.log | awk -F'|' '{print $3}' | s
 
 **操作**：
 ```bash
-grep 'worker_rpc_get_remote_object_latency' $LOG/datasystem_worker.INFO.log | tail -3
+grep 'worker_rpc_remote_get_outbound_latency' $LOG/datasystem_worker.INFO.log | tail -3
 grep 'zmq_rpc_network_latency' $LOG/datasystem_worker.INFO.log | tail -3
 ```
 
@@ -279,11 +278,13 @@ grep 'zmq_rpc_network_latency' $LOG/datasystem_worker.INFO.log | tail -3
 | `worker_process_create_latency` | Worker处理Create延迟 | 值高表示Worker业务慢 | 检查Worker端 |
 | `worker_rpc_create_meta_latency` | 创建元数据延迟 | 值高表示元数据操作慢 | 检查元数据服务 |
 | `worker_rpc_query_meta_latency` | 查询元数据延迟 | 值高表示元数据操作慢 | 检查元数据服务 |
-| `worker_rpc_get_remote_object_latency` | 跨Worker获取延迟 | 值高表示跨Worker或网络慢 | 自证清白定位 |
+| `worker_rpc_remote_get_outbound_latency` | 跨Worker获取出站延迟 | 值高表示跨Worker或网络慢 | 自证清白定位 |
+| `worker_rpc_remote_get_inbound_latency` | 跨Worker获取入站延迟 | 值高表示远端处理慢 | 检查远端Worker |
 | `worker_urma_write_latency` | URMA写入延迟 | 值高表示URMA慢 | 联系URMA团队 |
+| `worker_urma_wait_latency` | URMA等待延迟 | 值高表示URMA慢 | 联系URMA团队 |
 | `worker_tcp_write_latency` | TCP写入延迟 | 值高表示TCP降级慢 | 检查URMA状态 |
 
-### B.2 ZMQ RPC队列时延类（单位：μs）
+### B.2 ZMQ RPC队列时延类（单位：ns）
 
 | 指标 | 名称 | 判定方法 | 解决措施 |
 |------|------|---------|---------|
@@ -295,7 +296,16 @@ grep 'zmq_rpc_network_latency' $LOG/datasystem_worker.INFO.log | tail -3
 | `zmq_rpc_e2e_latency` | 端到端延迟 | P99高表示整体慢 | 分段定位瓶颈 |
 | `zmq_rpc_network_latency` | 网络延迟 | 值高+框架正常表示网络慢 | 检查网络设备和链路 |
 
-### B.3 数据面字节类（单位：bytes）
+### B.3 ZMQ RPC I/O时延类（单位：μs）
+
+| 指标 | 名称 | 判定方法 | 解决措施 |
+|------|------|---------|---------|
+| `zmq_send_io_latency` | ZMQ发送I/O延迟 | 值高表示发送慢 | 检查网络 |
+| `zmq_receive_io_latency` | ZMQ接收I/O延迟 | 值高表示接收慢 | 检查网络 |
+| `zmq_rpc_serialize_latency` | RPC序列化延迟 | 值高表示序列化慢 | 检查CPU |
+| `zmq_rpc_deserialize_latency` | RPC反序列化延迟 | 值高表示反序列化慢 | 检查CPU |
+
+### B.4 数据面字节类（单位：bytes）
 
 | 指标 | 名称 | 判定方法 | 解决措施 |
 |------|------|---------|---------|
@@ -303,21 +313,33 @@ grep 'zmq_rpc_network_latency' $LOG/datasystem_worker.INFO.log | tail -3
 | `client_put_tcp_write_total_bytes` | Client TCP写入字节 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
 | `client_get_urma_read_total_bytes` | Client URMA读取字节 | delta=0表示URMA通道未使用 | 检查URMA连接 |
 | `client_get_tcp_read_total_bytes` | Client TCP读取字节 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
-| `worker_put_urma_write_total_bytes` | Worker URMA写入字节 | delta=0表示URMA通道未使用 | 检查UB连接 |
-| `worker_put_tcp_write_total_bytes` | Worker TCP写入字节 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
-| `worker_get_urma_read_total_bytes` | Worker URMA读取字节 | delta=0表示URMA通道未使用 | 检查UB连接 |
-| `worker_get_tcp_read_total_bytes` | Worker TCP读取字节 | delta>0且urma_delta=0表示降级 | 联系URMA团队 |
+| `worker_to_client_total_bytes` | Worker到客户端字节 | delta反映数据量 | 正常指标 |
+| `worker_from_client_total_bytes` | 客户端到Worker字节 | delta反映数据量 | 正常指标 |
 
-### B.4 ZMQ故障监控 + resource监控
+### B.5 ZMQ故障监控 + resource监控
 
 | 指标 | 名称 | 判定方法 | 解决措施 |
 |------|------|---------|---------|
 | `zmq_send_failure_total` | ZMQ发送失败次数 | delta>0表示网络/连接故障 | 检查网络和防火墙 |
 | `zmq_receive_failure_total` | ZMQ接收失败次数 | delta>0表示网络/连接故障 | 检查网络和防火墙 |
 | `zmq_send_try_again_total` | ZMQ发送重试次数 | delta>0且failure=0为背压非故障 | 正常现象 |
+| `zmq_receive_try_again_total` | ZMQ接收重试次数 | delta>0且failure=0为背压非故障 | 正常现象 |
+| `zmq_network_error_total` | ZMQ网络错误次数 | delta>0表示网络问题 | 检查网络 |
+| `zmq_gateway_recreate_total` | Gateway重创次数 | delta>0表示连接重置 | 检查连接稳定性 |
+| `zmq_event_disconnect_total` | 事件断开次数 | delta>0表示连接断开 | 检查网络 |
+| `zmq_event_handshake_failure_total` | TLS握手失败次数 | delta>0表示证书问题 | 检查TLS配置 |
 | `ACTIVE_CLIENT_COUNT` | 活跃客户端数 | 超过设计上限 | 扩容或优化连接管理 |
 | `WAITING_TASK_NUM` | 等待任务数 | 接近MAX_THREAD_NUM表示打满 | 扩容线程池或减少业务量 |
 | `MAX_THREAD_NUM` | 最大线程数 | 作为WAITING_TASK_NUM的对比基准 | — |
+
+### B.6 Worker Get处理分段（单位：μs）
+
+| 指标 | 名称 | 判定方法 | 解决措施 |
+|------|------|---------|---------|
+| `worker_get_threadpool_queue_latency` | Get线程池队列延迟 | 值高表示线程池忙碌 | 扩容线程池 |
+| `worker_get_threadpool_exec_latency` | Get线程池执行延迟 | 值高表示执行慢 | 检查业务代码 |
+| `worker_get_meta_addr_hashring_latency` | Get元数据地址哈希环延迟 | 值高表示哈希环查询慢 | 检查哈希环 |
+| `worker_get_post_query_meta_phase_latency` | Get查询元数据阶段后延迟 | 值高表示后续处理慢 | 检查处理逻辑 |
 
 ---
 
@@ -328,3 +350,5 @@ grep 'zmq_rpc_network_latency' $LOG/datasystem_worker.INFO.log | tail -3
 | 运行日志-metrics | `datasystem_worker.INFO.log` | Metrics Summary 指标输出 |
 | resource日志 | `resource.log` | 资源监控（线程池、客户端数等） |
 | 运行日志-错误消息 | `datasystem_worker.INFO.log` | 结构化错误日志和降级日志 |
+| Server延迟日志 | `datasystem_worker.INFO.log` | `[SERVER_LATENCY]` 前缀 |
+| RPC延迟日志 | `datasystem_worker.INFO.log` | `[RPC_LATENCY]` 前缀 |
