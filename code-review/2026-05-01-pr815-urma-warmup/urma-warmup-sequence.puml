@@ -1,0 +1,164 @@
+@startuml
+title URMA Connection Warmup - Worker Startup Sequence (PR #815)
+
+header
+<color:#FF6B00>**[NEW]**</color> = 新增代码 | <color:#0066CC>**[EXISTING]**</color> = 已有代码
+end header
+
+skinparam noteBackgroundColor #FFFBCC
+skinparam noteBorderColor #FF6B00
+
+participant "WorkerN\n(Startup)" as WN
+participant "EtcdCluster\nManager" as ECM
+participant "ObjectCache\nClientWorkerSvc" as OCWS
+participant "ObjectTable" as OT
+participant "WorkerOcService\nGetImpl" as GET
+participant "WorkerOC\nServer" as WOC
+participant "EtcdStore" as ES
+participant "Worker1..N\n(Peers)" as WP
+
+== Phase 1: Worker Start (Pre-existing) ==
+
+WN -[#0066CC]-> WOC : <color:#0066CC>**Start()**</color>
+activate WOC
+WN -[#0066CC]-> ECM : <color:#0066CC>**SetWorkerReady()**</color>
+activate ECM
+ECM -[#0066CC]-> ES : <color:#0066CC>**UpdateNodeState(ETCD_NODE_READY)**</color>
+deactivate ECM
+
+note right of ECM
+  <color:#0066CC>**[EXISTING]**</color>
+  此流程在 PR 前已存在
+end note
+
+== Phase 2: Local Warmup Object Preparation ==
+
+WN -[#FF6B00]-> WOC : <color:#FF6B00>**MaybeStartConnectionWarmup()**</color>
+activate WOC
+note right of WOC
+  <color:#FF6B00>**[NEW]**</color>
+  检查 warmup_connection 参数
+  创建 warmupThreadPool_(4线程)
+  创建 warmupControllerThread_
+end note
+
+WOC -[#FF6B00]-> OCWS : <color:#FF6B00>**PrepareUrmaWarmupObject()**</color>
+activate OCWS
+note right of OCWS
+  <color:#FF6B00>**[NEW]**</color>
+  创建本地 1 字节预热对象
+  同步执行，等待完成
+end note
+
+OCWS -[#0066CC]-> OT : ReserveGetAndLock()
+activate OT
+OT --[#0066CC]-> OCWS : entry locked
+deactivate OT
+
+OCWS -[#0066CC]-> OCWS : SetNewObjectEntry()
+OCWS -[#0066CC]-> OCWS : SaveBinaryObjectToMemory()
+note right of OCWS
+  1 byte warmup value
+end note
+OCWS -[#0066CC]-> OT : Erase()
+activate OT
+OT --[#0066CC]-> OCWS : erased
+deactivate OT
+OCWS --[#FF6B00]-> WOC : <color:#FF6B00>**K_OK**</color>
+deactivate OCWS
+
+WOC -[#FF6B00]-> WOC : <color:#FF6B00>**Create warmupThreadPool_()**</color>
+WOC -[#FF6B00]-> WOC : <color:#FF6B00>**warmupControllerThread_**</color>
+deactivate WOC
+
+== Phase 3: Readiness Probe ==
+
+WN -[#0066CC]-> WOC : <color:#0066CC>**ReadinessProbe()**</color>
+activate WOC
+note right of WOC
+  <color:#0066CC>**[EXISTING]**</color>
+  此流程在 PR 前已存在
+  K8s readiness probe 检查点
+end note
+
+WOC -[#0066CC]-> WOC : WaitForServiceReady()
+WOC -[#0066CC]-> WOC : Write ready-check file
+note right of WOC
+  /health/ready
+end note
+deactivate WOC
+
+== Phase 4: Async Peer Warmup (Background) ==
+
+loop RunUrmaWarmupController() - every 1s until 30-110s
+note over WOC
+  <color:#FF6B00>**[NEW]**</color>
+  后台控制器：
+  - 扫描 ETCD_CLUSTER_TABLE
+  - 发现新 ready peer
+  - 提交 warmup 任务到线程池
+end note
+
+    WOC -[#0066CC]-> ES : GetAll(ETCD_CLUSTER_TABLE)
+    activate ES
+    ES --[#0066CC]-> WOC : List<workerAddr>
+    deactivate ES
+
+    WOC -[#FF6B00]-> WOC : <color:#FF6B00>**ScheduleUrmaWarmupTasks()**</color>
+
+    par for each new peer
+        WOC -[#FF6B00]-> WOC : <color:#FF6B00>**warmupThreadPool_->Submit()**</color>
+        note right of WOC
+          lambda: WarmupUrmaConnectionToPeer()
+        end note
+        activate WOC
+        WOC -[#FF6B00]-> GET : <color:#FF6B00>**WarmupGetObjectFromRemoteWorker()**</color>
+        activate GET
+
+        note right of GET
+          <color:#FF6B00>**[NEW]**</color>
+          直接发起 remote get
+          绕过 QueryMeta 流程
+          超时 5s
+        end note
+
+        GET -[#0066CC]-> WP : RemoteGetRequest()
+        activate WP
+
+        alt URMA not connected yet
+            WP -[#0066CC]-> WP : K_URMA_NEED_CONNECT
+            WP -[#0066CC]-> WN : ExecOnceParrallelExchange()
+            note right of WP
+              <color:#0066CC>**[EXISTING]**</color>
+              URMA 建链 handshake
+            end note
+        end
+
+        WP --[#0066CC]-> GET : RemoteGetResponse
+        GET -[#FF6B00]-> GET : <color:#FF6B00>**evictionManager_->Erase()**</color>
+        GET -[#FF6B00]-> GET : <color:#FF6B00>**objectTable_->Erase()**</color>
+        note right of GET
+          <color:#FF6B00>**[NEW]**</color>
+          清理本地临时对象
+        end note
+        GET --[#FF6B00]-> WOC : <color:#FF6B00>**K_OK**</color>
+        deactivate GET
+        deactivate WP
+        deactivate WOC
+    end
+end
+
+== Phase 5: Warmup Completion ==
+
+WOC -[#FF6B00]-> WOC : <color:#FF6B00>**GetUrmaWarmupSuccessCount()**</color>
+note right of WOC
+  <color:#FF6B00>**[NEW]**</color>
+  打印日志：success_count/total_count
+end note
+
+legend right
+  <color:#FF6B00>**■ NEW**</color> = 本 PR 新增的代码和函数
+  <color:#0066CC>**■ EXISTING**</color> = PR 前已存在的代码路径
+endlegend
+
+@enduml

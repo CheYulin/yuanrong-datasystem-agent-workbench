@@ -1,0 +1,143 @@
+{
+  "pr_number": 815,
+  "title": "feat(worker): warm up URMA connections",
+  "author": "yaohaolin (Marck)",
+  "state": "open",
+  "created_at": "2026-05-01T00:22:11+08:00",
+  "updated_at": "2026-05-01T13:14:05+08:00",
+  "head_branch": "0.8.1",
+  "base_branch": "0.8.1",
+  "mergeable": true,
+  "labels": ["sig/sig-YuanRong", "ci_failed"],
+  "changed_files": [
+    {
+      "filename": ".repo_context/modules/runtime/cluster-management.md",
+      "status": "modified",
+      "additions": 19,
+      "deletions": 0
+    },
+    {
+      "filename": ".repo_context/modules/runtime/worker-runtime.md",
+      "status": "modified",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
+      "filename": ".repo_context/playbooks/operations/urma-warmup.md",
+      "status": "added",
+      "additions": 171,
+      "deletions": 0
+    },
+    {
+      "filename": "cli/deploy/conf/worker_config.json",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "filename": "docs/source_zh_cn/deployment/dscli.md",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "filename": "docs/source_zh_cn/deployment/k8s_configuration.md",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "filename": "k8s/helm_chart/datasystem/templates/worker_daemonset.yaml",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "filename": "k8s/helm_chart/datasystem/values.yaml",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "filename": "k8s_deployment/helm_chart/deployment/README.md",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "filename": "k8s_deployment/helm_chart/deployment/values.yaml",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "filename": "k8s_deployment/helm_chart/worker.config",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/common/util/gflag/common_gflag_define.cpp",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/common/util/gflag/common_gflags.h",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/common/util/gflag/common_gflags_validate.cpp",
+      "status": "modified",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/worker/object_cache/service/worker_oc_service_get_impl.cpp",
+      "status": "modified",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/worker/object_cache/service/worker_oc_service_get_impl.h",
+      "status": "modified",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/worker/object_cache/worker_oc_service_impl.cpp",
+      "status": "modified",
+      "additions": 57,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/worker/object_cache/worker_oc_service_impl.h",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/worker/worker_oc_server.cpp",
+      "status": "modified",
+      "additions": 152,
+      "deletions": 0
+    },
+    {
+      "filename": "src/datasystem/worker/worker_oc_server.h",
+      "status": "modified",
+      "additions": 40,
+      "deletions": 0
+    },
+    {
+      "filename": "tests/st/client/object_cache/urma_object_client_test.cpp",
+      "status": "modified",
+      "additions": 73,
+      "deletions": 0
+    }
+  ],
+  "total_additions": 404,
+  "total_deletions": 0,
+  "total_files_changed": 21
+}
