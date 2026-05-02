@@ -25,20 +25,30 @@
 
 ## 当前 RFC
 
-| RFC | Status | 落地位置（datasystem） |
-|-----|--------|-----------------------|
-| [2026-04-kvclient-urma-tcp-observability/](2026-04-kvclient-urma-tcp-observability/README.md) | **Done** | `include/datasystem/utils/status.h`：`K_URMA_WAIT_TIMEOUT=1010`、`K_URMA_CONNECT_FAILED=1009`；`urma_manager.cpp` 新增 WARNING/ERROR 日志；Trace 上下文扩展 |
-| [2026-04-zmq-rpc-metrics/](2026-04-zmq-rpc-metrics/README.md) | **Done** | `common/metrics/kv_metrics.{h,cpp}`：`ZMQ_SEND_IO_LATENCY`、`ZMQ_RECEIVE_IO_LATENCY`、`ZMQ_LAST_ERROR_NUMBER`、`ZMQ_NETWORK_ERROR_TOTAL`、`ZMQ_SEND/RECEIVE_FAILURE_TOTAL`、`ZMQ_EVENT_DISCONNECT_TOTAL`、`ZMQ_EVENT_HANDSHAKE_FAILURE_TOTAL`、`ZMQ_GATEWAY_RECREATE_TOTAL` 等 |
-| [2026-04-shm-leak-observability/](2026-04-shm-leak-observability/README.md) | **In-Progress**（MR [#635](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/635) 评审中） | 新增 18 条 metric（10 worker + 6 master + 2 client）合并为单 commit `3bbcc55a` / 单 PR：覆盖 Allocator alloc/free 对账、`memoryRefTable_` size/bytes、ShmUnit 生命周期、master TTL 链路（fire/success/failed/retry/pending）、client async release 滞后；针对 [2026-04-19 worker shm OOM](../bugfix/2026-04-19-worker-shm-oom-问题定位.md) |
-| [2026-04-zmq-rpc-queue-latency/](2026-04-zmq-rpc-queue-latency/README.md) | **Draft** | `common/metrics/kv_metrics.{h,cpp}`：新增 7 个 Histogram metric（`ZMQ_CLIENT_QUEUING_LATENCY`、`ZMQ_CLIENT_STUB_SEND_LATENCY`、`ZMQ_SERVER_QUEUE_WAIT_LATENCY`、`ZMQ_SERVER_EXEC_LATENCY`、`ZMQ_SERVER_REPLY_LATENCY`、`ZMQ_RPC_E2E_LATENCY`、`ZMQ_RPC_NETWORK_LATENCY`）；`zmq_constants.h`：新增 8 个 Tick 常量 |
-| [2026-04-zmq-rpc-metrics-0.8.1/](2026-04-zmq-rpc-metrics-0.8.1/README.md) | **Draft** | 0.8.1 与 PR #706 对齐说明 + Bazel/whl + `harness_zmq_metrics_e2e.sh` 复用 `run_smoke.py` |
-| [2026-04-worker-get-metrics-breakdown/](2026-04-worker-get-metrics-breakdown/README.md) | **Draft** | **性能定位/定界**：[issue-rfc](2026-04-worker-get-metrics-breakdown/issue-rfc.md) / [modification_plan](2026-04-worker-get-metrics-breakdown/modification_plan.md) / [design](2026-04-worker-get-metrics-breakdown/design.md)；`kv_metrics` 增量 + Get 分段；验收：Bazel `metrics_test` + 日志 + [`grep_get_breakdown`](../scripts/metrics/grep_get_latency_breakdown.sh) |
-| [2026-04-worker-ub-throughput-load-metric/](2026-04-worker-ub-throughput-load-metric/README.md) | **Draft** | **切流 + C↔W 连接均衡**：[issue-rfc](2026-04-worker-ub-throughput-load-metric/issue-rfc.md) / [design](2026-04-worker-ub-throughput-load-metric/design.md)；**A** Po2+连接数、[validation-po2](2026-04-worker-ub-throughput-load-metric/validation-po2-client-count.md)；**B** Po2+UB 字节；`CONTEXT.md` |
+按创建日期倒序排列（最新在上）：
+
+| 日期 | RFC | Status | 落地位置（datasystem） |
+|------|-----|--------|-----------------------|
+| 2026-04-30 | [2026-04-30-zmq-rpc-queue-latency/](2026-04-30-zmq-rpc-queue-latency/README.md) | **Draft** | `common/metrics/kv_metrics.{h,cpp}`：新增 7 个 Histogram metric（`ZMQ_CLIENT_QUEUING_LATENCY`、`ZMQ_CLIENT_STUB_SEND_LATENCY`、`ZMQ_SERVER_QUEUE_WAIT_LATENCY`、`ZMQ_SERVER_EXEC_LATENCY`、`ZMQ_SERVER_REPLY_LATENCY`、`ZMQ_RPC_E2E_LATENCY`、`ZMQ_RPC_NETWORK_LATENCY`）；`zmq_constants.h`：新增 8 个 Tick 常量 |
+| 2026-04-29 | [2026-04-29-worker-ub-throughput-load-metric/](2026-04-29-worker-ub-throughput-load-metric/README.md) | **Draft** | **切流 + C↔W 连接均衡**：[issue-rfc](2026-04-29-worker-ub-throughput-load-metric/issue-rfc.md) / [design](2026-04-29-worker-ub-throughput-load-metric/design.md)；**A** Po2+连接数、[validation-po2](2026-04-29-worker-ub-throughput-load-metric/validation-po2-client-count.md)；**B** Po2+UB 字节；`CONTEXT.md` |
+| 2026-04-27 | [2026-04-27-worker-get-metrics-breakdown/](2026-04-27-worker-get-metrics-breakdown/README.md) | **Draft** | **性能定位/定界**：[issue-rfc](2026-04-27-worker-get-metrics-breakdown/issue-rfc.md) / [modification_plan](2026-04-27-worker-get-metrics-breakdown/modification_plan.md) / [design](2026-04-27-worker-get-metrics-breakdown/design.md)；`kv_metrics` 增量 + Get 分段；验收：Bazel `metrics_test` + 日志 + [`grep_get_breakdown`](../scripts/metrics/grep_get_latency_breakdown.sh) |
+| 2026-04-19 | [2026-04-19-shm-leak-observability/](2026-04-19-shm-leak-observability/README.md) | **In-Progress**（MR [#635](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/635) 评审中） | 新增 18 条 metric（10 worker + 6 master + 2 client）合并为单 commit `3bbcc55a` / 单 PR：覆盖 Allocator alloc/free 对账、`memoryRefTable_` size/bytes、ShmUnit 生命周期、master TTL 链路（fire/success/failed/retry/pending）、client async release 滞后；针对 [2026-04-19 worker shm OOM](../bugfix/2026-04-19-worker-shm-oom-问题定位.md) |
+| 2026-04-18 | [2026-04-18-kvclient-urma-tcp-observability/](2026-04-18-kvclient-urma-tcp-observability/README.md) | **Done** | `include/datasystem/utils/status.h`：`K_URMA_WAIT_TIMEOUT=1010`、`K_URMA_CONNECT_FAILED=1009`；`urma_manager.cpp` 新增 WARNING/ERROR 日志；Trace 上下文扩展 |
+| 2026-04-18 | [2026-04-18-zmq-rpc-metrics/](2026-04-18-zmq-rpc-metrics/README.md) | **Done** | `common/metrics/kv_metrics.{h,cpp}`：`ZMQ_SEND_IO_LATENCY`、`ZMQ_RECEIVE_IO_LATENCY`、`ZMQ_LAST_ERROR_NUMBER`、`ZMQ_NETWORK_ERROR_TOTAL`、`ZMQ_SEND/RECEIVE_FAILURE_TOTAL`、`ZMQ_EVENT_DISCONNECT_TOTAL`、`ZMQ_EVENT_HANDSHAKE_FAILURE_TOTAL`、`ZMQ_GATEWAY_RECREATE_TOTAL` 等 |
+
+---
+
+### 散文件（非目录）
+
+| 文件 | 日期 | 说明 |
+|------|------|------|
+| [p99_histogram.patch](p99_histogram.patch) | — | 未提交的 patch 文件 |
+| [2026-04-urma-jfs-cqe-error9-walkthrough.md](2026-04-urma-jfs-cqe-error9-walkthrough.md) | 2026-04-27 | urma-jfs-cqe-error9 排查走读笔记 |
 
 ---
 
 ## 新 RFC 约定
 
-- 目录命名：`YYYY-MM-<slug>/`（短英文 slug，kebab-case）
+- 目录命名：`YYYY-MM-DD-<slug>/`（日期 + 短英文 slug，kebab-case）
 - 必备文件：`README.md`（含 Status + 目标 + 代码落点摘要）
 - 可选文件：`design.md`、`env-validation.md`、`test-walkthrough.md`、`results.md`、`issue-rfc.md`、`pr-description.md`
