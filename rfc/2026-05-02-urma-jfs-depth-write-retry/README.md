@@ -6,7 +6,7 @@
 
 ## 一句话
 
-通过 **gflags** 配置 send jetty **JFS depth**（默认 2）与 **`URMA_EAGAIN`** 退避间隔（默认 50µs）；在 **`UrmaWriteImpl`** 内按 **`reqTimeoutDuration::CalcRealRemainingTime()`** 截止重试 **post send WR**；新增 **`worker_urma_write_spin_latency`**（Histogram，µs）度量单次分段 post 直至成功或失败退出的耗时。
+通过 **gflags** 配置 send jetty **JFS depth**（默认 2）与 **`URMA_EAGAIN`** 退避间隔（默认 50µs）；在 **`UrmaWriteImpl`** 内按 **`reqTimeoutDuration::CalcRealRemainingTime()`** 截止重试 **post send WR**；新增 **`worker_urma_write_spin_latency`**（Histogram，µs）度量 **首次 `URMA_EAGAIN` 至首次成功** 的耗时（无 EAGAIN 或失败退出则不采样）。
 
 ## 文档索引
 

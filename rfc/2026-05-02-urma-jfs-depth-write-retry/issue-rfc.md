@@ -6,7 +6,7 @@
 
 1. **Send jetty JFS depth** 长期硬编码为与 recv JFR 同量级常量（历史默认 256），不利于在 **浅队列 / 设备限额** 场景下调参验证；需要将 **send 侧 JFS depth** 暴露为 **gflags**，并把临时默认设为较小值（如 **2**）以便压测与行为对齐。
 2. **`urma_post_jetty_send_wr`**（本仓库经 `PostJettyRw` → `ds_urma_post_jetty_send_wr`）在设备侧可能出现 **`URMA_EAGAIN`**（典型：队列满或 WR 缓冲暂不可用，参见 UMDK `bondp_datapath`）。当前实现一旦失败即返回错误，缺少 **基于 RPC 剩余时间的退避重试**，易导致不必要失败或与上层超时语义不协调。
-3. **可观测性**：需要度量「从首次尝试 post 到 post 成功或因不可恢复错误 / RPC deadline 退出」的耗时，用于评估浅队列下的 **自旋 / 睡眠等待** 成本，而不是单独计量每次 `nanosleep`。
+3. **可观测性**：需要度量「从 **首次 `URMA_EAGAIN`** 到 **首次 post 成功**」的耗时（µs），用于评估浅队列下的 **退避 / 重试** 成本；**首次 post 即成功则不采样**；**非 EAGAIN 失败或 deadline 退出也不采样**。
 
 ### 目标
 
@@ -16,7 +16,7 @@
 | Gflags：退避 | **`urma_write_spin_retry_sleep_us`**（uint32，默认 **50**，单位 **µs**）：两次 **`URMA_EAGAIN`** post 尝试之间的 **`nanosleep`**；**0** 表示不睡眠（校验上限例如 ≤ 1s）。 |
 | 重试语义 | **仅对 `URMA_EAGAIN`** 重试；其它 **`urma_status_t`** 立即失败（避免对 **`EINVAL`** 等错误死循环）。 |
 | 截止时间 | 每次继续重试前使用 **`reqTimeoutDuration.CalcRealRemainingTime() <= 0`** 作为硬停（与 RPC deadline 对齐的真实剩余毫秒）；耗尽则 **`DeleteEvent`** 并返回 **`K_URMA_ERROR`**（文案标明 deadline）。 |
-| 指标 | 新增 **`WORKER_URMA_WRITE_SPIN_LATENCY`** → Prometheus 名 **`worker_urma_write_spin_latency`**，Histogram，单位 **µs**；**每个 write 分段** 在 **成功**、**非 EAGAIN 失败**、**deadline 耗尽** 路径各 **Observe 一次**（终态样本）。 |
+| 指标 | 新增 **`WORKER_URMA_WRITE_SPIN_LATENCY`** → Prometheus 名 **`worker_urma_write_spin_latency`**，Histogram，单位 **µs**；**仅当** 该分段发生过 **≥1 次 `URMA_EAGAIN`** 且最终 **post 成功** 时 **Observe 一次**（失败 / 超时路径不写入）。 |
 | 既有指标 | **`WORKER_URMA_WRITE_LATENCY`**（`METRIC_TIMER`）仍覆盖该分段主要逻辑区间；**不在** write 重试的 `nanosleep` 上打 **`URMA_NANOSLEEP_LATENCY`**（该指标保留 id，**仅** JFC poll 线程原逻辑继续使用，避免与「post 重试」语义混淆）。 |
 
 ### 非目标
@@ -46,13 +46,14 @@ jfsConfig.depth = isSendJetty ? FLAGS_urma_send_jfs_depth : RECV_JETTY_JFS_DEPTH
 对每个 **`remainSize` 分段**（对应一次 **`CreateEvent`** + 同一 **`key`**）：
 
 1. **`CreateEvent`** 成功后进入 **复合语句块**（便于阅读 RAII 与 **break → 后继语句** 的先后关系）。
-2. 块首 **`METRIC_TIMER(WORKER_URMA_WRITE_LATENCY)`**；**`Timer spinTimer`** 从首次 **`PostJettyRw`** 前启动。
+2. 块首 **`METRIC_TIMER(WORKER_URMA_WRITE_LATENCY)`**；**`Timer spinLatencyTimer`** + **`spinPhaseActive`**（初始 **false**）。
 3. **`while (true)`**：调用 **`PostJettyRw`**（NUMA / 非 NUMA 分支保持原有逻辑）。
-4. **`URMA_SUCCESS`**：**`break`**。
-5. 否则计算 **`spinUs`**；若 **`ret != URMA_EAGAIN`**：**Observe spin** → **`DeleteEvent`** → **`RETURN_STATUS_LOG_ERROR`**。
-6. 若 **`CalcRealRemainingTime() <= 0`**：**Observe spin** → **`DeleteEvent`** → deadline 文案 **`RETURN_STATUS_LOG_ERROR`**。
-7. 否则按 **`FLAGS_urma_write_spin_retry_sleep_us`** 构造 **`timespec`**（µs → **`tv_sec` + `tv_nsec`**，`tv_nsec` 为 **余 µs × 1000**）并 **`nanosleep`**（**不打** **`URMA_NANOSLEEP_LATENCY`**）。
-8. 内层循环结束后 **再次 Observe** **`spinUsDone`**（成功路径），然后 **`VLOG` / `PerfPoint::Record` / 更新 `remainSize` / `eventKeys`**。
+4. **`URMA_SUCCESS`**：若 **`spinPhaseActive`**（曾遇到 **`URMA_EAGAIN`**），则 **`Observe`** **`spinLatencyTimer`**（µs）→ **`WORKER_URMA_WRITE_SPIN_LATENCY`**；然后 **`break`**。
+5. 若 **`ret != URMA_EAGAIN`**：**不 Observe spin** → **`DeleteEvent`** → **`RETURN_STATUS_LOG_ERROR`**。
+6. 首次进入 **`URMA_EAGAIN` 分支**：置 **`spinPhaseActive=true`** 并对 **`spinLatencyTimer.Reset()`**（计时起点：**收到首次 EAGAIN 之后**，位于 deadline 检查与 **`nanosleep` 之前）。
+7. 若 **`CalcRealRemainingTime() <= 0`**：**不 Observe** → **`DeleteEvent`** → deadline 文案 **`RETURN_STATUS_LOG_ERROR`**。
+8. 否则按 **`FLAGS_urma_write_spin_retry_sleep_us`** 构造 **`timespec`** 并 **`nanosleep`**（**不打** **`URMA_NANOSLEEP_LATENCY`**）；循环继续。
+9. 内层循环 **`break`** 后 **`VLOG` / `PerfPoint::Record` / 更新 `remainSize` / `eventKeys`**（成功路径无第二次 spin Observe）。
 
 ### `timespec` 与单位（便于代码评审）
 
@@ -113,8 +114,8 @@ bazel test //tests/ut/common/metrics:metrics_test --test_output=errors
 
 ### 集成 / 实机（必选用于数据面）
 
-- 在 **URMA** 环境跑 worker-worker OC Put / 压力下：**浅 depth + 并发 post** 可能拉高 **`worker_urma_write_spin_latency`**。
-- 对照 **`worker_urma_write_latency`** 与 **`worker_urma_write_spin_latency`**：前者偏分段整体，后者偏 **post 重试区间**。
+- 在 **URMA** 环境跑 worker-worker OC Put / 压力下：**浅 depth + 并发 post** 可能在「遇 EAGAIN 后仍成功」的请求上 **`worker_urma_write_spin_latency`** 出现样本。
+- 对照 **`worker_urma_write_latency`**（分段整体）与 **`worker_urma_write_spin_latency`**（仅 **EAGAIN→成功** 子集）：后者 **计数** 通常 ≤ 前者分段次数。
 
 ---
 

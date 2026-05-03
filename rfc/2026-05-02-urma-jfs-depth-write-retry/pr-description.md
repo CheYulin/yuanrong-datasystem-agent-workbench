@@ -13,7 +13,7 @@
 1. **Send jetty JFS depth 可配置**：新增 **`urma_send_jfs_depth`**（默认 **2**），仅作用于 **`UrmaJetty::Create`** 中 **send** 分支的 **`jfsConfig.depth`**；recv 深度与 recv 侧 JFR 常量策略不变。
 2. **Post 遇 `URMA_EAGAIN` 可退避重试**：在 **`UrmaWriteImpl`** 内循环 **`PostJettyRw`**；仅 **`URMA_EAGAIN`** 在 **`reqTimeoutDuration.CalcRealRemainingTime() > 0`** 时 **`nanosleep`** 后继续；其它返回码立即失败；deadline 耗尽返回 **`K_URMA_ERROR`** 并 **`DeleteEvent`**。
 3. **退避间隔可配置**：新增 **`urma_write_spin_retry_sleep_us`**（默认 **50**，单位 **µs**；允许 **0**；校验上限 **1_000_000** µs）。
-4. **可观测**：新增 **`WORKER_URMA_WRITE_SPIN_LATENCY`**（**`worker_urma_write_spin_latency`**，Histogram **µs**），对每个 write **分段**在 **post 成功**或 **失败退出**（非 EAGAIN / deadline）记录一次耗时。
+4. **可观测**：新增 **`WORKER_URMA_WRITE_SPIN_LATENCY`**（**`worker_urma_write_spin_latency`**，Histogram **µs**）；**仅当** 该分段发生过 **≥1 次 `URMA_EAGAIN`** 且最终 **post 成功** 时记录 **从首次 EAGAIN 到成功** 的耗时（首次 post 即成功、或非 EAGAIN / deadline 失败 **均不采样**）。
 5. **不打 `URMA_NANOSLEEP` 在 write 重试**：避免与 poll 线程 **`URMA_NANOSLEEP_LATENCY`** 语义混淆；**poll 线程原 `METRIC_TIMER(URMA_NANOSLEEP_LATENCY)` 保留**。
 
 **为什么需要**：浅 JFS / 设备侧 transient 资源不足时，`EAGAIN` 直接失败会放大尾延迟与失败率；需要 **可观测的 post 重试代价** 与 **可运维的 depth / sleep** 旋钮。UMDK bond 路径在部分场景返回 **`URMA_EAGAIN`**，与本重试语义对齐。
@@ -28,7 +28,7 @@
 | `StatusCode` | **无** 新枚举（仍用既有 **`K_URMA_ERROR`** 等承载 post / deadline 失败） |
 | 默认行为 | **`urma_send_jfs_depth` 默认 2**（原硬编码 send depth 通常为 256 量级）：可能影响 **并发未完成 post 数** 与 **吞吐**，需按环境覆盖 flag |
 | 行为语义 | **`URMA_EAGAIN`** 下由 **立即失败** 变为 **在 RPC 剩余时间内重试**：可能改变 **尾延迟分布** 与 **错误率** |
-| 监控 | 新增 **`worker_urma_write_spin_latency`**；**`URMA_NANOSLEEP_LATENCY`** id **保留**，write 路径不再写入 |
+| 监控 | 新增 **`worker_urma_write_spin_latency`**（Histogram，仅 **≥1×EAGAIN 且最终成功** 采样）；**`URMA_NANOSLEEP_LATENCY`** id **保留**，write 重试 **`nanosleep`** 不打 |
 
 ---
 
