@@ -83,7 +83,18 @@ fi
 
 quoted=""
 if [[ $# -gt 0 ]]; then
-  for _a; do
+  arr=("$@")
+  inject_jobs=1
+  for _x in "${arr[@]}"; do
+    if [[ "${_x}" == --jobs=* || "${_x}" == -j ]]; then
+      inject_jobs=0
+      break
+    fi
+  done
+  if [[ "${inject_jobs}" -eq 1 && "${arr[0]}" =~ ^(build|test|run|coverage)$ ]]; then
+    arr=("${arr[0]}" "--jobs=${BAZEL_JOBS}" "${arr[@]:1}")
+  fi
+  for _a in "${arr[@]}"; do
     quoted+=" $(printf '%q' "${_a}")"
   done
   quoted="${quoted# }"
@@ -105,8 +116,8 @@ if [[ "${INSPECT_ONLY}" -eq 1 ]]; then
 fi
 
 if [[ -z "${quoted}" ]]; then
-  quoted="build //..."
-  echo "No bazel args; default: build //..."
+  quoted="$(printf '%q' build) $(printf '%q' --jobs="${BAZEL_JOBS}") $(printf '%q' //...)"
+  echo "No bazel args; default: build --jobs=${BAZEL_JOBS} //..."
 fi
 
 # shellcheck disable=SC2029
@@ -118,7 +129,7 @@ ssh "${REMOTE}" "
   ${BAZEL_CMD} info release 2>/dev/null || true
   ${BAZEL_CMD} info bazel-bin
   ${BAZEL_CMD} info output_path
-  ${BAZEL_CMD} --jobs=\"${BAZEL_JOBS}\" ${quoted}
+  ${BAZEL_CMD} ${quoted}
 "
 echo
 echo "产物与排查: ${SCRIPT_DIR}/REMOTE_BAZEL_BUILD.md"
