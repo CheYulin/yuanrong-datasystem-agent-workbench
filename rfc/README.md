@@ -29,6 +29,7 @@
 
 | 日期 | RFC | Status | 落地位置（datasystem） |
 |------|-----|--------|-----------------------|
+| 2026-05-03 | [2026-05-03-metrics-p99-histogram/](2026-05-03-metrics-p99-histogram/README.md) | **Draft** | **Histogram P99**（20 固定桶，`common/metrics` + `metrics_test`）；见 [implementation-plan](2026-05-03-metrics-p99-histogram/implementation-plan.md) |
 | 2026-05-02 | [2026-05-02-urma-jfs-depth-write-retry/](2026-05-02-urma-jfs-depth-write-retry/README.md) | **In-Progress** | **URMA write**：gflags `urma_send_jfs_depth` / `urma_write_spin_retry_sleep_us`；`urma_resource.cpp` send JFS depth；`UrmaWriteImpl` **`URMA_EAGAIN`** 退避 + **`worker_urma_write_spin_latency`**；详见 [issue-rfc](2026-05-02-urma-jfs-depth-write-retry/issue-rfc.md) |
 | 2026-04-30 | [2026-04-30-zmq-rpc-queue-latency/](2026-04-30-zmq-rpc-queue-latency/README.md) | **Draft** | `common/metrics/kv_metrics.{h,cpp}`：新增 7 个 Histogram metric（`ZMQ_CLIENT_QUEUING_LATENCY`、`ZMQ_CLIENT_STUB_SEND_LATENCY`、`ZMQ_SERVER_QUEUE_WAIT_LATENCY`、`ZMQ_SERVER_EXEC_LATENCY`、`ZMQ_SERVER_REPLY_LATENCY`、`ZMQ_RPC_E2E_LATENCY`、`ZMQ_RPC_NETWORK_LATENCY`）；`zmq_constants.h`：新增 8 个 Tick 常量 |
 | 2026-04-29 | [2026-04-29-worker-ub-throughput-load-metric/](2026-04-29-worker-ub-throughput-load-metric/README.md) | **Draft** | **切流 + C↔W 连接均衡**：[issue-rfc](2026-04-29-worker-ub-throughput-load-metric/issue-rfc.md) / [design](2026-04-29-worker-ub-throughput-load-metric/design.md)；**A** Po2+连接数、[validation-po2](2026-04-29-worker-ub-throughput-load-metric/validation-po2-client-count.md)；**B** Po2+UB 字节；`CONTEXT.md` |
@@ -43,7 +44,8 @@
 
 | 文件 | 日期 | 说明 |
 |------|------|------|
-| [p99_histogram.patch](p99_histogram.patch) | — | 未提交的 patch 文件 |
+| ~~`yuanrong-datasystem-metrics-p99-design.md`~~ / ~~`yuanrong-datasystem-metrics-p99.patch`~~ | — | **已删除**：其中 **Histogram P99（metrics）** 已迁入 [2026-05-03-metrics-p99-histogram/](2026-05-03-metrics-p99-histogram/README.md)；原稿中 ZMQ/tick/ns→µs 等内容与 [2026-04-30-zmq-rpc-queue-latency/](2026-04-30-zmq-rpc-queue-latency/README.md) 等相关 RFC 另线跟踪 |
+| ~~`p99_histogram_verification.md`~~ | — | **已删除**：与 [2026-05-03-metrics-p99-histogram/verification.md](2026-05-03-metrics-p99-histogram/verification.md) 重复；以 RFC 目录内版本为准（§2 patch 路径已更新） |
 | [2026-04-urma-jfs-cqe-error9-walkthrough.md](2026-04-urma-jfs-cqe-error9-walkthrough.md) | 2026-04-27 | urma-jfs-cqe-error9 排查走读笔记 |
 
 ---

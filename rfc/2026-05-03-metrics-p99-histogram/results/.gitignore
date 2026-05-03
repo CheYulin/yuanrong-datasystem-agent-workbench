@@ -1,0 +1,2 @@
+# Logs from scripts/bazel_run_tests.sh / run_full_tests_remote.sh
+*.log

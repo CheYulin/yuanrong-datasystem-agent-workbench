@@ -1,0 +1,291 @@
+diff --git a/src/datasystem/common/metrics/metrics.cpp b/src/datasystem/common/metrics/metrics.cpp
+index cb20726e..4ab54739 100644
+--- a/src/datasystem/common/metrics/metrics.cpp
++++ b/src/datasystem/common/metrics/metrics.cpp
+@@ -17,6 +17,7 @@
+ #include "datasystem/common/metrics/metrics.h"
+ 
+ #include <array>
++#include <algorithm>
+ #include <atomic>
+ #include <cstring>
+ #include <mutex>
+@@ -57,6 +58,7 @@ struct alignas(64) MetricSlot {
+     std::atomic<uint64_t> sum{ 0 };
+     std::atomic<uint64_t> max{ 0 };
+     std::atomic<uint64_t> periodMax{ 0 };
++    HistBuckets histBuckets{};
+     std::mutex histMutex;
+     bool used = false;
+ };
+@@ -66,6 +68,7 @@ struct LastSnapshot {
+     uint64_t u64Value = 0;
+     int64_t i64Value = 0;
+     uint64_t sum = 0;
++    HistBuckets histBuckets{};
+ };
+ 
+ std::array<MetricSlot, MAX_METRIC_NUM> g_slots;
+@@ -89,6 +92,7 @@ void ClearAll()
+         slot.sum.store(0, std::memory_order_relaxed);
+         slot.max.store(0, std::memory_order_relaxed);
+         slot.periodMax.store(0, std::memory_order_relaxed);
++        slot.histBuckets = {};
+         slot.used = false;
+     }
+     for (auto &last : g_last) {
+@@ -127,6 +131,56 @@ std::string RenderJsonSummary(
+     return os.str();
+ }
+ 
++uint64_t PercentileFromBuckets(const HistBuckets& buckets, uint64_t count, uint32_t percentile,
++                               uint64_t overflowMax)
++{
++    if (count == 0) {
++        return 0;
++    }
++    uint64_t target = (count * percentile + 99) / 100;
++    uint64_t seen = 0;
++    for (size_t i = 0; i < buckets.size(); ++i) {
++        uint64_t prevSeen = seen;
++        seen += buckets[i];
++        if (seen >= target) {
++            // If target lands in the last bucket, return the actual overflow max
++            // (not the bucket upper bound, which is just an upper estimate).
++            // This correctly handles sparse data where the actual max is known.
++            if (i == buckets.size() - 1 && overflowMax > 0) {
++                return overflowMax;
++            }
++            // Small count: histogram approximation is unreliable, return actual max
++            if (count <= 10) {
++                return overflowMax > 0 ? overflowMax : HIST_BUCKET_UPPER.back();
++            }
++            uint64_t lower = (i == 0) ? 0 : HIST_BUCKET_UPPER[i - 1];
++            uint64_t upper = HIST_BUCKET_UPPER[i];
++            uint64_t bucketCount = buckets[i];
++            if (bucketCount == 0) {
++                return upper;
++            }
++            uint64_t positionInBucket = target - prevSeen;
++            uint64_t bucketWidth = upper - lower;
++            if (bucketWidth == 0) {
++                return lower;
++            }
++            uint64_t interpolated =
++                lower + (positionInBucket * bucketWidth + bucketCount - 1) / bucketCount;
++            return interpolated;
++        }
++    }
++    return overflowMax > 0 ? overflowMax : HIST_BUCKET_UPPER.back();
++}
++
++inline HistBuckets DeltaBuckets(const HistBuckets& curr, const HistBuckets& last)
++{
++    HistBuckets delta{};
++    for (size_t i = 0; i < HIST_BUCKET_NUM; ++i) {
++        delta[i] = (curr[i] >= last[i]) ? (curr[i] - last[i]) : curr[i];
++    }
++    return delta;
++}
++
+ std::vector<std::string> BuildSummary(int intervalMs)
+ {
+     std::lock_guard<std::mutex> lock(g_stateMutex);
+@@ -163,15 +217,23 @@ std::vector<std::string> BuildSummary(int intervalMs)
+             auto dCount = count - last.u64Value;
+             auto dSum = sum - last.sum;
+             auto dMax = slot.periodMax.exchange(0, std::memory_order_relaxed);
++            HistBuckets deltaHistBuckets = DeltaBuckets(slot.histBuckets, last.histBuckets);
++            uint64_t totalP99 = PercentileFromBuckets(slot.histBuckets, count, 99, max);
++            uint64_t deltaP99 = PercentileFromBuckets(deltaHistBuckets, dCount, 99, dMax);
+             if (count > 0) {
+                 needAdd = true;
+-                item << "{\"name\":\"" << slot.name << "\",\"total\":"
+-                     << "{\"count\":" << count << ",\"avg_us\":" << (count == 0 ? 0 : sum / count)
+-                     << ",\"max_us\":" << max << "},\"delta\":{\"count\":" << dCount
+-                     << ",\"avg_us\":" << (dCount == 0 ? 0 : dSum / dCount) << ",\"max_us\":" << dMax << "}}";
++                std::ostringstream val;
++                val << "{\"count\":" << count << ",\"avg_us\":" << (count == 0 ? 0 : sum / count)
++                    << ",\"max_us\":" << max << ",\"p99\":" << totalP99 << "}";
++                std::ostringstream dval;
++                dval << "{\"count\":" << dCount << ",\"avg_us\":" << (dCount == 0 ? 0 : dSum / dCount)
++                     << ",\"max_us\":" << dMax << ",\"p99\":" << deltaP99 << "}";
++                item << "{\"name\":\"" << slot.name << "\",\"total\":" << val.str()
++                     << ",\"delta\":" << dval.str() << "}";
+             }
+             last.u64Value = count;
+             last.sum = sum;
++            last.histBuckets = slot.histBuckets;
+         }
+         if (needAdd) {
+             metrics.emplace_back(item.str());
+@@ -300,6 +362,7 @@ void Histogram::Observe(uint64_t value) const
+         slot_->sum.fetch_add(value, std::memory_order_relaxed);
+         UpdateMax(slot_->max, value);
+         UpdateMax(slot_->periodMax, value);
++        ++slot_->histBuckets[BucketIndex(value)];
+     }
+ }
+ 
+diff --git a/src/datasystem/common/metrics/metrics.h b/src/datasystem/common/metrics/metrics.h
+index 01ec1cc1..e8369749 100644
+--- a/src/datasystem/common/metrics/metrics.h
++++ b/src/datasystem/common/metrics/metrics.h
+@@ -23,6 +23,8 @@
+ #include <string>
+ 
+ #include "datasystem/utils/status.h"
++#include <array>
++#include <algorithm>
+ 
+ namespace datasystem::metrics {
+ struct MetricSlot;
+@@ -73,6 +75,28 @@ private:
+     MetricSlot *slot_;
+ };
+ 
++// P99 histogram: 20 fixed buckets (1us ~ 60s, optimized for 0-5ms)
++constexpr std::array<uint64_t, 20> HIST_BUCKET_UPPER = {
++    1, 2, 5, 10, 20, 50, 100, 200, 500, 1000,
++    2000, 3000, 4000, 5000,
++    10000, 20000, 50000, 100000, 1000000, 60000000
++};
++constexpr size_t HIST_BUCKET_NUM = HIST_BUCKET_UPPER.size();
++using HistBuckets = std::array<uint64_t, HIST_BUCKET_NUM>;
++
++// upper_bound: first bucket > value -> P99 returns bucket upper bound
++inline size_t BucketIndex(uint64_t value) {
++    auto it = std::upper_bound(HIST_BUCKET_UPPER.begin(), HIST_BUCKET_UPPER.end(), value);
++    size_t idx = static_cast<size_t>(it - HIST_BUCKET_UPPER.begin());
++    if (idx >= HIST_BUCKET_NUM) {
++        idx = HIST_BUCKET_NUM - 1;
++    }
++    return idx;
++}
++
++uint64_t PercentileFromBuckets(const HistBuckets& buckets, uint64_t count, uint32_t percentile,
++                                uint64_t overflowMax = 0);
++
+ Counter GetCounter(uint16_t id);
+ Gauge GetGauge(uint16_t id);
+ Histogram GetHistogram(uint16_t id);
+diff --git a/tests/ut/common/metrics/metrics_test.cpp b/tests/ut/common/metrics/metrics_test.cpp
+index 7f905928..a0345fed 100644
+--- a/tests/ut/common/metrics/metrics_test.cpp
++++ b/tests/ut/common/metrics/metrics_test.cpp
+@@ -64,12 +64,13 @@ std::string ScalarMetricJson(const std::string &name, int64_t total, int64_t del
+ }
+ 
+ std::string HistogramMetricJson(const std::string &name, uint64_t totalCount, uint64_t totalAvg, uint64_t totalMax,
+-                                uint64_t deltaCount, uint64_t deltaAvg, uint64_t deltaMax)
++                                uint64_t totalP99, uint64_t deltaCount, uint64_t deltaAvg, uint64_t deltaMax,
++                                uint64_t deltaP99)
+ {
+     std::ostringstream os;
+     os << "{\"name\":\"" << name << "\",\"total\":{\"count\":" << totalCount << ",\"avg_us\":" << totalAvg
+-       << ",\"max_us\":" << totalMax << "},\"delta\":{\"count\":" << deltaCount << ",\"avg_us\":" << deltaAvg
+-       << ",\"max_us\":" << deltaMax << "}}";
++       << ",\"max_us\":" << totalMax << ",\"p99\":" << totalP99 << "},\"delta\":{\"count\":" << deltaCount
++       << ",\"avg_us\":" << deltaAvg << ",\"max_us\":" << deltaMax << ",\"p99\":" << deltaP99 << "}}";
+     return os.str();
+ }
+ 
+@@ -112,7 +113,7 @@ TEST_F(MetricsTest, histogram_observe_test)
+     hist.Observe(10);
+     hist.Observe(30);
+     auto summary = metrics::DumpSummaryForTest();
+-    EXPECT_NE(summary.find(HistogramMetricJson("test_histogram", 2, 20, 30, 2, 20, 30)), std::string::npos);
++    EXPECT_NE(summary.find(HistogramMetricJson("test_histogram", 2, 20, 30, 30, 2, 20, 30, 30)), std::string::npos);
+ }
+ 
+ TEST_F(MetricsTest, histogram_empty_test)
+@@ -180,7 +181,8 @@ TEST_F(MetricsTest, histogram_concurrent_observe_test)
+         worker.join();
+     }
+     auto summary = metrics::DumpSummaryForTest();
+-    EXPECT_NE(summary.find(HistogramMetricJson("test_histogram", 64000, 10, 10, 64000, 10, 10)), std::string::npos);
++    EXPECT_NE(summary.find(HistogramMetricJson("test_histogram", 64000, 10, 10, 10, 64000, 10, 10, 10)),
++              std::string::npos);
+ }
+ 
+ TEST_F(MetricsTest, writer_summary_format_test)
+@@ -286,7 +288,7 @@ TEST_F(MetricsTest, writer_histogram_delta_test)
+     (void)metrics::DumpSummaryForTest();
+     metrics::GetHistogram(HISTOGRAM_ID).Observe(30);
+     auto summary = metrics::DumpSummaryForTest();
+-    EXPECT_NE(summary.find(HistogramMetricJson("test_histogram", 2, 20, 30, 1, 30, 30)), std::string::npos);
++    EXPECT_NE(summary.find(HistogramMetricJson("test_histogram", 2, 20, 30, 30, 1, 30, 30, 30)), std::string::npos);
+ }
+ 
+ TEST_F(MetricsTest, writer_zero_delta_test)
+@@ -452,7 +454,8 @@ TEST_F(MetricsTest, client_put_metrics_counter_test)
+ {
+     InitKvMetricsForTest();
+     METRIC_INC(metrics::KvMetricId::CLIENT_PUT_REQUEST_TOTAL);
+-    EXPECT_NE(metrics::DumpSummaryForTest().find(ScalarMetricJson("client_put_request_total", 1, 1)), std::string::npos);
++    EXPECT_NE(metrics::DumpSummaryForTest().find(ScalarMetricJson("client_put_request_total", 1, 1)),
++              std::string::npos);
+ }
+ 
+ TEST_F(MetricsTest, client_put_metrics_error_counter_test)
+@@ -466,7 +469,8 @@ TEST_F(MetricsTest, client_get_metrics_counter_test)
+ {
+     InitKvMetricsForTest();
+     METRIC_INC(metrics::KvMetricId::CLIENT_GET_REQUEST_TOTAL);
+-    EXPECT_NE(metrics::DumpSummaryForTest().find(ScalarMetricJson("client_get_request_total", 1, 1)), std::string::npos);
++    EXPECT_NE(metrics::DumpSummaryForTest().find(ScalarMetricJson("client_get_request_total", 1, 1)),
++              std::string::npos);
+ }
+ 
+ TEST_F(MetricsTest, client_get_metrics_error_counter_test)
+@@ -676,8 +680,8 @@ TEST_F(MetricsTest, kv_metrics_create_meta_test)
+ {
+     InitKvMetricsForTest();
+     metrics::GetHistogram(static_cast<uint16_t>(metrics::KvMetricId::WORKER_RPC_CREATE_META_LATENCY)).Observe(10);
+-    EXPECT_NE(metrics::DumpSummaryForTest().find(HistogramMetricJson("worker_rpc_create_meta_latency", 1, 10, 10, 1,
+-                                                                     10, 10)),
++    EXPECT_NE(metrics::DumpSummaryForTest().find(HistogramMetricJson("worker_rpc_create_meta_latency", 1, 10, 10, 10, 1,
++                                                                     10, 10, 10)),
+               std::string::npos);
+ }
+ 
+@@ -685,8 +689,8 @@ TEST_F(MetricsTest, kv_metrics_query_meta_test)
+ {
+     InitKvMetricsForTest();
+     metrics::GetHistogram(static_cast<uint16_t>(metrics::KvMetricId::WORKER_RPC_QUERY_META_LATENCY)).Observe(10);
+-    EXPECT_NE(metrics::DumpSummaryForTest().find(HistogramMetricJson("worker_rpc_query_meta_latency", 1, 10, 10, 1, 10,
+-                                                                     10)),
++    EXPECT_NE(metrics::DumpSummaryForTest().find(HistogramMetricJson("worker_rpc_query_meta_latency", 1, 10, 10, 10, 1,
++                                                                     10, 10, 10)),
+               std::string::npos);
+ }
+ 
+@@ -697,7 +701,7 @@ TEST_F(MetricsTest, kv_metrics_remote_get_test)
+         .Observe(10);
+     EXPECT_NE(
+         metrics::DumpSummaryForTest().find(
+-            HistogramMetricJson("worker_rpc_remote_get_outbound_latency", 1, 10, 10, 1, 10, 10)),
++            HistogramMetricJson("worker_rpc_remote_get_outbound_latency", 1, 10, 10, 10, 1, 10, 10, 10)),
+         std::string::npos);
+ }
+ 
+@@ -708,7 +712,7 @@ TEST_F(MetricsTest, kv_metrics_urma_path_test)
+     metrics::GetHistogram(static_cast<uint16_t>(metrics::KvMetricId::WORKER_URMA_WRITE_LATENCY)).Observe(10);
+     auto summary = metrics::DumpSummaryForTest();
+     EXPECT_NE(summary.find(ScalarMetricJson("client_get_urma_read_total_bytes", 32, 32)), std::string::npos);
+-    EXPECT_NE(summary.find(HistogramMetricJson("worker_urma_write_latency", 1, 10, 10, 1, 10, 10)),
++    EXPECT_NE(summary.find(HistogramMetricJson("worker_urma_write_latency", 1, 10, 10, 10, 1, 10, 10, 10)),
+               std::string::npos);
+ }
+ 
+@@ -719,7 +723,9 @@ TEST_F(MetricsTest, kv_metrics_tcp_fallback_test)
+     metrics::GetHistogram(static_cast<uint16_t>(metrics::KvMetricId::WORKER_TCP_WRITE_LATENCY)).Observe(10);
+     auto summary = metrics::DumpSummaryForTest();
+     EXPECT_NE(summary.find(ScalarMetricJson("client_get_tcp_read_total_bytes", 64, 64)), std::string::npos);
+-    EXPECT_NE(summary.find(HistogramMetricJson("worker_tcp_write_latency", 1, 10, 10, 1, 10, 10)), std::string::npos);
++    EXPECT_NE(
++        summary.find(HistogramMetricJson("worker_tcp_write_latency", 1, 10, 10, 10, 1, 10, 10, 10)),
++        std::string::npos);
+ }
+ 
+ TEST_F(MetricsTest, kv_metrics_summary_format_test)
