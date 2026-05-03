@@ -10,11 +10,15 @@
 #   --skip-run     Stop after build
 #   --skip-parse   Do not run parse_repl_log.py after run
 #   --tee          Forward to bazel_run.sh (live ssh stream; default is remote file + scp)
+#   --kv-metrics-ut After remote bazel_build, run //tests/ut/common/metrics:metrics_test
+#                  (--test_filter=MetricsTest.kv_metric_urma_id_layout_test) — catches stale
+#                  KvMetricId / KV_METRIC_DESCS skew when queue-flow enums shift before URMA worker tail.
 # Environment: same as repl_remote_common.inc.sh (REMOTE_*, DS_OPENSOURCE_DIR_REMOTE, BAZEL_JOBS, …)
 #
 # Examples:
 #   ./repl_pipeline.sh
 #   BAZEL_JOBS=16 ./repl_pipeline.sh --skip-sync 15
+#   ./repl_pipeline.sh --kv-metrics-ut --skip-sync 5   # KV enum/desc sanity before long REPL UT
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +30,7 @@ SKIP_BUILD=0
 SKIP_RUN=0
 SKIP_PARSE=0
 RUN_TEE=0
+KV_METRICS_UT=0
 DURATION="5"
 
 while [[ $# -gt 0 ]]; do
@@ -35,8 +40,9 @@ while [[ $# -gt 0 ]]; do
     --skip-run) SKIP_RUN=1 ;;
     --skip-parse) SKIP_PARSE=1 ;;
     --tee) RUN_TEE=1 ;;
+    --kv-metrics-ut) KV_METRICS_UT=1 ;;
     -h|--help)
-      sed -n '1,20p' "$0"
+      sed -n '1,22p' "$0"
       exit 0
       ;;
     -*)
@@ -67,6 +73,11 @@ if [[ "${SKIP_BUILD}" -eq 0 ]]; then
   bash "${SCRIPT_DIR}/bazel_build.sh"
 else
   echo "=== skipping bazel build (--skip-build) ==="
+fi
+
+if [[ "${KV_METRICS_UT}" -eq 1 ]]; then
+  echo "=== remote KV metrics URMA-tail layout UT (after build, before repl bazel_run) ==="
+  bash "${SCRIPT_DIR}/bazel_run_kv_metric_urma_layout_ut.sh"
 fi
 
 if [[ "${SKIP_RUN}" -eq 0 ]]; then

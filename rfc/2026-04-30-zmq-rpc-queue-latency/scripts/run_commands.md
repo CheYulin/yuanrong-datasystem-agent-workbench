@@ -7,10 +7,11 @@
 | 脚本 | 作用 |
 |------|------|
 | `repl_remote_common.inc.sh` | **仅被 source**：统一 `LOCAL_DS`、`REMOTE`、`REMOTE_DS`、`DS_OPENSOURCE_DIR_REMOTE`、`BAZEL_JOBS`、bazel target、日志路径（不要单独执行） |
-| `repl_pipeline.sh` | **推荐一键**：按顺序调用下面三步 + `parse_repl_log.py` |
+| `repl_pipeline.sh` | **推荐一键**：按顺序调用下面三步 + `parse_repl_log.py`；可加 **`--kv-metrics-ut`**：在远端 `bazel build` 之后、长耗时的 REPL `bazel test` 之前跑一次 **`MetricsTest.kv_metric_urma_id_layout_test`** |
 | `rsync_datasystem.sh` | 将本地 `yuanrong-datasystem` 同步到远端 `REMOTE_DS`（`--delete`，排除项见 `${AGENT_WORKBENCH_ROOT}/scripts/build/remote_build_run_datasystem.rsyncignore`） |
 | `bazel_build.sh` | 远端 `bazel build`：`//tests/st/common/rpc/zmq:zmq_rpc_queue_latency_repl` |
 | `bazel_run.sh` | 默认：远端 **`bazel test`**（`ds_cc_test`），`--test_env=ZMQ_RPC_QUEUE_LATENCY_SEC=<秒>`（位置参数默认 5），stdout/stderr 重定向 **`REMOTE_REPL_LOG_PATH`** 后 **`scp` 回本机** `results/zmq_rpc_queue_latency_repl.log`。盯屏：**`./bazel_run.sh --tee [秒]`**。 |
+| `bazel_run_kv_metric_urma_layout_ut.sh` | 远端 **仅 UT**：**`//tests/ut/common/metrics:metrics_test`** + **`--test_filter=MetricsTest.kv_metric_urma_id_layout_test`**，`--define=enable_urma=false`（依赖已 `rsync`/build）；**`repl_pipeline.sh --kv-metrics-ut`** 会调用 |
 | `parse_repl_log.py` | 从上述 log 中提取 metrics_summary / queue-flow histogram（**本地运行**） |
 
 ### 推荐用法（人机与 Agent 对齐）
@@ -30,8 +31,11 @@ BAZEL_JOBS=16 ./repl_pipeline.sh 10
 # 需要盯 RPC 日志流：加 --tee（经 ssh \| tee）；默认不写满屏而是远端文件 + scp
 ./repl_pipeline.sh --tee --skip-sync 10
 
+# build 后、长 REPL `bazel test` 前先跑 KV metrics tail 布局 UT（几秒级）
+./repl_pipeline.sh --kv-metrics-ut --skip-sync 10
+
 # 分步（与一键脚本完全一致的环境变量）
-./rsync_datasystem.sh && ./bazel_build.sh && ./bazel_run.sh 10
+./rsync_datasystem.sh && ./bazel_build.sh && ./bazel_run_kv_metric_urma_layout_ut.sh && ./bazel_run.sh 10
 ./parse_repl_log.py ../results/zmq_rpc_queue_latency_repl.log
 ```
 
@@ -67,6 +71,7 @@ rfc/2026-04-30-zmq-rpc-queue-latency/
 │   ├── rsync_datasystem.sh
 │   ├── bazel_build.sh
 │   ├── bazel_run.sh
+│   ├── bazel_run_kv_metric_urma_layout_ut.sh
 │   ├── parse_repl_log.py
 │   └── run_commands.md        # 本文件
 ├── docs/
