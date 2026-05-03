@@ -6,10 +6,11 @@ DataSystem Smoke Test
 - **Cross-worker traffic**: by default, KVClient uses `enable_cross_node_connection=True` and each
   (tenant, client) picks a **round-robin entry worker port** so requests often land on a non-primary
   worker and follow redirect / worker↔worker paths (helps worker Get breakdown + remote ZMQ in logs).
+  Each worker **must** use a distinct `--worker_address` matching its bind port (published to etcd); the driver sets both.
   Use `--no-cross-node` to force single-hop local routing only.
 - Cross-tenant read loop (default: long enough for ZMQ histogram **count** to reach --min-zmq-metric-count)
 - Value sizes: 0.5MB (default; optional multi-size in template)
-- On exit: **0** only if clients succeed **and** all 7 ZMQ flow metrics meet min histogram count
+- On exit: **0** only if clients succeed **and** all 6 ZMQ flow metrics meet min histogram count
   (parsing `count=` from metrics_summary JSON in logs; tiny counts are rejected).
 
 Usage:
@@ -71,7 +72,6 @@ ZMQ_METRIC_PATTERNS = {
     "ZMQ_EVENT_HANDSHAKE_FAILURE_TOTAL": re.compile(r"zmq_event_handshake_failure_total\s+(\S+)", re.IGNORECASE),
     # RPC Queue Flow Latency (PR #706: always enabled regardless of ENABLE_PERF)
     "ZMQ_CLIENT_QUEUING_LATENCY":    re.compile(r"zmq_client_queuing_latency\s+(\S+)", re.IGNORECASE),
-    "ZMQ_CLIENT_STUB_SEND_LATENCY":  re.compile(r"zmq_client_stub_send_latency\s+(\S+)", re.IGNORECASE),
     "ZMQ_SERVER_QUEUE_WAIT_LATENCY": re.compile(r"zmq_server_queue_wait_latency\s+(\S+)", re.IGNORECASE),
     "ZMQ_SERVER_EXEC_LATENCY":       re.compile(r"zmq_server_exec_latency\s+(\S+)", re.IGNORECASE),
     "ZMQ_SERVER_REPLY_LATENCY":      re.compile(r"zmq_server_reply_latency\s+(\S+)", re.IGNORECASE),
@@ -83,7 +83,8 @@ ZMQ_METRIC_NAME_TO_KEY = {k.lower(): k for k in ZMQ_METRIC_PATTERNS}
 # are emitted in unary_client_impl / zmq_service; see sequence_diagram + RFC 0.8.1.
 ZMQ_UNARY_LATENCY_DIAG = re.compile(
     r"unary_RecordRpcLatencyMetrics.*observe: queuing=(?P<q>\d) "
-    r"stub_send=(?P<s>\d) e2e=(?P<e>\d) network=(?P<n>\d)"
+    r"(?:stub_send=\d+ )?"
+    r"e2e=(?P<e>\d) network=(?P<n>\d)"
 )
 ZMQ_SERVER_REPLY_DIAG = re.compile(
     r"\[ZmqServerReplyDiag\].*reply_latency_ns=([0-9]+)\b"
@@ -96,7 +97,6 @@ ZMQ_SERVER_REPLY_TICK_EVIDENCE = re.compile(
 )
 REQUIRED_ZMQ_FLOW_METRICS = [
     "ZMQ_CLIENT_QUEUING_LATENCY",
-    "ZMQ_CLIENT_STUB_SEND_LATENCY",
     "ZMQ_SERVER_QUEUE_WAIT_LATENCY",
     "ZMQ_SERVER_EXEC_LATENCY",
     "ZMQ_SERVER_REPLY_LATENCY",
@@ -104,7 +104,7 @@ REQUIRED_ZMQ_FLOW_METRICS = [
     "ZMQ_RPC_NETWORK_LATENCY",
 ]
 # Min histogram `count` (from metrics_summary JSON lines like count=NNN,avg_us=...) for each
-# of the 7 flow metrics. Too low = flaky / not a real E2E acceptance.
+# of the 6 flow metrics. Too low = flaky / not a real E2E acceptance.
 MIN_ZMQ_METRIC_COUNT = 50
 
 # ============ Config ============
@@ -323,6 +323,10 @@ def start_workers(log_dir):
 
         cmd = [
             WORKER_BIN,
+            # worker_address is published to etcd / hash-ring; default gflag is 127.0.0.1:31501 for ALL processes.
+            # bind_address alone does NOT override it — without per-port worker_address every worker looks like
+            # 31501 and remote get / worker↔worker RPC breaks.
+            "--worker_address", f"127.0.0.1:{port}",
             "--bind_address", f"127.0.0.1:{port}",
             "--etcd_address", f"127.0.0.1:{ETCD_PORT}",
             "--shared_memory_size_mb", "2048",
@@ -336,7 +340,11 @@ def start_workers(log_dir):
         with open(wlog_dir / "worker_stdout.log", "w") as f:
             proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT)
         workers.append((port, proc, wlog_dir, probe_file))
-        log(f"Worker @{port} started (pid={proc.pid})")
+        log(
+            f"Worker @{port} started (pid={proc.pid}); "
+            f"worker_address=127.0.0.1:{port}, bind_address=127.0.0.1:{port} "
+            f"(etcd uses worker_address for hash ring — must match bind port)"
+        )
 
     log("Waiting for workers to become ready (health probe)...")
     max_wait = 60
@@ -361,6 +369,11 @@ def start_workers(log_dir):
         if len(ready_ports) >= len(workers):
             elapsed = int(time.time() - start)
             log(f"Workers ready in {elapsed}s: {sorted(ready_ports)}")
+            if len(workers) > 1:
+                log(
+                    "Sanity check (optional): grep 'Ring summarize:' in workers/worker-*/datasystem_worker.INFO.log — "
+                    "expect total: equals worker count once hash ring settles."
+                )
             break
 
         time.sleep(1)
@@ -637,10 +650,6 @@ def parse_zmq_metrics(log_dir):
                                 results["ZMQ_CLIENT_QUEUING_LATENCY"].append(
                                     (display, "count=1,avg_us=1,max_us=1 (diag)")
                                 )
-                            if mdiag.group("s") == "1":
-                                results["ZMQ_CLIENT_STUB_SEND_LATENCY"].append(
-                                    (display, "count=1,avg_us=1,max_us=1 (diag)")
-                                )
                             if mdiag.group("e") == "1":
                                 results["ZMQ_RPC_E2E_LATENCY"].append(
                                     (display, "count=1,avg_us=1,max_us=1 (diag)")
@@ -678,7 +687,7 @@ def _max_histogram_count_from_occurrences(occurrences):
 
 def validate_zmq_flow_metrics(metrics_data, min_count):
     """
-    E2E acceptance: each of the 7 flow histograms must have been updated at least
+    E2E acceptance: each of the 6 flow histograms must have been updated at least
     `min_count` times (LogSummary JSON: count=...). Single-digit or missing counts
     are treated as FAIL.
     """

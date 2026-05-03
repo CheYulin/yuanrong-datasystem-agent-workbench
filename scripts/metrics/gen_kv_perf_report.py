@@ -269,7 +269,6 @@ EVENT_SNIPPET = '"event":"metrics_summary"'
 ZMQ_HISTOGRAM_NS = frozenset(
     {
         "zmq_client_queuing_latency",
-        "zmq_client_stub_send_latency",
         "zmq_server_queue_wait_latency",
         "zmq_server_exec_latency",
         "zmq_server_reply_latency",
