@@ -2,6 +2,9 @@
 """
 从 zmq_rpc_queue_latency_repl.log 中提取关键信息并美化输出。
 
+metrics_summary 中 Histogram 使用每条 metric 的 total（不用 delta）：count / avg_us / max_us，
+以及 p50、p90、p99（与 avg 同为微秒）。
+
 用法:
     ./parse_repl_log.py <logfile>
 
@@ -13,41 +16,7 @@ import sys
 import json
 import re
 
-EXPECTED_METRICS = [
-    # Queue-flow latency (the ones we care about debugging)
-    "zmq_client_queuing_latency",
-    "zmq_client_stub_send_latency",
-    "zmq_server_queue_wait_latency",
-    "zmq_server_exec_latency",
-    "zmq_server_reply_latency",
-    "zmq_rpc_e2e_latency",
-    "zmq_rpc_network_latency",
-    # I/O metrics (these always work)
-    "zmq_send_io_latency",
-    "zmq_receive_io_latency",
-    "zmq_rpc_serialize_latency",
-    "zmq_rpc_deserialize_latency",
-    # Fault counters
-    "zmq_send_failure_total",
-    "zmq_receive_failure_total",
-    "zmq_network_error_total",
-    "zmq_gateway_recreate_total",
-]
-
-
-def extract_json_metrics(content: str) -> dict | None:
-    """从日志内容中提取 metrics_summary JSON（bazel --logtostderr 输出混有 protobuf 文本，需定位 "event": "metrics_summary" 块）。"""
-    marker = '"event": "metrics_summary"'
-    idx = content.find(marker)
-    if idx < 0:
-        return None
-
-    # Backward find the opening brace of this JSON object
-    brace_start = content.rfind("{", 0, idx)
-    if brace_start < 0:
-        return None
-
-    # Find matching closing brace
+def _parse_json_balance(content: str, brace_start: int) -> dict | None:
     depth = 0
     for i in range(brace_start, len(content)):
         if content[i] == "{":
@@ -55,12 +24,29 @@ def extract_json_metrics(content: str) -> dict | None:
         elif content[i] == "}":
             depth -= 1
             if depth == 0:
-                json_str = content[brace_start:i + 1]
+                json_str = content[brace_start : i + 1]
                 try:
                     return json.loads(json_str)
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+def extract_json_metrics(content: str) -> dict | None:
+    """从日志内容中提取 metrics_summary JSON（bazel --logtostderr 输出混有多行日志，优先 event 标记）。"""
+    marker = '"event": "metrics_summary"'
+    idx = content.find(marker)
+    brace_start = -1
+    if idx >= 0:
+        brace_start = content.rfind("{", 0, idx)
+    if brace_start < 0:
+        dump_marker = "=== METRICS DUMP ==="
+        dm = content.find(dump_marker)
+        if dm >= 0:
+            brace_start = content.find("{", dm + len(dump_marker))
+    if brace_start < 0:
+        return None
+    return _parse_json_balance(content, brace_start)
 
 
 def extract_rpc_summary(content: str) -> tuple[str, str, str]:
@@ -71,15 +57,31 @@ def extract_rpc_summary(content: str) -> tuple[str, str, str]:
     return match.group(1), match.group(2), match.group(3)
 
 
-def format_us(value, unit="us"):
-    """格式化 latency 值，ns -> us 自动转换。"""
-    try:
-        v = int(value)
-        if v >= 1000:
-            return f"{v / 1000:.1f}ms"
-        return f"{v}{unit}"
-    except (ValueError, TypeError):
-        return str(value)
+def format_hist_total(total: dict) -> str:
+    """
+    Render histogram stats from metric['total'] only (not delta).
+    Fields are microseconds: avg_us, max_us; percentiles p50/p90/p99 when present.
+    """
+    cnt = total.get("count", 0)
+    if cnt <= 0:
+        return ""
+
+    avg = total.get("avg_us", 0)
+    mx = total.get("max_us", 0)
+    parts = [f"count={cnt:,}", f"avg={avg:.1f}us", f"max={mx:.1f}us"]
+
+    pct_parts = []
+    for key in ("p50", "p90", "p99"):
+        if key not in total or total[key] is None:
+            continue
+        try:
+            pct_parts.append(f"{key}={int(total[key])}us")
+        except (ValueError, TypeError):
+            pct_parts.append(f"{key}={total[key]}")
+    if pct_parts:
+        parts.append(" ".join(pct_parts))
+
+    return "  ".join(parts)
 
 
 def main():
@@ -119,17 +121,16 @@ def main():
     print(f"  Interval  : {data.get('interval_ms', '?')}ms")
     print()
 
-    # 2a. Queue-flow latency (ns unit metrics)
+    # 2a. Queue-flow latency（Histogram：summary JSON 中为微秒 avg_us/max_us、p50/p90/p99）
     queue_flow_names = [
         "zmq_client_queuing_latency",
-        "zmq_client_stub_send_latency",
         "zmq_server_queue_wait_latency",
         "zmq_server_exec_latency",
         "zmq_server_reply_latency",
         "zmq_rpc_e2e_latency",
         "zmq_rpc_network_latency",
     ]
-    print("  ── Queue-Flow Latency (ns) ────────────────────────────────")
+    print("  ── Queue-Flow Latency (total / us) ────────────────────────")
     found_any_qf = False
     for name in queue_flow_names:
         m = metrics_map.get(name)
@@ -137,12 +138,14 @@ def main():
         if m is None:
             print(f"    {display_name:30s}  {color('MISSING', 31)}")
         else:
-            total = m.get("total", {})
+            total = m.get("total") or {}
+            if not isinstance(total, dict):
+                print(f"    {display_name:30s}  {color('BAD total shape', 31)}")
+                continue
             cnt = total.get("count", 0)
-            avg = total.get("avg_us", 0)  # json 里存的是 us
-            mx = total.get("max_us", 0)
             if cnt > 0:
-                print(f"    {display_name:30s} count={cnt:>8,}  avg={avg:>8.1f}us  max={mx:>8.1f}us")
+                line = format_hist_total(total)
+                print(f"    {display_name:30s}  {line}")
                 found_any_qf = True
             else:
                 print(f"    {display_name:30s} count={cnt:>8,}  {color('MISSING', 31)}")
@@ -151,18 +154,20 @@ def main():
     print()
 
     # 2b. I/O & ser/deser
-    print("  ── I/O & Serialization ─────────────────────────────────────")
+    print("  ── I/O & Serialization (total / us) ───────────────────────")
     for name in ["zmq_send_io_latency", "zmq_receive_io_latency",
                  "zmq_rpc_serialize_latency", "zmq_rpc_deserialize_latency"]:
         if name not in metrics_map:
             continue
         m = metrics_map[name]
-        total = m.get("total", {})
-        cnt = total.get("count", 0)
-        avg = total.get("avg_us", 0)
-        mx = total.get("max_us", 0)
+        total = m.get("total") or {}
+        if not isinstance(total, dict):
+            continue
         display_name = name.replace("zmq_", "").replace("_latency", "")
-        print(f"    {display_name:30s} count={cnt:>8,}  avg={avg:>8.1f}us  max={mx:>8.1f}us")
+        if total.get("count", 0) > 0:
+            print(f"    {display_name:30s}  {format_hist_total(total)}")
+        else:
+            print(f"    {display_name:30s}  count=0  {color('MISSING', 31)}")
     print()
 
     # 2c. Fault counters

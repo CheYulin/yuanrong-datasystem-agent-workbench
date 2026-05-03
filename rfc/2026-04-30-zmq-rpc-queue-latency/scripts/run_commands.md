@@ -1,107 +1,101 @@
 ## ST 验证脚本说明
 
-本目录包含三个脚本/工具，支持将本地代码 rsync 到远端机器后执行 bazel build + run，日志自动保存到 `results/` 目录。日志解析脚本在本地运行，无需 SSH。
+本目录是 **ZMQ RPC queue latency ST（gtest）** 在远端 `xqyun-32c32g` 上 **rsync → bazel build → bazel test → 本地 parse** 的**唯一推荐入口**，避免各会话各写一套 ssh/bazel 命令导致 **third-party 缓存不一致** 或 **并行度不一致**。
 
 ### 脚本一览
 
 | 脚本 | 作用 |
 |------|------|
-| `rsync_datasystem.sh` | 将本地 yuanrong-datasystem 同步到远端 `/root/workspace/git-repos/yuanrong-datasystem`（`--delete` 同步） |
-| `bazel_build.sh` | 在远端 bazel build target：`//tests/st/common/rpc/zmq:zmq_rpc_queue_latency_repl` |
-| `bazel_run.sh` | 在远端 bazel run，日志保存到 `results/` |
-| `parse_repl_log.py` | 从 `results/zmq_rpc_queue_latency_repl.log` 中提取关键 metrics 并美化输出（本地运行，无需 SSH） |
+| `repl_remote_common.inc.sh` | **仅被 source**：统一 `LOCAL_DS`、`REMOTE`、`REMOTE_DS`、`DS_OPENSOURCE_DIR_REMOTE`、`BAZEL_JOBS`、bazel target、日志路径（不要单独执行） |
+| `repl_pipeline.sh` | **推荐一键**：按顺序调用下面三步 + `parse_repl_log.py` |
+| `rsync_datasystem.sh` | 将本地 `yuanrong-datasystem` 同步到远端 `REMOTE_DS`（`--delete`，排除项见 `${AGENT_WORKBENCH_ROOT}/scripts/build/remote_build_run_datasystem.rsyncignore`） |
+| `bazel_build.sh` | 远端 `bazel build`：`//tests/st/common/rpc/zmq:zmq_rpc_queue_latency_repl` |
+| `bazel_run.sh` | 默认：远端 **`bazel test`**（`ds_cc_test`），`--test_env=ZMQ_RPC_QUEUE_LATENCY_SEC=<秒>`（位置参数默认 5），stdout/stderr 重定向 **`REMOTE_REPL_LOG_PATH`** 后 **`scp` 回本机** `results/zmq_rpc_queue_latency_repl.log`。盯屏：**`./bazel_run.sh --tee [秒]`**。 |
+| `parse_repl_log.py` | 从上述 log 中提取 metrics_summary / queue-flow histogram（**本地运行**） |
 
-### 使用流程
+### 推荐用法（人机与 Agent 对齐）
 
 ```bash
-# 1. 同步代码（首次，或本地代码有变更后）
-./rsync_datasystem.sh
+cd yuanrong-datasystem-agent-workbench/rfc/2026-04-30-zmq-rpc-queue-latency/scripts
 
-# 2. 构建
-./bazel_build.sh
+# 一键：sync + build + run + parse（默认跑 5s）
+./repl_pipeline.sh
 
-# 3. 运行（默认 5 秒）
-./bazel_run.sh           # 默认 5 秒
-./bazel_run.sh 10        # 10 秒
+# 改并行度（与 remote CMake 文档一致：用大缓存目录，避免 cold rebuild）
+BAZEL_JOBS=16 ./repl_pipeline.sh 10
 
-# 4. 解析日志（本地运行，无需 SSH）
+# 仅改代码后重跑 binary（仍建议保留同一条 DS_OPENSOURCE_DIR 链路）
+./repl_pipeline.sh --skip-sync 10
+
+# 需要盯 RPC 日志流：加 --tee（经 ssh \| tee）；默认不写满屏而是远端文件 + scp
+./repl_pipeline.sh --tee --skip-sync 10
+
+# 分步（与一键脚本完全一致的环境变量）
+./rsync_datasystem.sh && ./bazel_build.sh && ./bazel_run.sh 10
 ./parse_repl_log.py ../results/zmq_rpc_queue_latency_repl.log
 ```
+
+### 环境变量覆盖（可选）
+
+路径与远端账号若与默认值不同，在执行任一脚本 **前** export：
+
+| 变量 | 默认值 | 含义 |
+|------|--------|------|
+| `YUANRONG_DATASYSTEM_ROOT` | agent-workbench 同级的 `yuanrong-datasystem`，否则 `~/workspace/git-repos/yuanrong-datasystem` | 本地待 rsync 的仓库根 |
+| `REMOTE_USER` | `root` | SSH 用户 |
+| `REMOTE_HOST` | `xqyun-32c32g` | SSH Host（可走 `~/.ssh/config` 别名） |
+| `REMOTE_DS` | `${REMOTE_REPO_BASE}/yuanrong-datasystem` | 远端 datasystem 根 |
+| `REMOTE_REPO_BASE` | `/root/workspace/git-repos` | 与 `REMOTE_DS` 拼接用 |
+| `DS_OPENSOURCE_DIR_REMOTE` | `/root/.cache/yuanrong-datasystem-third-party` | **远端 Bazel/third_party 持久缓存**（勿指向每次会删的 `bazel-bin`/`/tmp`） |
+| `BAZEL_JOBS` | `32` | **`bazel build` / `bazel test` 共用** `--jobs` |
+| `LOCAL_RESULTS_DIR` | 本 RFC 下 `results/` | **`scp`** 拉回后的日志目录（默认模式不打满屏 SSH） |
+| `REMOTE_REPL_LOG_PATH` | `/tmp/zmq_rpc_queue_latency_repl_capture.log` | 远端：`bazel test` stdout/stderr 先写此文件，`bazel_run.sh` 末尾再 `scp` |
+| `ZMQ_RPC_QUEUE_LATENCY_TEST_TIMEOUT` | `3600` | **`bazel test --test_timeout`**（秒）；由本机在调用 `ssh` **前** 展开传给远端脚本 |
+
+### 日志与 `--tee`
+
+- **默认**：无 tty 洪流，远端落盘后用 **`scp`** 回本机 `LOCAL_RESULTS_DIR`。
+- **`./bazel_run.sh --tee`**：`ssh \| tee`，方便观察 / 兼容旧流程；大批量日志时可能比「远端写文件 + `scp`」更扰动链路。
 
 ### 目录结构
 
 ```
-rfc/2026-04-zmq-rpc-queue-latency/
+rfc/2026-04-30-zmq-rpc-queue-latency/
 ├── scripts/
-│   ├── rsync_datasystem.sh   # 同步代码到远端
-│   ├── bazel_build.sh        # 构建 target
-│   ├── bazel_run.sh          # 运行并保存日志
-│   ├── parse_repl_log.py     # 解析 repl 日志（本地运行）
+│   ├── repl_remote_common.inc.sh
+│   ├── repl_pipeline.sh
+│   ├── rsync_datasystem.sh
+│   ├── bazel_build.sh
+│   ├── bazel_run.sh
+│   ├── parse_repl_log.py
 │   └── run_commands.md        # 本文件
-├── results/                   # bazel_run.sh 自动创建，日志输出目录
+├── docs/
+│   ├── timing_points.puml
+│   └── timing_points_current.puml
+├── results/
 │   └── zmq_rpc_queue_latency_repl.log
-└── .gitignore                # 忽略 results/ 和 *.log
+└── .gitignore
 ```
 
-### 远端信息
+### ST gtest：`zmq_rpc_queue_latency_repl`
 
-- **远端机器**: `root@xqyun-32c32g`
-- **远端代码路径**: `/root/workspace/git-repos/yuanrong-datasystem`
-- **third-party 缓存**: `/root/.cache/yuanrong-datasystem-third-party`（bazel build 复用，避免重复编译 protobuf 等依赖）
+1. 本进程内 ZMQ TCP server + client。
+2. 负载时长：**远端 `bazel test` 传入 `--test_env=ZMQ_RPC_QUEUE_LATENCY_SEC=…`**（默认 5）；`bazel_run.sh <秒>` 把该时长作为位置参数转成 test env。
+3. 结束前 **`DumpSummaryForTest`**，日志中带 **`Completed … RPCs`** 与 **`=== METRICS DUMP ===`**，供 `parse_repl_log.py` 解析。
 
-### repl 独立可执行文件
+`bazel_run.sh`：**`--test_arg=--logtostderr=1`、`--test_arg=--v=0`**（与 ST 内 `FLAGS_v = 0`、`LOG(INFO)` 一致）。
 
-`zmq_rpc_queue_latency_repl` 是一个独立的可执行 binary（非 gtest），功能：
+### BUILD.bazel
 
-1. 在本进程内启动 ZMQ TCP server + client
-2. 运行指定时长（默认 5 秒）的 RPC 循环
-3. 调用 `DumpSummaryJson()` 输出 metrics 汇总
+`//tests/st/common/rpc/zmq/BUILD.bazel` 中 **`ds_cc_test`** `zmq_rpc_queue_latency_repl` 带 `tags = ["manual"]`，需显式 target 路径构建/运行。
 
-支持参数：
+### 已知语义（摘录）
 
-```bash
---duration=N        # 运行 N 秒（默认 5）
---logtostderr=1    # 日志输出（bazel_run.sh 自动传入）
-```
-
-### BUILD.bazel 修改记录
-
-已在 `//tests/st/common/rpc/zmq/BUILD.bazel` 中添加 `zmq_rpc_queue_latency_repl`（cc_binary）：
-
-```python
-cc_binary(
-    name = "zmq_rpc_queue_latency_repl",
-    srcs = ["zmq_rpc_queue_latency_repl.cpp", "zmq_test.h"],
-    deps = [
-        "//src/datasystem/common/flags:ds_flags",
-        "//src/datasystem/common/inject:common_inject",
-        "//src/datasystem/common/log:common_log",
-        "//src/datasystem/common/metrics:common_metrics",
-        "//src/datasystem/common/rpc:rpc_channel",
-        "//src/datasystem/common/rpc:rpc_server",
-        "//src/datasystem/common/rpc:rpc_unary_client_impl",
-        "//src/datasystem/common/rpc/zmq:zmq_common",
-        "//src/datasystem/common/rpc/zmq:zmq_context",
-        "//src/datasystem/common/rpc/zmq:zmq_service",
-        "//src/datasystem/common/util:status_helper",
-        "//src/datasystem/protos:zmq_test_zmq_cc_proto",
-        "@nlohmann_json//:json",
-    ],
-)
-```
-
-### 已知问题
-
-#### CLIENT_ZMQ_SEND 架构限制
-
-`CLIENT_ZMQ_SEND` tick 由于架构限制暂时无法获取：
-- 原因：`SendDirect` 在 prefetcher 线程运行，而 `clientMeta` 存储在 AsyncWriteImpl 线程
-- 影响：`CLIENT_QUEUING` metric 暂时为 MISSING
-
-完整根因和修复记录见 `../docs/issue-rfc.md`。
+- **`zmq_client_queuing_latency`**：`CLIENT_TO_STUB − CLIENT_ENQUEUE`（真正 `zmq_msg_send` 仍难进同一 MetaPb 时序，见 `docs/issue-rfc.md`）。
+- **`zmq_rpc_network_latency`**：残差模型，非纯 RTT；见 `docs/timing_points_current.puml`。
 
 ### 注意事项
 
-- rsync 会跳过 `build/`、`output/`、`.git/`、`.cache/` 等目录（由 `remote_build_run_datasystem.rsyncignore` 定义）。
-- 构建目标带有 `tags = ["manual"]`，bazel 不会自动包含在 `//...` 全量构建中，必须用完整 target 路径。
-- 如需修改并行度，可设置环境变量 `BAZEL_JOBS`：`BAZEL_JOBS=16 ./bazel_build.sh`。
+- `bazel_run.sh` 对 **`bazel test` 传入 `--experimental_ui_max_stdouterr_bytes=-1`**，否则当一次 run 同时 **编译 + 跑 ST** 且编译输出很大时，Bazel 默认会 **截断/跳过** 测试 stdout，`parse_repl_log.py` 会拿不到 `Completed …` / `=== METRICS DUMP ===`。
+- rsync 排除规则与全仓 `remote_build_run_datasystem.rsyncignore` 对齐，避免把巨大 `bazel-*` / `output` 同步上去。
+- **日志如何到本机**：`bazel_run.sh` **默认**在远端 **`bazel test`** 输出重定向到 **`REMOTE_REPL_LOG_PATH`**，结束后 **`scp`** 到 `LOCAL_RESULTS_DIR`。调试用 **`--tee`** 才走 **`ssh \| tee`**。

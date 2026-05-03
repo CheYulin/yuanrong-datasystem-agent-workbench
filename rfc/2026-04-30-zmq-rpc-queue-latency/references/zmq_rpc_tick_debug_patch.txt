@@ -1,0 +1,13 @@
+Restore removed ZMQ RPC tick debug helpers (LogRpcMetaTicksGrouped, LogZmqRpcTickSanityChecks
+and related #if 0 blocks, plus commented call sites in zmq_stub_impl.h / zmq_server_impl.cpp).
+
+From the yuanrong-datasystem repository root:
+
+  git apply -R --ignore-whitespace \
+    ../yuanrong-datasystem-agent-workbench/rfc/2026-04-30-zmq-rpc-queue-latency/references/zmq_rpc_tick_debug_removed.patch
+
+Path: adjust the patch file path if your workbench clone is elsewhere. After restore, re-enable
+any call sites you need and set FLAGS_v / RPC_LOG_LEVEL as before.
+
+Patch file: zmq_rpc_tick_debug_removed.patch (generated with git diff against the tree that still
+contained the debug code).

@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Rsync local yuanrong-datasystem to remote /root/workspace/git-repos/
-# Usage: ./rsync_datasystem.sh
+# Rsync local yuanrong-datasystem → remote REMOTE_DS (see repl_remote_common.inc.sh).
 set -euo pipefail
 
-LOCAL_DS="/home/t14s/workspace/git-repos/yuanrong-datasystem"
-REMOTE="root@xqyun-32c32g"
-REMOTE_DS="/root/workspace/git-repos/yuanrong-datasystem"
-RSYNCIGNORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/build" && pwd)"
-RSYNCIGNORE_FILE="${RSYNCIGNORE_DIR}/remote_build_run_datasystem.rsyncignore"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=repl_remote_common.inc.sh
+source "${SCRIPT_DIR}/repl_remote_common.inc.sh"
 
 if [[ ! -d "${LOCAL_DS}/src" ]]; then
-  echo "Local DS not found: ${LOCAL_DS}" >&2
+  echo "Local DS not found: ${LOCAL_DS} (set YUANRONG_DATASYSTEM_ROOT)" >&2
   exit 1
 fi
 if [[ ! -f "${RSYNCIGNORE_FILE}" ]]; then

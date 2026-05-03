@@ -1,0 +1,123 @@
+@startuml ZMQ RPC Metrics — Current Code (2026-05 snapshot)
+' Companion to timing_points.puml: that file保留历史叙事；本图对齐 yuanrong-datasystem 当前实现。
+!pragma teoz true
+skinparam backgroundColor #FEFEFE
+skinparam actorBorderColor #666666
+skinparam lifelineBorderColor #666666
+skinparam lifelineBackgroundColor #F5F5F5
+
+title **ZMQ RPC ticks & histograms — lifecycle (aligned with current sources)**
+
+participant "Caller" as C <<Client>>
+box "Stub (templates in zmq_stub_impl.h)" #LightBlue
+participant "AsyncWriteImpl" as AW
+participant "AsyncReadImpl" as AR
+end box
+participant "MsgQueRef /\noutbound" as R <<Queue>>
+participant "MsgQueMgr prefetch\n→ Outbound()" as OB <<Route>>
+participant "ZmqFrontend::SendMsg\n(zmq_stub_conn.cpp)" as FE <<Frontend>>
+participant "Frontend msgQue_\n(+ async send thread)" as AS <<AsyncGW>>
+database "TCP / IPC" as Net
+participant "ZmqService /\nRecv path" as SRV <<Server>>
+participant "WorkerEntry\n(zmq_service.cpp)" as W <<Worker>>
+participant "Unary Write()\n(enableMsgQ_)\nzmq_server_stream_base.h" as UW <<Reply>>
+participant "ZmqService::\nServiceToClient" as STC <<Backend>>
+participant "ZmqServerImpl::\nServiceToClient" as IMPL <<GW>>
+
+note top
+**Ticks** (MetaPb.tick_name — current sources)
+
+* **CLIENT_ENQUEUE** → **zmq_stub_impl.h** AsyncWriteImpl, before outer **mQue->SendMsg**
+
+* **CLIENT_TO_STUB** → **zmq_stub_conn.cpp**, start of **ZmqStubConnMgrImpl::Outbound**
+  (after **MsgQueMgr::PrefetchMsg** dequeues from per-stub outbound; still **before** frontend inner queue /
+  ``zmq_msg_send``)
+
+* (none on request wire-out) → **CLIENT_ZMQ_SEND** still missing (prefetcher vs **clientMeta**)
+
+* **CLIENT_RECV** → **zmq_stub_impl.h** AsyncReadImpl after **ReceiveMsg**
+
+* **SERVER_RECV** / **SERVER_DEQUEUE** → recv path + **WorkerEntry** after **ReceiveMsg**
+
+* **SERVER_EXEC_END** → may repeat (**Unary Write()** plus **WorkerEntry** tail — duplicate risk)
+
+* **SERVER_SEND** → **Write()** /**ServiceToClient** — **ZmqServerImpl::ServiceToClient** has **no**
+  ``TICK_SERVER_ZMQ_SEND`` after **SendAllFrames**
+
+* **SERVER_EXEC_NS** → synthetic (**RecordServerLatencyMetrics**), EXEC_END − RECV (**zmq_constants.h**)
+
+
+**Histograms** (same headers)
+
+* ``zmq_client_queuing`` → ``TO_STUB − ENQUEUE`` (caller enqueue through prefetch dequeue, before frontend zmq stack)
+
+* server: DEQUEUE−RECV, EXEC_END−DEQUEUE, SEND−EXEC_END
+
+* ``zmq_rpc_e2e`` = RECV − ENQUEUE; ``zmq_rpc_network`` ≈ e2e − (TO_STUB−ENQUEUE) − ``SERVER_RPC_WINDOW_NS`` (**not** pure RTT)
+
+end note
+
+== Request (client) ==
+
+C -> AW : AsyncWriteImpl
+activate AW
+AW -> AW : RecordTick: **CLIENT_ENQUEUE**
+AW -> R : mQue->SendMsg(meta, frames)
+activate R
+R -> R : MsgQue outbound **enqueue**
+R -> OB : prefetcher ``PrefetchMsg`` → ``routeFn`` → **Outbound(sender, meta+frames)**
+activate OB
+OB -> OB : RecordTick: **CLIENT_TO_STUB**
+OB -> FE : **SendMsg**(→ inner queue / async gateway)
+activate FE
+FE -> AS : msgQue_->Send(ConnMsgFrames); later RouteToZmqSocket → ``zmq_msg_send``
+deactivate FE
+deactivate OB
+deactivate R
+note over AS
+  **无 MetaPb tick** 于真正 ``zmq_msg_send`` 完成处
+end note
+deactivate AW
+
+AS -> Net : request bytes
+Net -> SRV : delivery
+activate SRV
+SRV -> SRV : RecordTick: **SERVER_RECV**
+SRV -> W : dispatch → WorkerEntry
+activate W
+W -> W : ReceiveMsg → RecordTick **SERVER_DEQUEUE**
+W -> UW : impl_->CallMethod → … Write(reply)
+activate UW
+UW -> UW : RecordTick **SERVER_EXEC_END**, **SERVER_SEND**\nRecordServerLatencyMetrics(meta)\n(追加 **SERVER_EXEC_NS**  synthetic)
+UW -> STC : mQue_->SendMsg / reply path
+deactivate UW
+
+STC -> STC : RecordTick **SERVER_SEND**\nRecordServerLatencyMetrics (again if hit)
+STC -> IMPL : replyQueue → ServiceToClient
+activate IMPL
+IMPL -> IMPL : PushFront… + **frontend_->SendAllFrames**\n(此处 **无** RecordTick TICK_SERVER_ZMQ_SEND)
+IMPL -> Net : response bytes
+deactivate IMPL
+deactivate W
+deactivate SRV
+
+Net -> AR : reply
+activate AR
+C -> AR : AsyncReadImpl → ReceiveMsg
+AR -> AR : RecordTick **CLIENT_RECV**
+AR -> AR : merge clientMeta.ticks → rsp.first
+AR -> AR : **RecordRpcLatencyMetrics**(rsp.first)
+
+deactivate AR
+
+== Notes for PR / docs ==
+note across
+  **与 timing_points.puml 的差异**
+  • 已不再使用字面 **CLIENT_DEQUEUE**；**CLIENT_TO_STUB** 语义对齐 **Prefetcher 出队后**（**Outbound** 首行），而非 **ZmqFrontend::SendMsg** 入口。
+  • 回包侧重命名 **SERVER_SEND**，**不是**只在 zmq_server_impl.cpp 打完 zmq_send 后打 **SERVER_ZMQ_SEND**（常量存在与否与 unary 路径需再统一）。
+  • **Unary + enableMsgQ_**：**SERVER_EXEC_END** 可能在 Write 与 WorkerEntry 末尾各打一次 → 度量若取「最后一个同名 tick」会吞掉异步 SendAll 时间，PR 793 建议在代码或文档固定语义。
+
+  **PerfPoint（非 histogram）**：ParseMsgFrames 里 **GetLapTime** 打点 **ZMQ_NETWORK_TRANSFER (SERVER)** 可作传输辅助，但与 **zmq_rpc_network_latency** 公式不同。
+end note
+
+@enduml

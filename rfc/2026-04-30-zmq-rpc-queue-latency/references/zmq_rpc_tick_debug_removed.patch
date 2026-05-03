@@ -1,0 +1,219 @@
+diff --git a/src/datasystem/common/rpc/zmq/zmq_constants.h b/src/datasystem/common/rpc/zmq/zmq_constants.h
+index f1f09cc9..a7d89ad1 100644
+--- a/src/datasystem/common/rpc/zmq/zmq_constants.h
++++ b/src/datasystem/common/rpc/zmq/zmq_constants.h
+@@ -97,91 +97,6 @@ inline uint64_t GetTotalTicksTime(const MetaPb& meta)
+     return 0;
+ }
+ 
+-#if 0
+-// Group MetaPb ticks for debugging: CLIENT_*, SERVER_* wall-clock, GetLapTime-style names,
+-// plus synthetic SERVER_EXEC_NS (duration, not epoch). Scheduled removal; call sites //'d out.
+-inline void LogRpcMetaTicksGrouped(const MetaPb &meta, const char *tag, const std::string &ctx,
+-                                   int64_t asyncTagId = -1LL)
+-{
+-    if (FLAGS_v < static_cast<int32_t>(RPC_LOG_LEVEL)) {
+-        return;
+-    }
+-    std::string head =
+-        std::string(tag).append(" ").append(ctx).append(" ticks_total=").append(std::to_string(meta.ticks_size()));
+-    const std::string &traceId = meta.trace_id();
+-    if (!traceId.empty()) {
+-        head.append(" trace_id=").append(traceId);
+-    }
+-    if (asyncTagId >= 0) {
+-        head.append(" async_tag=").append(std::to_string(asyncTagId));
+-    }
+-    VLOG(RPC_LOG_LEVEL) << head;
+-    std::vector<int> ixClient;
+-    std::vector<int> ixServer;
+-    std::vector<int> ixOther;
+-    uint64_t serverExecNsSynthetic = 0;
+-    uint64_t serverRpcWindowNsSynthetic = 0;
+-    const int n = meta.ticks_size();
+-    for (int i = 0; i < n; ++i) {
+-        const std::string &nm = meta.ticks(i).tick_name();
+-        if (nm == "SERVER_EXEC_NS") {
+-            serverExecNsSynthetic = meta.ticks(i).ts();
+-            continue;
+-        }
+-        if (nm == "SERVER_RPC_WINDOW_NS") {
+-            serverRpcWindowNsSynthetic = meta.ticks(i).ts();
+-            continue;
+-        }
+-        if (nm.rfind("SERVER_", 0) == 0) {
+-            ixServer.push_back(i);
+-            continue;
+-        }
+-        if (nm.rfind("CLIENT_", 0) == 0 || nm.empty()) {
+-            ixClient.push_back(i);
+-            continue;
+-        }
+-        ixOther.push_back(i);
+-    }
+-    auto dumpBucket = [&](const char *subtitle, std::vector<int> &indices) {
+-        std::stable_sort(indices.begin(), indices.end(), [&](int a, int b) {
+-            return meta.ticks(a).ts() < meta.ticks(b).ts();
+-        });
+-        VLOG(RPC_LOG_LEVEL) << "  + " << subtitle << " (" << indices.size() << " entries)";
+-        uint64_t baseTs = 0;
+-        bool haveBase = false;
+-        for (int i : indices) {
+-            uint64_t ts = meta.ticks(i).ts();
+-            if (ts != 0U) {
+-                baseTs = ts;
+-                haveBase = true;
+-                break;
+-            }
+-        }
+-        for (int i : indices) {
+-            const TickPb &t = meta.ticks(i);
+-            std::string tickName = t.tick_name();
+-            if (tickName.empty()) {
+-                tickName = "(empty)";
+-            }
+-            uint64_t deltaNs = 0;
+-            if (haveBase && t.ts() != 0U) {
+-                deltaNs = t.ts() - baseTs;
+-            }
+-            VLOG(RPC_LOG_LEVEL) << "      " << tickName << " ts=" << t.ts() << " delta_ns=" << deltaNs;
+-        }
+-    };
+-    dumpBucket("CLIENT ticks (CLIENT_* / empty compat)", ixClient);
+-    dumpBucket("SERVER wall-clock ticks (SERVER_*)", ixServer);
+-    dumpBucket("OTHER (e.g. ZMQ_* from GetLapTime)", ixOther);
+-    if (serverExecNsSynthetic != 0U) {
+-        VLOG(RPC_LOG_LEVEL) << "  SERVER_EXEC_NS synthetic_duration_ns=" << serverExecNsSynthetic;
+-    }
+-    if (serverRpcWindowNsSynthetic != 0U) {
+-        VLOG(RPC_LOG_LEVEL) << "  SERVER_RPC_WINDOW_NS synthetic_duration_ns=" << serverRpcWindowNsSynthetic;
+-    }
+-}
+-#endif
+-
+ static inline void RecordServerLatencyMetrics(MetaPb &meta)
+ {
+     int64_t serverRecvTs = 0;
+@@ -238,85 +153,6 @@ static inline void RecordServerLatencyMetrics(MetaPb &meta)
+ //
+ // Client pre-send: TO_STUB−ENQUEUE (MsgQue prefetch dequeue), histogram zmq_client_queuing_latency.
+ 
+-#if 0
+-// TICK sanity-check debug slog (scheduled removal); helpers only referenced here.
+-static inline uint64_t RpcTickTsByName(const MetaPb &meta, const char *tickName)
+-{
+-    for (int i = 0; i < meta.ticks_size(); ++i) {
+-        if (meta.ticks(i).tick_name() == tickName) {
+-            return meta.ticks(i).ts();
+-        }
+-    }
+-    return 0;
+-}
+-
+-static inline int RpcTickFirstIndex(const MetaPb &meta, const char *tickName)
+-{
+-    for (int i = 0; i < meta.ticks_size(); ++i) {
+-        if (meta.ticks(i).tick_name() == tickName) {
+-            return i;
+-        }
+-    }
+-    return -1;
+-}
+-
+-// One-clock + synthetic-duration checks only (no CLIENT wall vs SERVER wall subtraction).
+-static inline void LogZmqRpcTickSanityChecks(const MetaPb &meta)
+-{
+-    if (FLAGS_v < static_cast<int32_t>(RPC_LOG_LEVEL)) {
+-        return;
+-    }
+-    std::string head = "[ZMQ_RPC_TICK_CHECK]";
+-    if (!meta.trace_id().empty()) {
+-        head.append(" trace_id=").append(meta.trace_id());
+-    }
+-
+-    uint64_t cenq = RpcTickTsByName(meta, TICK_CLIENT_ENQUEUE);
+-    uint64_t ctos = RpcTickTsByName(meta, TICK_CLIENT_TO_STUB);
+-    uint64_t crecv = RpcTickTsByName(meta, TICK_CLIENT_RECV);
+-    if (cenq != 0U && ctos != 0U && crecv != 0U && !(cenq <= ctos && ctos <= crecv)) {
+-        VLOG(RPC_LOG_LEVEL) << head << " FAIL client_monotone ENQ<=TO_STUB<=RECV "
+-                            << "enq=" << cenq << " to_stub=" << ctos << " recv=" << crecv;
+-    }
+-
+-    uint64_t srecv = RpcTickTsByName(meta, TICK_SERVER_RECV);
+-    uint64_t sdq = RpcTickTsByName(meta, TICK_SERVER_DEQUEUE);
+-    uint64_t sexe = RpcTickTsByName(meta, TICK_SERVER_EXEC_END);
+-    uint64_t ssnd = RpcTickTsByName(meta, TICK_SERVER_SEND);
+-    if (srecv != 0U && sdq != 0U && sexe != 0U && ssnd != 0U &&
+-        !(srecv <= sdq && sdq <= sexe && sexe <= ssnd)) {
+-        VLOG(RPC_LOG_LEVEL) << head << " FAIL server_monotone RECV<=DEQUEUE<=EXEC_END<=SEND "
+-                            << "recv=" << srecv << " dq=" << sdq << " exec_end=" << sexe << " send=" << ssnd;
+-    }
+-
+-    uint64_t winSyn = RpcTickTsByName(meta, "SERVER_RPC_WINDOW_NS");
+-    if (winSyn != 0U && ssnd > srecv && srecv != 0U) {
+-        uint64_t winCalc = ssnd - srecv;
+-        if (winSyn != winCalc) {
+-            VLOG(RPC_LOG_LEVEL) << head << " FAIL SERVER_RPC_WINDOW_NS=" << winSyn << " vs SEND-RECV=" << winCalc;
+-        }
+-    }
+-
+-    uint64_t exSyn = RpcTickTsByName(meta, "SERVER_EXEC_NS");
+-    if (exSyn != 0U && sexe > srecv && srecv != 0U) {
+-        uint64_t exCalc = sexe - srecv;
+-        if (exSyn != exCalc) {
+-            VLOG(RPC_LOG_LEVEL) << head << " FAIL SERVER_EXEC_NS=" << exSyn << " vs EXEC_END-RECV=" << exCalc;
+-        }
+-    }
+-
+-    int ixEnq = RpcTickFirstIndex(meta, TICK_CLIENT_ENQUEUE);
+-    int ixCrecv = RpcTickFirstIndex(meta, TICK_CLIENT_RECV);
+-    if (ixEnq >= 0 && ixCrecv >= 0 && ixCrecv < ixEnq) {
+-        VLOG(RPC_LOG_LEVEL) << head << " WARN CLIENT_RECV tick index precedes CLIENT_ENQUEUE in MetaPb (ordering)";
+-    }
+-
+-    if (crecv > 0U && cenq > 0U && crecv < cenq) {
+-        VLOG(RPC_LOG_LEVEL) << head << " FAIL CLIENT_RECV stamp before CLIENT_ENQUEUE (clock bug or corrupt meta)";
+-    }
+-}
+-#endif
+-
+ static inline void RecordRpcLatencyMetrics(MetaPb &meta)
+ {
+     uint64_t clientEnqueueTs = 0;
+@@ -370,7 +206,6 @@ static inline void RecordRpcLatencyMetrics(MetaPb &meta)
+     if (networkResidualNs > 0U) {
+         RecordLatencyMetric(metrics::KvMetricId::ZMQ_RPC_NETWORK_LATENCY, networkResidualNs);
+     }
+-    // LogZmqRpcTickSanityChecks(meta);
+ }
+ 
+ }  // namespace datasystem
+diff --git a/src/datasystem/common/rpc/zmq/zmq_server_impl.cpp b/src/datasystem/common/rpc/zmq/zmq_server_impl.cpp
+index 22efc2b4..29c44b1a 100644
+--- a/src/datasystem/common/rpc/zmq/zmq_server_impl.cpp
++++ b/src/datasystem/common/rpc/zmq/zmq_server_impl.cpp
+@@ -172,10 +172,6 @@ Status ParseMsgFrames(ZmqMsgFrames &frames, MetaPb &meta, int fd, const EventTyp
+ 
+ Status ZmqServerImpl::ServiceToClient(const MetaPb &meta, ZmqMsgFrames &&frames)
+ {
+-    // LogRpcMetaTicksGrouped(meta, "[ZMQ_RPC_TICK_SERVER]",
+-    //                        FormatString("gateway=%s client=%s svc=%s method=%d", meta.gateway_id().c_str(),
+-    //                                     meta.client_id().c_str(), meta.svc_name().c_str(),
+-    //                                     static_cast<int>(meta.method_index())));
+     RETURN_IF_NOT_OK(PushFrontProtobufToFrames(meta, frames));
+     RETURN_IF_NOT_OK(PushFrontStringToFrames(meta.client_id(), frames));
+     RETURN_IF_NOT_OK(PushFrontStringToFrames(meta.gateway_id(), frames));
+diff --git a/src/datasystem/common/rpc/zmq/zmq_stub_impl.h b/src/datasystem/common/rpc/zmq/zmq_stub_impl.h
+index 95623b84..e4601941 100644
+--- a/src/datasystem/common/rpc/zmq/zmq_stub_impl.h
++++ b/src/datasystem/common/rpc/zmq/zmq_stub_impl.h
+@@ -180,9 +180,6 @@ public:
+             *tick = clientMeta.ticks(i);
+         }
+         RecordTick(rsp.first, TICK_CLIENT_RECV);
+-        // std::string tickCtx = "client=" + clientId + " svc=" + svcName + " method=" +
+-        //                       std::to_string(static_cast<int>(method->MethodIndex()));
+-        // LogRpcMetaTicksGrouped(rsp.first, "[ZMQ_RPC_TICK_CLIENT]", tickCtx, tagId);
+         RecordRpcLatencyMetrics(rsp.first);
+         rc = AckRequest(rsp.second, replyMsg);
+         RETURN_IF_NOT_OK(rc);

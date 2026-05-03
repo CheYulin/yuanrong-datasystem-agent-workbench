@@ -34,6 +34,8 @@
 
 | 文件 | 说明 |
 |------|------|
+| [timing_points_current.puml](timing_points_current.puml) | 与当前源码一致的 ticks / histogram 生命周期（推荐使用） |
+| [timing_points.puml](timing_points.puml) | 早期示意图（部分命名已变更，见上一行） |
 | [issue-rfc.md](issue-rfc.md) | Issue / RFC 文案模板 |
 | [design.md](design.md) | 详细设计方案（Tick 定义、Metric 计算公式、正交性分析） |
 | [test-walkthrough.md](test-walkthrough.md) | 测试串讲（规划中） |
