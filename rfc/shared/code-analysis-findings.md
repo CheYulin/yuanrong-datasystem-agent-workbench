@@ -15,20 +15,22 @@ src/datasystem/protos/slot_recovery.pb.h
 - 已有 `SlotRecoveryIncidentState::IsTaskTerminal()` 终端状态判断
 - **RFC1 Checkpoint 可在此框架上扩展**：新增 `CheckpointBasedRecovery` 策略
 
-### 1.2 RocksDB Checkpoint ✅
+### 1.2 RocksDB 持久化基础 ✅ (但 RFC1 不直接用)
 
 ```
 src/datasystem/common/kvstore/rocksdb/replica.cpp:71:
     checkpointPath_ = replicaDBRootPath + "/checkpoint_" + dbName;
-    env_ = rocksdb::Env::Default();
-
-src/datasystem/common/kvstore/rocksdb/replica.cpp:30:
+    src/datasystem/common/kvstore/rocksdb/replica.cpp:30:
     #include "rocksdb/utilities/checkpoint.h"
 ```
 
-**发现**: RocksDB Replica 已经使用 `rocksdb::Checkpoint` 和 `env_`！`InitRocksStore` 已有恢复逻辑。
-- **RFC1 的 CheckpointManager 可以直接封装 RocksDB Checkpoint API**
-- 已有 ColumnFamily 支持 (`CreateOcTable`, `CreateScTable`)
+**发现**: RocksDB Replica 已有 Checkpoint 机制。
+- ⚠️ **但 RFC1 不直接使用 RocksDB Checkpoint**: 太重量级，迭代慢，不需要 KV 查询
+- ✅ **改用直接文件序列化** (参考 Mooncake SHM 快照):
+  - StateSnapshot protobuf → write() + fdatasync → 本地 NVMe
+  - 恢复时 read() + protobuf 反序列化 → 直接加载到内存
+  - 文件大小 < 500MB (仅 metadata)，NVMe 读 < 200ms
+  - RocksDB 仅保留现有写入路径，不做额外操作
 
 ### 1.3 URMA Jetty 动态加载 ✅
 
