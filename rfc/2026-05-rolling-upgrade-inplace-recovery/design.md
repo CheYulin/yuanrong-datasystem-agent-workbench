@@ -112,80 +112,128 @@ stateDiagram-v2
     FAIL --> INIT: Restart (lossy recovery)
 ```
 
-### 3.2 新增核心对象
+### 3.2 设计决策: 不用 RocksDB Checkpoint
 
-**CheckpointManager** — 负责快照的创建、恢复、清理：
+**Mooncake 参考**: Mooncake 使用 SharedMemory (`/dev/shm`) + 本地 NVMe 快照，进程重启后 mmap 直接加载。
+不需要重量级 KV 查询，只需要把内存热数据 dump 到盘、启动时读回。
+
+**我们的方案: 直接内存序列化 → 本地 NVMe**
 
 ```
-CheckpointManager:
-  - CreateCheckpoint() → CheckpointId  // 同步快照
-  - RestoreFromCheckpoint(id) → Status // 从快照恢复
-  - ListCheckpoints() → []CheckpointMeta
-  - PruneOldCheckpoints(maxKeep)        // 保留最近 N 个
-  - VerifyCheckpoint(id) → bool        // CRC/版本校验
+优点:
+  - 零 RocksDB 依赖，不需要 Checkpoint API / WAL 回放 / ColumnFamily
+  - 序列化/反序列化比 RocksDB 迭代快 10x+
+  - 可精确控制序列化内容（metadata、对象索引、TTL map）
+  - 文件格式简单: protobuf + CRC32，跨版本可解析
 
-CheckpointMeta:
-  - id: uint64           // 单调递增
-  - timestamp: uint64    // 创建时间 (steady_clock)
-  - worker_version: string // 创建时版本
-  - data_size: uint64    // 字节数
-  - rocksdb_seqno: uint64 // RocksDB 序列号 (一致性锚点)
-  - status: enum { CREATING, COMPLETE, CORRUPTED }
+缺点:
+  - 需要自行管理一致性（利用现有的 SlotRecovery 框架保证）
+  - 大对象数据不在 snapshot 内（仅序列化引用，实际数据复用 RocksDB WAL）
+```
+
+### 3.3 新增核心对象
+
+**StateSnapshot** — 轻量级内存快照：
+
+```cpp
+struct StateSnapshot {
+    // 对象索引: key_hash → ObjectMeta (不含实际数据)
+    std::vector<ObjectMetaEntry> object_metas;
+    
+    // Hash Ring 位置: key_hash → owner_worker
+    std::vector<HashRingEntry> hash_assignments;
+    
+    // TTL 信息: key_hash → expire_time
+    std::vector<TTLEntry> ttl_entries;
+    
+    // Master 分配的 slot 信息
+    std::vector<SlotInfo> slots;
+    
+    // 元数据
+    uint64_t checkpoint_id;
+    uint64_t timestamp_us;
+    std::string worker_version;
+    uint64_t master_seqno;           // etcd 中的序列号锚点
+    uint32_t crc32;
+};
+```
+
+**SnapshotManager** — 直接文件读写，不走 RocksDB：
+
+```
+SnapshotManager (per Worker):
+  - CreateSnapshot(path) → Status      // 内存 → protobuf → write() → fdatasync
+  - RestoreFromSnapshot(path) → Status // read() → protobuf → 内存
+  - VerifySnapshot(path) → bool        // 读文件 → CRC32 校验
+  - PruneOldSnapshots(maxKeep) → void  // 保留最近 N 个
+  - GetLatestSeqno() → uint64          // 从 snapshot 读取锚点 seqno
+
+存储路径: {checkpoint_data_dir}/snapshot_{id}.pb
+文件大小: 典型 < 500MB (仅 metadata，不含实际数据块)
 ```
 
 ---
 
 ## 四、关键流程设计
 
-### 4.1 Checkpoint 创建流程
+### 4.1 Snapshot 创建流程 (参考 Mooncake SHM 快照)
 
 ```mermaid
 sequenceDiagram
     participant Master
     participant WorkerMain as Worker (Main Thread)
-    participant CheckpointMgr as CheckpointManager
-    participant RocksDB
+    participant SnapshotMgr as SnapshotManager
+    participant NVMe as Local NVMe
     
-    Master->>WorkerMain: Upgrade command (or periodic)
-    WorkerMain->>WorkerMain: BeginCheckpoint() — pause incoming writes
-    WorkerMain->>CheckpointMgr: CreateCheckpoint()
-    CheckpointMgr->>RocksDB: TakeSnapshot() (RocksDB Snapshot API)
-    CheckpointMgr->>RocksDB: Iterate metadata keys
-    CheckpointMgr->>CheckpointMgr: Write checkpoint manifest
-    CheckpointMgr-->>WorkerMain: CheckpointId
+    Master->>WorkerMain: Upgrade command (or periodic 10s)
+    WorkerMain->>WorkerMain: PauseNewWrites() — 新写入排队
+    Note over WorkerMain: 不需要等已有写入完成<br/>快照只需 metadata 一致性
+    WorkerMain->>SnapshotMgr: CreateSnapshot()
+    SnapshotMgr->>SnapshotMgr: 遍历 object_table → ObjectMetaEntry[]
+    SnapshotMgr->>SnapshotMgr: 遍历 hash_ring → HashRingEntry[]
+    SnapshotMgr->>SnapshotMgr: 遍历 ttl_map → TTLEntry[]
+    SnapshotMgr->>SnapshotMgr: 序列化 → protobuf → CRC32
+    SnapshotMgr->>NVMe: write(fd, pb_data, size)
+    SnapshotMgr->>NVMe: fdatasync(fd)  // 确保持久化
+    SnapshotMgr-->>WorkerMain: snapshot_id
     WorkerMain->>WorkerMain: ResumeWrites()
-    WorkerMain->>WorkerMain: WriteCleanShutdownFlag()
 ```
 
-**关键设计决策：**
-- 使用 RocksDB `GetSnapshot()` + `GetIter()` 获得一致性视图
-- Checkpoint 仅序列化 metadata（对象引用、hash ring 位置、TTL 信息），不序列化实际数据
-- 实际数据通过 RocksDB 已有持久化保证一致性
-- Checkpoint Manifest 记录：seqno、版本、时间戳、key range
+**关键设计决策 (参考 Mooncake):**
+- 只序列化 metadata（引用），不序列化实际数据块
+- 实际数据通过已有的 RocksDB WAL 或 peer 对账恢复
+- fdatasync 保证落盘（NVMe 上 < 100ms）
+- 暂停新写入时间窗口 < 500ms
 
-### 4.2 快速恢复流程
+### 4.2 快速恢复流程 (mmap 直接加载)
 
 ```mermaid
 sequenceDiagram
     participant Master
     participant Worker as Worker (Starting)
-    participant CheckpointMgr
-    participant RocksDB
+    participant SnapshotMgr
+    participant NVMe as Local NVMe
     
-    Worker->>CheckpointMgr: HasCheckpoint()
-    alt Has checkpoint
-        CheckpointMgr->>RocksDB: Open DB (existing)
-        CheckpointMgr->>CheckpointMgr: VerifyCheckpoint() — CRC + version check
-        CheckpointMgr->>CheckpointMgr: RestoreFromLatest()
-        Note over Worker: Restore metadata: object_index, hash_ring_pos, ttl_map
-        Worker->>Master: Register (with recovery_flag=true)
-        Master->>Worker: DeltaSync(from_seqno) — missed updates
-    else No checkpoint (fresh start)
-        Worker->>Master: Register (fresh)
-        Master->>Worker: FullSync() — full data rebuild
+    Worker->>SnapshotMgr: HasSnapshot()?
+    alt Has snapshot
+        SnapshotMgr->>NVMe: open() + read() snapshot file
+        SnapshotMgr->>SnapshotMgr: CRC32 → 校验通过
+        SnapshotMgr->>SnapshotMgr: protobuf → StateSnapshot
+        Note over Worker: 恢复: object_index, hash_ring_pos, ttl_map
+        Worker->>Master: Register(recovery=true, last_seqno=N)
+        Master->>Worker: DeltaSync(from_seqno=N) — 增量对账
+    else No snapshot (fresh start)
+        Worker->>Master: Register(fresh)
+        Master->>Worker: FullSync()
     end
-    Worker-->>Worker: Enter RUNNING state
+    Worker-->>Worker: Enter RUNNING state (< 3s)
 ```
+
+**恢复性能:**
+- Snapshot 文件大小 < 500MB → read() < 200ms (NVMe 3GB/s)
+- protobuf 反序列化 < 300ms
+- CRC32 校验 < 50ms
+- 总恢复时间 < 3s (含 Master DeltaSync)
 
 ### 4.3 滚动升级编排
 
