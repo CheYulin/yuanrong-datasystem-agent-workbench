@@ -283,7 +283,172 @@ sequenceDiagram
 
 ---
 
-## 七、与 Mooncake 的对比
+## 七、元数据可靠性: key→locations 映射
+
+### 7.1 问题分析
+
+当前架构中，key→locations 映射存储在 Master 的 etcd 中。多副本引入后：
+
+```
+key=abc → locations: {
+  primary: Worker-1 (running, seqno=42)
+  backup_1: Worker-2 (running, seqno=42)
+  backup_2: Worker-3 (syncing, seqno=40)
+}
+```
+
+**元数据可靠性挑战：**
+
+| 故障场景 | 影响 | 当前状态 |
+|----------|------|:--:|
+| Master 进程重启 | 内存中 location 缓存丢失，需 etcd 重建 | ⚠️ 有 etcd 恢复 |
+| etcd 集群故障 | 全部 metadata 丢失，所有 key 位置信息消失 | ⚠️ 单 etcd |
+| Master 脑裂 | 双 Master 同时更新 location → 不一致 | ❌ 无保护 |
+| 网络分区 | Partition 一侧的 Master 无法更新 location | ❌ 无处理 |
+| Worker 假死后恢复 | 旧 location 信息残留 → 脏读 | ⚠️ Lease 机制 |
+
+### 7.2 设计方案
+
+**L1: etcd 持久化 (已有)**
+- 所有 `ObjectMetaPb` 持久化到 etcd
+- Master 重启从 etcd 恢复
+
+**L2: 客户端缓存 + 版本号 (新增)**
+
+```protobuf
+message ReplicaSetPb {
+  string primary_address = 1;
+  repeated string backup_addresses = 2;
+  uint64 version = 3;          // 单调递增版本号
+  uint64 primary_seqno = 4;    // 主副本当前 seqno
+}
+```
+
+Client 本地缓存 `ReplicaSetPb`，每次 GetReplicaList 带版本号：
+- Master 返回 `304 Not Modified` (版本不变) → Client 用缓存
+- Master 返回新版本 → Client 更新缓存
+
+**L3: Worker 端自声明 (兜底)**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Master
+    participant W1 as W1 (old Primary)
+    participant W2 as W2 (new Primary)
+
+    Note over W1: 假死后恢复，不知自己被 Promote
+    Client->>W1: Get(key), 以为 W1 是 Primary
+    W1->>W1: 查本地 seqno=42
+    W1->>Master: 验证: Am I still primary?
+    Master-->>W1: No, W2 is primary (seqno=45)
+    W1-->>Client: Redirect to W2
+    Client->>W2: Get(key)
+    W2-->>Client: OK
+```
+
+Worker 每次处理 Get/Put 时**自检**：
+- 本地 seqno >= Client 期望版本 → 正常服务
+- 本地 seqno < Client 期望版本 → 重定向到 Master 返回的 Primary
+
+**L4: Quorum 写入保证一致性**
+
+```
+写入时: Primary Write → 等待 ≥ quorum 个副本 ACK → 返回 Client
+         Primary 写入 etcd: {key: abc, primary: W1, backups: [W2,W3], seqno: N, version: V}
+         
+读取时: Client 从 Master 获取 ReplicaSetPb (version=V, primary=W1)
+        Client → W1 Get(key)
+        W1 自检: 本地 seqno >= 期望版本 → 正常
+        若 W1 故障: Client → Master 刷新 → 获得 promote 后的新 Primary
+```
+
+### 7.3 元数据故障恢复流程
+
+```mermaid
+flowchart TD
+    A[Master 故障] --> B{etcd 可用?}
+    B -->|是| C[新 Master 从 etcd 恢复 location 缓存]
+    B -->|否| D[紧急: 从 Worker 自声明重建]
+    
+    C --> E[Client 重连 → 带缓存版本号查询]
+    E --> F{版本匹配?}
+    F -->|是| G[继续使用缓存]
+    F -->|否| H[刷新 ReplicaSetPb]
+    
+    D --> I[广播: 所有 Worker 上报本地 objects]
+    I --> J[重建 key→locations 映射]
+    J --> K[标记修复中，逐步恢复]
+```
+
+### 7.4 新增的数据结构
+
+```cpp
+// Worker 端 — 每个 object 额外维护
+struct ObjectReplicaInfo {
+    uint64_t seqno;              // 本地最新 seqno
+    bool is_primary;             // 当前是否为 Primary
+    std::string primary_addr;    // Master 记录的 Primary 地址
+};
+
+// Master 端 — 增强的 location 管理
+struct LocationEntry {
+    std::string worker_addr;
+    AckState state;              // UNACK / ACKED
+    uint64_t seqno;              // 该副本的 seqno
+    uint64_t last_heartbeat;     // 最后心跳时间
+};
+
+// Object → 增强的 location 映射
+// Key: object_name → Value: LocationGroup
+struct LocationGroup {
+    std::string primary_addr;
+    std::vector<LocationEntry> replicas;
+    uint64_t version;            // 单调递增，Client 缓存用
+    uint32_t quorum_size;        // min( (N/2)+1, replica_count )
+};
+```
+
+### 7.5 数据修复流程
+
+```python
+def reconcile_replicas(key):
+    """由 Master 定期 (60s) 或故障后触发"""
+    locations = master.get_locations(key)
+    primary = locations.primary
+    
+    for replica in locations.replicas:
+        if replica.seqno < primary.seqno:
+            # 备副本落后 → 触发增量同步
+            master.send_recover_command(
+                source=primary,
+                target=replica,
+                from_seqno=replica.seqno,
+                to_seqno=primary.seqno
+            )
+        
+        if replica.last_heartbeat < now - 30s:
+            # 备副本失联 → 分配新备副本
+            new_backup = hash_ring.get_next_node(key, skip=[primary, replica])
+            master.send_replicate_command(
+                source=primary,
+                target=new_backup,
+                mode=FULL_SYNC
+            )
+```
+
+### 7.6 元数据 RPO/RTO
+
+| 场景 | RPO | RTO | 恢复方式 |
+|------|-----|-----|---------|
+| Master 进程重启 | 0 | < 5s | etcd 恢复 |
+| etcd 单点故障 | < 10s (最近 Put) | < 30s | etcd 恢复 + Worker 自声明 |
+| 脑裂 | 0 | < 10s | etcd 选举 + fencing token |
+| Worker 假死恢复 | 0 | 0 (实时) | Worker 自检 + 重定向 |
+
+---
+
+## 八、与 Mooncake 的对比
 
 | 维度 | Mooncake | 我们方案 | 优势 |
 |------|---------|---------|------|
