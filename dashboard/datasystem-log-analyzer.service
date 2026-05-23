@@ -1,0 +1,22 @@
+[Unit]
+Description=DataSystem Log Analyzer
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/agent/hermes-workspace/yuanrong-datasystem-agent-workbench/dashboard
+ExecStart=/root/agent/hermes-workspace/yuanrong-datasystem-agent-workbench/dashboard/.venv/bin/python /root/agent/hermes-workspace/yuanrong-datasystem-agent-workbench/dashboard/app.py --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Logging
+SyslogIdentifier=datasystem-log-analyzer
+
+[Install]
+WantedBy=multi-user.target

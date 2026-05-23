@@ -1,0 +1,5 @@
+flask>=2.3
+plotly>=5.18
+pandas>=2.0
+psutil>=5.9
+requests>=2.31
