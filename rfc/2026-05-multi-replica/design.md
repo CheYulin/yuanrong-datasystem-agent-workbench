@@ -105,27 +105,59 @@ sequenceDiagram
     participant Backup2 as Backup Worker 2
     participant Master
     
-    Client->>Master: GetReplicaTargets(key, N=2)
-    Master-->>Client: [Primary: W1, Backup: W2] (anti-affinity checked)
+    Note over Client,Master: === 同步写入多副本 (数据+元数据) ===
     
-    Client->>Primary: PutStart(key, N=2)
-    Primary->>Primary: Allocate local ShmUnit
+    Client->>Primary: Put(key, data, N=2)
     
-    Client->>Primary: WriteChunk(data, offset)
-    Primary->>Backup1: ReplicateChunk(data, offset) [async]
+    Note over Primary: Phase 1: 本地写入 (50us)
+    Primary->>Primary: Allocate ShmUnit + MemoryCopy
     
-    Client->>Primary: PutEnd(key)
-    Primary->>Primary: Mark COMPLETE (seqno=N)
-    Primary->>Backup1: ReplicatePutEnd(seqno=N) [async]
-    Backup1-->>Primary: ACK (seqno=N)
-    Primary-->>Client: PutResult(OK, replicas=2)
+    Note over Primary: Phase 2: 同步并行复制到备副本 (100us)
+    par 并行 URMA 写入 [同步等待 Quorum]
+        Primary->>Backup1: SyncReplicate(key, data, seqno=N) [URMA RDMA]
+        Primary->>Backup2: SyncReplicate(key, data, seqno=N) [URMA RDMA]
+    end
+    Backup1-->>Primary: ACK (seqno=N, written)
+    Backup2-->>Primary: ACK (seqno=N, written)
+    Note over Primary: Quorum=2/2 ✓
+    
+    Note over Primary: Phase 3: 元数据同步到 Master (200us)
+    Primary->>Master: CreateMeta(key, locations=[P,B1,B2], seqno=N, quorum=2)
+    Master-->>Primary: OK (version=V)
+    
+    Primary-->>Client: PutResult(OK, version=V, replicas=2)
+    Note over Client: P99 ~350us << 3ms ✅
 ```
 
-**关键决策:**
-- 主副本同步写入 (Client → Primary)
-- 备副本异步写入 (Primary → Backup)，Client 不等待
-- PutEnd 时 Primary 确保 seqno 单调递增
-- 备副本 ACK 返回后 Primary 标记 min_synced_seqno
+**关键设计决策:**
+
+| 决策 | 说明 | 理由 |
+|------|------|------|
+| **同步写入** | Primary 等待 Quorum ACK 后才返回 Client | Client 拿到 OK = N 个副本都已写入 |
+| **数据和元数据都同步** | 数据通过 URMA 写备副本，元数据 seqno 一起传递 | 一致性：数据和 metadata 原子绑定 |
+| **并行复制** | 同时向 N 个 Backup 发起 URMA 写入 | N 个副本延迟 = max(单次 URMA)，不是 sum |
+| **Quorum = N/2+1** | N=2 → Quorum=2；N=3 → Quorum=2 | 容忍 N-Quorum 个副本失败 |
+| **元数据包含完整 locations** | CreateMeta 直接写入全部副本位置 | Master 始终知道完整副本集，切换零延迟 |
+
+**同步写入时序预算 (N=2, 8MB, 200Gbps RDMA):**
+
+| 阶段 | 操作 | 耗时 |
+|------|------|:--:|
+| Phase 1 | 本地 SHM 分配 + 拷贝 | ~50us |
+| Phase 2 | URMA RDMA → 2 Backup (并行, 200Gbps) | ~100us |
+| Phase 3 | Master RocksDB 持久化 | ~200us |
+| **Total P99** | | **~350us << 3ms** ✅ |
+
+**备副本操作 (SyncReplicate RPC):**
+
+```
+Backup 收到 SyncReplicateReqPb {key, data, seqno, primary_addr}:
+  1. AllocateMemoryForObject()     → SHM 分配
+  2. URMA 数据接收 (RDMA write)   → 已在 SHM
+  3. PublishObjectLocal()          → ObjectEntry, SetPrimaryCopy(false)
+  4. local_seqno_ = seqno          → 记录同步位点
+  5. 返回 {ack=true, seqno=N}
+```
 
 ### 3.2 故障切换流程
 
