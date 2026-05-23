@@ -139,14 +139,33 @@ sequenceDiagram
 | **Quorum = N/2+1** | N=2 → Quorum=2；N=3 → Quorum=2 | 容忍 N-Quorum 个副本失败 |
 | **元数据包含完整 locations** | CreateMeta 直接写入全部副本位置 | Master 始终知道完整副本集，切换零延迟 |
 
-**同步写入时序预算 (N=2, 8MB, 200Gbps RDMA):**
+**同步写入时序预算 (基于现网 6.62.223.31 Worker 实测数据):**
 
-| 阶段 | 操作 | 耗时 |
-|------|------|:--:|
-| Phase 1 | 本地 SHM 分配 + 拷贝 | ~50us |
-| Phase 2 | URMA RDMA → 2 Backup (并行, 200Gbps) | ~100us |
-| Phase 3 | Master RocksDB 持久化 | ~200us |
-| **Total P99** | | **~350us << 3ms** ✅ |
+| 阶段 | 操作 | P50 | P99 | 数据来源 |
+|------|------|:--:|:--:|------|
+| Phase 1 | 本地 SHM 分配 | 41us | 69us | `worker_process_create_latency` |
+| Phase 2 | URMA RDMA → 2 Backup (并行) | 13us | 21us | `worker_urma_write_latency` |
+| Phase 3 | Master RocksDB 持久化 | 347us | 378us | `worker_rpc_create_meta_latency` |
+| **Total** | | **~401us** | **~468us** | **<< 3ms 目标 ✅** |
+
+> 数据来源: 生产 Worker 6.62.223.31, 164 周期 × 8 shard, 1312 行 metrics_summary 日志
+> 5ms 间隔采集, 覆盖 ZMQ/URMA/Process/RPC 全部延迟指标
+
+**Get 路径延迟分解 (现网数据, 用于多副本读性能分析):**
+
+| 阶段 | P50 | P99 | 占比 |
+|------|:--:|:--:|:--:|
+| ZMQ Send/Recv IO | 1us | 9us | ~1% |
+| ZMQ Network | 158us | 423us | ~23% |
+| ZMQ Server Queue Wait | 17us | 46us | ~3% |
+| ZMQ Server Exec (含 Process Get) | 268us | 1433us | **~73%** |
+| **E2E Total** | **359us** | **893us** | 100% |
+
+**关键结论:**
+1. ZMQ Server Exec 是最大瓶颈 (73%), 主要是 Get 处理逻辑
+2. URMA 写入极快 (13us P50, 21us P99), 同步复制 2 副本延迟可忽略
+3. 同步写入 P99 ~468us, 离 3ms 上限有 6x 余量
+4. Get P99 ~893us, 离 5ms 目标有 5.6x 余量
 
 **备副本操作 (SyncReplicate RPC):**
 
