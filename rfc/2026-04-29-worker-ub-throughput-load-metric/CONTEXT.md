@@ -32,7 +32,7 @@
 ## 3. 与 URMA/UB 的关系（为何数据面是瓶颈）
 
 - 切换路径上 `TrySwitchToStandbyWorker` → `ClientWorkerRemoteCommonApi::Init` → `TryFastTransportAfterHeartbeat`；`USE_URMA` 下会走 **URMA 首次握手**（如 `TryUrmaHandshake`）等，**对单台 Standby 的并发**敏感。
-- 在 **鲲鹏超节点、京东类场景** 的讨论结论：**UB 数据面带宽** 往往是 Worker **存取的关键约束**；因此「负载」若用于**调度/均衡/Po2**，**近窗 UB 传输量** 比纯连接数、纯 RPC 次数更贴近（见同目录 `README.md` 正式定义：含 **C↔W 跨节点** 与 **W↔W** 的 UB 字节）。
+- 在 **类鲲鹏超节点、业务方类场景** 的讨论结论：**UB 数据面带宽** 往往是 Worker **存取的关键约束**；因此「负载」若用于**调度/均衡/Po2**，**近窗 UB 传输量** 比纯连接数、纯 RPC 次数更贴近（见同目录 `README.md` 正式定义：含 **C↔W 跨节点** 与 **W↔W** 的 UB 字节）。
 
 ---
 
@@ -41,7 +41,7 @@
 | 里程碑 | 交付 | Po2 比较输入（负载信号） |
 |--------|------|---------------------------|
 | **A（先验证）** | **Power-of-Two**：候选中 **二选一**，**连接数少者优先** 尝试。 | **各 Worker 上当前 Client 连接数**（实现与观测简单；用于三节点轮换故障，看连接是否更均衡）。 |
-| **B（生产/京东口径）** | 同上 Po2 框架，**仅替换比较量**。 | **近窗 UB 传输 bytes**（C↔W + W↔W，见 `README.md` §1）。 |
+| **B（生产/业务方口径）** | 同上 Po2 框架，**仅替换比较量**。 | **近窗 UB 传输 bytes**（C↔W + W↔W，见 `README.md` §1）。 |
 | **后续** | **Jitter**、**Worker 熔断/限流**、**Client 换候选重试**。 | 与 Po2 正交。 |
 
 **验证 Case（用户）**：`worker1/2/3` 正常 → **分别**让 w1、w2、w3 故障 → 观察存活节点 **Client 连接数** 是否相对均衡；详见 [validation-po2-client-count.md](./validation-po2-client-count.md)。

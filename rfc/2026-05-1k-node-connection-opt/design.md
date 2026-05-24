@@ -275,4 +275,4 @@ flowchart TD
 | Jetty 负载均衡 | 写入压力下统计各 Jetty 使用率 | 偏差 < 15% |
 | 连接池耗尽 | 压测 > pool_size 并发，验证排队 | 排队不超时 |
 | 空闲回收 | idle 5min 后检查连接数 | 连接正确回收 |
-| 海思环境验证 | 鲲鹏/昇腾节点上实际测试 | Jetty Cache miss < 1% |
+| 海思环境验证 | 类鲲鹏/昇腾节点上实际测试 | Jetty Cache miss < 1% |

@@ -1,7 +1,7 @@
 # 验证方案：Power-of-Two + Client 连接数（PoC）
 
 - **Status**: Draft
-- **目的**：在 **UB 字节** 作为京东/鲲鹏侧最终负载口径之前，先用 **Client 连接数** 作为 Po2 的**比较信号** 做一版可跑通的实现与验证；实现简单、易在现网或 ST 环境观察 **各 Worker 上连接是否更均衡**。
+- **目的**：在 **UB 字节** 作为业务方/类鲲鹏侧最终负载口径之前，先用 **Client 连接数** 作为 Po2 的**比较信号** 做一版可跑通的实现与验证；实现简单、易在现网或 ST 环境观察 **各 Worker 上连接是否更均衡**。
 - **与主 RFC 关系**：见 [README.md](./README.md) §1.1「里程碑」；本文件只描述 **场景与判据**，不规定 metric 名字与 MR 细节。  
 - **用例怎么设计、记什么、怎么比、URMA/重复次数**：见 [validation-test-design-and-observation.md](./validation-test-design-and-observation.md)。  
 - **顺序与覆盖**：**验收用例/脚本** **优先** 在 **非 URMA** 下完成 **§2 行为预期** 对应场景与基线，**再** 增加 **URMA** 环境专项；**实现** 上 Po2/切流/负载读 须对 **非 URMA 与 URMA** 两条 C↔W 路径**均可测**，见 [validation-test-design-and-observation.md](./validation-test-design-and-observation.md) **§0**。
