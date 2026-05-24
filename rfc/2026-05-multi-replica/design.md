@@ -717,110 +717,126 @@ key=abc → locations: {
 
 **元数据可靠性挑战：**
 
-### 7.1 存储架构
+### 7.1 存储架构: 元数据分布式化
 
-**关键的架构决策: 对象级元数据 (key→location) 不走 etcd。**
+**核心架构决策: 元数据 (key→location) 分布式存储在 Worker 上，通过一致性哈希定位。**
 
-| 存储 | 存什么 | 规模 | 性能 |
-|------|--------|------|------|
-| **Master RocksDB** | 对象级元数据 (key→location, TTL, version, seqno) | 千万级 object | 写入 P99=378us (现网) |
-| **Master 内存** | `metaTable_` hash map (RocksDB 的写缓存 + 读缓存) | 与 RocksDB 同步 | 读取 <1us |
-| **etcd** | 集群配置 (HashRing, Slot, Master 选举) | ~KB 级 | — |
-| **Worker RocksDB** | 副本间 WAL 同步 (已有 ReplicationService) | 同 Master | — |
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        etcd (集群级配置)                          │
+│  HashRing · Slot 分配 · Master Leader 选举                       │
+│  数据量: ~KB · 变更频率: 分钟级                                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              一致性哈希分发元数据到 Worker                          │
+│                                                                 │
+│  key="abc" → hash_ring.GetNode(key) → Worker-5                  │
+│                                                                 │
+│  Worker-5 负责:                                                  │
+│    • key="abc" 的 metadata (locations, TTL, version, seqno)     │
+│    • metadata 通过多副本机制同步到 Backup Workers                 │
+│    • 处理 Client 的 GetReplicaList 查询                          │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**为什么不用 etcd 存对象元数据:**
-- etcd 设计目标是配置数据 (KB 级)，不适合千万级对象的高频更新
-- etcd Raft 日志膨胀: 每个 CreateMeta → 一次 Raft 提交，etcd 磁盘和 CPU 无法承受
-- RocksDB 写入 P99=378us vs etcd Raft P99=几ms → **10x 性能差距**
+**各组件职责明确:**
+
+| 组件 | 存什么 | 不存什么 |
+|------|--------|---------|
+| **etcd** | HashRing, Slot 分配, Master Leader 选举 | ❌ 对象级 metadata |
+| **Master 服务** | 路由 metadata 请求到正确的 Worker, HashRing 管理, 故障协调 | ❌ 对象级 metadata (转发给 Worker) |
+| **Worker (Meta Owner)** | 其 hash range 内所有 key 的 metadata (key→locations, seqno, TTL) | ❌ 其他 Worker range 的 metadata |
+| **Worker (Data Owner)** | 对象的实际数据 (SHM) | — |
+
+**为什么元数据要分布式化:**
+- **去中心化**: 消除 Master 单点瓶颈。1K 节点的 metadata 查询分散到所有 Worker
+- **水平扩展**: metadata 容量随 Worker 数量线性增长（每个 Worker 只负责 ~1/N 的 key）
+- **故障隔离**: 单个 Worker 故障只影响其 hash range 的 metadata，不影响其他
+- **etcd 减压**: etcd 只存集群配置 (~KB)，metadata 完全不经过 etcd
+- **一致性**: metadata 和数据用同一套副本机制 (SyncReplicate)，metadata 的副本数 = 数据的副本数
 
 ### 7.2 元数据可靠性: 四层保障
 
-**L1: Master 本地 RocksDB (已有)**
+**L1: Worker 本地持久化 (RocksDB + SHM)**
 
+每个 Worker 对自己 hash range 内的 metadata 负责:
 ```cpp
-// oc_metadata_manager.cpp:485 — 现有代码路径
-Status CreateMetaFirstTime(key, meta, address) {
-    metaCache.locations[address] = AckState::ACK;
-    objectStore_->CreateOrUpdateMeta(key, meta);  // → RocksDB Write
-    // 失败回滚: objectStore_->RemoveMeta() + metaTable_.erase()
+// Worker 端: metadata 和数据一起写入
+Status CreateReplicas(key, data, N) {
+    // 1. 数据写入本地 SHM
+    // 2. metadata (locations, seqno, TTL) 写入本地 objectTable_
+    // 3. 两者原子绑定 (同一个 seqno)
 }
 ```
 
-- 每次 CreateMeta/UpdateMeta 同步写入 RocksDB + 内存缓存
-- Master 重启: `metaTable_` 从 RocksDB 恢复 (全量扫描 or Checkpoint)
+Worker 重启: Snapshot 恢复 metadata + DeltaSync 对账 (见 RFC1 §4.3)
 
-**L2: Master 主备 RocksDB 复制 (已有, 增强)**
+**L2: 副本同步保证 metadata 一致性**
 
-```mermaid
-sequenceDiagram
-    participant PrimaryM as Primary Master
-    participant RocksDB_P as RocksDB (Primary)
-    participant BackupM as Backup Master
-    participant RocksDB_B as RocksDB (Backup)
-
-    PrimaryM->>RocksDB_P: CreateMeta(key, locations=[W1,W2])
-    RocksDB_P-->>PrimaryM: OK
-
-    PrimaryM->>BackupM: PushNewLogs (WAL batch, async)
-    BackupM->>RocksDB_B: Apply WAL
-    BackM-->>PrimaryM: ACK
-
-    Note over PrimaryM,BackupM: 已有 ReplicationService:<br/>TryPSync / PushNewLogs / FetchMeta / FetchFile
-```
-
-- 已有 `ReplicationService` (TCP PSync, WAL 推送)
-- 已有 `HandleFetchMeta` (RocksDB Checkpoint 全量同步)
-- **增强点**: 每个 CreateMeta 后立即 PushNewLogs (当前是异步批量), 保证 RPO ~0
-
-**L3: Client 缓存 + Worker 自检 (新增)**
-
-```
-Client 侧: 缓存 ReplicaSetPb + version, 减少 Master 查询
-Worker 侧: 每次 Get/Put 自检 "我是否仍是 Primary"
-  → seqno 匹配: 正常服务
-  → seqno 不匹配 (已被 Promote): 重定向到新 Primary
-  → 自检失败: 主动向 Master 验证
-```
+metadata 和 data 使用**同一套 SyncReplicate 机制**:
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant M as Master
-    participant W1 as W1 (假死恢复)
-    participant W2 as W2 (已被 Promote)
+    participant Primary as Primary Worker (Meta Owner)
+    participant Backup1 as Backup Worker
+    participant Backup2 as Backup Worker
 
-    C->>W1: Get(key), version_cache=5
-    W1->>W1: seqno=42 vs expected=45 → 不匹配!
-    W1-->>C: Redirect to W2
-    C->>W2: Get(key)
-    W2-->>C: OK
+    Note over Primary: Put(key, data, N=2)
+
+    Primary->>Primary: 写入 data + metadata (seqno=N)
+
+    par SyncReplicate: 数据和 metadata 同步复制
+        Primary->>Backup1: SyncReplicate(data + metadata, seqno=N)
+        Primary->>Backup2: SyncReplicate(data + metadata, seqno=N)
+    end
+    Backup1-->>Primary: ACK (data+metadata written)
+    Backup2-->>Primary: ACK (data+metadata written)
+    Note over Primary: Quorum=2/2 ✓
 ```
 
-**L4: Quorum 写入 + 故障恢复**
+- **metadata 的副本数 = 数据的副本数 (N)**
+- **SyncReplicate 同时传输 data 和 metadata (同一个 seqno)**
+- **Quorum 确认: data 和 metadata 都写入才 ACK**
+- metadata 不需要单独的同步机制 — 复用数据副本通道
+
+**L3: 一致性哈希定位 metadata**
+
+```mermaid
+flowchart TD
+    A[Client: GetReplicaList key] --> B[key 的 hash → 哈希环位置]
+    B --> C[找到 Meta Owner Worker]
+    C --> D{Worker 本机 还是其他节点?}
+    D -->|本机| E[本机 objectTable_ 查找]
+    D -->|其他节点| F[ZMQ RPC → Meta Owner Worker 查询]
+    E --> G[返回 ReplicaSetPb]
+    F --> G
+```
+
+- Client / Worker 通过一致性哈希**直接定位** metadata 所在的 Worker
+- **不经过中心 Master** — 减少一跳，降低延迟
+- Meta Owner Worker 故障 → 副本接管 (同数据副本切换机制)
+
+**L4: Worker 自检 + 重定向 (兜底)**
 
 ```
-正常写入:
-  Primary Write → SyncReplicate(N Backups, Quorum=N/2+1) → Master CreateMeta(RocksDB + WAL) → OK
-
-Master 故障 (Primary Master 宕机):
-  1. etcd 检测心跳超时 → 选举新 Master (<5s)
-  2. 新 Master 从本地 RocksDB 恢复 metaTable_ (已有 WAL 同步, RPO~0)
-  3. 新 Master 继续服务 CreateMeta/GetReplicaList
-
-Master 故障 (全部 Master 宕机, 极端情况):
-  1. etcd 集群选出新 Master → 从 RocksDB Checkpoint 恢复
-  2. 如 Checkpoint 不可用 → Worker 自声明 (L3): 每个 Worker 上报本地 objects
-  3. Master 重建 key→locations 映射 → 标记修复中
+Worker 处理 Get/Put 时自检:
+  1. 我是这个 key 的 Meta Owner 吗? (查本地 hash ring)
+  2. 我的 metadata 版本是最新的吗? (seqno 比对)
+  3. 是 → 正常服务
+  4. 不是 → 重定向到正确的 Meta Owner
 ```
 
-### 7.3 RPO/RTO
+### 7.3 故障恢复
 
-| 场景 | RPO | RTO | 恢复方式 |
-|------|-----|-----|---------|
-| Master 进程重启 | 0 | <3s | RocksDB 恢复 `metaTable_` |
-| Master 主备切换 (WAL 同步) | 0 (同步 WAL) / <1s (异步 WAL) | <5s | etcd 选举 + Backup Master 接管 |
-| Master 全部宕机 (RocksDB 可用) | <1s | <30s | 新 Master + RocksDB 恢复 |
-| Master 全部宕机 (RocksDB 损坏) | <10s | <60s | Worker 自声明重建 |
+| 场景 | metadata 影响 | 恢复方式 | RTO |
+|------|-------------|---------|:--:|
+| Meta Owner Worker 宕机 | hash range 内 metadata 不可查 | Backup 自动接管 (同数据副本) | <5ms |
+| Meta Owner 假死后恢复 | metadata 可能过期 | Worker 自检 → Redirect 或 DeltaSync | 实时 |
+| etcd 故障 | 集群配置不可更新, metadata 不受影响 | metadata 走 Worker 分布式查询 | 0 (metadata 不受影响) |
+| Master 服务故障 | HashRing 管理暂停, metadata 查询不受影响 | 元数据查询不经过 Master | 0 |
+| 全部 Worker 宕机 | — | 从 RocksDB + 副本恢复 | <3s (Snapshot) |
 
 ### 7.3 元数据故障恢复流程
 
