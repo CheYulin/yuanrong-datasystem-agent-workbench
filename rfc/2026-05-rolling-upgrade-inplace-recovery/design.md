@@ -372,61 +372,159 @@ flowchart TD
 - 每个 Worker 升级间隔 > 30s（确保恢复稳定）
 - 先升级非关键节点（无 Primary 数据），后升级有 Primary 的节点
 
-### 4.8 Protobuf 消息定义
+### 4.8 持久化格式与兼容性设计
+
+#### 4.8.1 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| **向前兼容** | 新版本 Worker 必须能读取旧版本 Snapshot |
+| **向后兼容** | 旧版本 Worker 遇到新版本字段时降级处理 (不崩溃) |
+| **版本锚定** | Snapshot 记录创建时的 Worker 版本，恢复时校验 |
+| **增量扩展** | 新字段通过 Protobuf field number 追加，不修改已有字段语义 |
+| **降级路径** | 不兼容时走 SlotRecovery 全量恢复，保证服务可用 |
+
+#### 4.8.2 Protobuf 定义 (兼容性优先)
 
 ```protobuf
 // 文件: src/datasystem/protos/state_snapshot.proto (新增)
 
 message StateSnapshotPb {
-    // 版本信息
-    uint64 checkpoint_id = 1;
-    uint64 timestamp_us = 2;
-    string worker_version = 3;       // "v0.8.1.rc26"
+    // === 版本区 (field 1-9, 永不修改语义) ===
+    uint64 format_version = 1;       // Snapshot 格式版本 (当前=1), 递增
+    uint64 checkpoint_id = 2;        // 单调递增 ID
+    uint64 timestamp_us = 3;         // 创建时间戳
+    string worker_version = 4;       // Worker 版本, 如 "v0.8.1.rc26"
     
-    // 锚点信息 (用于增量对账)
-    uint64 master_seqno = 4;         // etcd 中最后确认的序列号
-    string etcd_cluster_id = 5;      // etcd 集群 ID (重启后验证)
+    // === 锚点区 (field 10-19) ===
+    uint64 master_seqno = 10;        // etcd 最后确认 seqno
+    string cluster_id = 11;          // 集群 ID (重启后校验, 防错集群)
     
-    // Meta 表项
+    // === 数据区 (field 20-49, 向后兼容追加) ===
     message ObjectMetaEntry {
-        string key_hash = 1;
+        string key_hash = 1;         // 不可变
         uint64 data_size = 2;
         uint32 ttl_second = 3;
         uint64 create_time_us = 4;
         uint64 version = 5;
         bool is_primary_copy = 6;
         string primary_address = 7;
-        bytes shm_unit_id = 8;       // SHM 单元引用
+        bytes shm_unit_id = 8;
+        // === v2 预留 (field 20+) ===
+        // ReplicaGroupPb replica_info = 20;    // 未来: 副本组信息
+        // uint64 last_access_time_us = 21;     // 未来: LRU 访问时间
     }
-    repeated ObjectMetaEntry object_metas = 10;
+    repeated ObjectMetaEntry object_metas = 20;
     
-    // Hash Ring 分配
     message HashRingEntry {
         string key_hash = 1;
         string owner_worker = 2;
         uint32 slot_id = 3;
+        // === v2 预留 ===
+        // uint32 rack_id = 10;                 // 未来: Rack 感知
     }
-    repeated HashRingEntry hash_assignments = 11;
+    repeated HashRingEntry hash_assignments = 21;
     
-    // TTL 信息
     message TTLEntry {
         string key_hash = 1;
         uint64 expire_time_us = 2;
     }
-    repeated TTLEntry ttl_entries = 12;
+    repeated TTLEntry ttl_entries = 22;
     
-    // Slot 信息 (从 Master 分配)
     message SlotInfo {
         uint32 slot_id = 1;
         string slot_path = 2;
         uint64 allocated_bytes = 3;
         uint64 used_bytes = 4;
     }
-    repeated SlotInfo slots = 13;
+    repeated SlotInfo slots = 23;
     
-    // CRC32 校验 (对整个消息计算)
-    uint32 crc32 = 20;
+    // === 扩展区 (field 50+) ===
+    // 新版本在此区域追加字段, 旧版本忽略 (Protobuf 默认行为)
+    // map<string, bytes> extension_metadata = 50;  // 未来扩展
+    uint64 snapshot_size_bytes = 51;    // v2: Snapshot 文件大小
+    
+    // === 校验区 (field 99) ===
+    uint32 crc32 = 99;               // CRC32C (Castagnoli), 对整个消息计算
 }
+```
+
+#### 4.8.3 兼容性矩阵
+
+| 场景 | 创建版本 | 恢复版本 | 行为 |
+|------|:--:|:--:|------|
+| 正常恢复 | rc24 | rc24 | ✅ 直接恢复 |
+| 滚动升级 | rc24 | rc26 | ✅ rc26 读取 rc24 Snapshot (向前兼容) |
+| 回滚 | rc26 | rc24 | ⚠️ rc24 忽略 rc26 的 field 50+ (Protobuf 默认), 恢复核心数据 |
+| 跨大版本 | v0.8 | v0.9 | ❌ `format_version` 不匹配 → 降级 SlotRecovery |
+| Snapshot 损坏 | — | — | ❌ CRC32 校验失败 → 自动回退上一版本 |
+
+#### 4.8.4 格式兼容性代码
+
+```cpp
+Status SnapshotManager::RestoreFromLatest(uint64_t *restored_seqno) {
+    StateSnapshotPb pb;
+    RETURN_IF_ERR(ReadSnapshotFromFile(latest_snapshot_id, &pb));
+    
+    // Step 1: 格式版本检查
+    if (pb.format_version() > kCurrentFormatVersion) {
+        LOG(WARNING) << "Snapshot format v" << pb.format_version()
+                    << " > current v" << kCurrentFormatVersion
+                    << ", falling back to SlotRecovery";
+        return Status::FailedPrecondition("Snapshot format too new");
+    }
+    
+    // Step 2: 版本兼容性检查
+    SemVer snapshot_ver = ParseVersion(pb.worker_version());
+    SemVer current_ver = GetCurrentVersion();
+    
+    if (snapshot_ver.major != current_ver.major) {
+        // 跨大版本: 降级到 SlotRecovery
+        LOG(WARNING) << "Major version mismatch: " 
+                    << pb.worker_version() << " vs " << current_ver.ToString();
+        return Status::FailedPrecondition("Snapshot major version mismatch");
+    }
+    
+    // Step 3: 同大版本: 正常恢复
+    // Protobuf 自动忽略未知 field (向前兼容)
+    // 新版本新增的 field 在旧 Snapshot 中为空 → 使用默认值
+    
+    if (snapshot_ver < current_ver) {
+        LOG(INFO) << "Restoring from older snapshot v" << snapshot_ver.ToString()
+                  << " to current v" << current_ver.ToString();
+        // 新版本可能需要的字段在旧 Snapshot 中不存在 → 标记为需要全量对账
+        *restored_seqno = pb.master_seqno();
+        return Status::OK();
+    }
+    
+    // Step 4: 同版本: 直接恢复
+    *restored_seqno = pb.master_seqno();
+    return Status::OK();
+}
+```
+
+#### 4.8.5 文件存储规范
+
+```
+{FLAGS_checkpoint_data_dir}/
+├── snapshot_000001.pb           # Snapshot 文件 (Protobuf binary)
+├── snapshot_000002.pb
+├── snapshot_000003.pb
+├── manifest.json                # 索引文件
+│   {
+│     "format_version": 1,
+│     "snapshots": [
+│       {"id":1, "ts":1717000000000000, "seqno":1000, "version":"v0.8.1.rc24", "size_bytes":524288000, "crc32":"a1b2c3d4"},
+│       {"id":2, "ts":1717000010000000, "seqno":1100, "version":"v0.8.1.rc24", "size_bytes":524300000, "crc32":"e5f6g7h8"},
+│       {"id":3, "ts":1717000020000000, "seqno":1200, "version":"v0.8.1.rc24", "size_bytes":524290000, "crc32":"i9j0k1l2"}
+│     ]
+│   }
+└── LOCK                          # 文件锁 (防止并发 Snapshot 创建)
+```
+
+**文件命名规则:** `snapshot_{id:06d}.pb` (零填充, 便于排序)
+**原子写入:** 先写到 `.tmp` 文件, `fdatasync` 后 `rename` (原子操作)
+**Manifest 更新:** 原子写入 (写完 tmp → rename)
 ```
 
 ### 4.9 SnapshotManager 完整 API
