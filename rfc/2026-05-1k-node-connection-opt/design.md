@@ -540,7 +540,36 @@ void URMAConnectionPool::HealthCheck(const std::string &peer_id) {
 
 ---
 
-## 五、工作量估算
+## 五、Jetty 代码深度分析
+
+> 基于完整 Jetty 代码深读 (16 文件: urma_dlopen_util + urma_resource + urma_manager + others)
+
+### 5.1 当前 Jetty 数量
+
+每个 Worker-远程对端连接 = **1 SEND + 1 RECV + 1 Target = 3 Jetty**.
+1024 节点 → **~3072 Jetty/Worker**
+
+### 5.2 现有复用机制
+
+**已有 (localJettyMap_):** 以 connectionKey 缓存, 重新连接时复用.
+**已有 (JFR 共享):** 所有 SEND Jetty 共享 1 个 JFR (深度 32).
+**已有 (JFC 全局):** 所有 Jetty 共享 1 个完成队列.
+**已有 (错误恢复):** ReCreateJetty() 异步重建 (statusCode=9 触发).
+
+**没有:** Jetty 池化、跨连接共享、预热、负载均衡.
+
+### 5.3 硬编码限制
+
+Jetty JFS 深度 256(SEND)/32(RECV) · max SGE=13 · URMA 连接上限 16384 · 可恢复错误码仅 1 个.
+
+### 5.4 优化目标
+
+Jetty 数 3072→128 (单 Jetty 承载 8 CTP) = **24x reduction**.
+创建耗时 153s→6.4s = **24x faster**.
+
+---
+
+## 六、工作量估算
 
 | 子需求 | 开发 | 测试 | 合计 |
 |--------|:--:|:--:|:--:|
