@@ -259,9 +259,219 @@ flowchart TD
 - 每个 Worker 升级间隔 > 30s（确保恢复稳定）
 - 先升级非关键节点（无 Primary 数据），后升级有 Primary 的节点
 
+### 4.4 Protobuf 消息定义
+
+```protobuf
+// 文件: src/datasystem/protos/state_snapshot.proto (新增)
+
+message StateSnapshotPb {
+    // 版本信息
+    uint64 checkpoint_id = 1;
+    uint64 timestamp_us = 2;
+    string worker_version = 3;       // "v0.8.1.rc26"
+    
+    // 锚点信息 (用于增量对账)
+    uint64 master_seqno = 4;         // etcd 中最后确认的序列号
+    string etcd_cluster_id = 5;      // etcd 集群 ID (重启后验证)
+    
+    // Meta 表项
+    message ObjectMetaEntry {
+        string key_hash = 1;
+        uint64 data_size = 2;
+        uint32 ttl_second = 3;
+        uint64 create_time_us = 4;
+        uint64 version = 5;
+        bool is_primary_copy = 6;
+        string primary_address = 7;
+        bytes shm_unit_id = 8;       // SHM 单元引用
+    }
+    repeated ObjectMetaEntry object_metas = 10;
+    
+    // Hash Ring 分配
+    message HashRingEntry {
+        string key_hash = 1;
+        string owner_worker = 2;
+        uint32 slot_id = 3;
+    }
+    repeated HashRingEntry hash_assignments = 11;
+    
+    // TTL 信息
+    message TTLEntry {
+        string key_hash = 1;
+        uint64 expire_time_us = 2;
+    }
+    repeated TTLEntry ttl_entries = 12;
+    
+    // Slot 信息 (从 Master 分配)
+    message SlotInfo {
+        uint32 slot_id = 1;
+        string slot_path = 2;
+        uint64 allocated_bytes = 3;
+        uint64 used_bytes = 4;
+    }
+    repeated SlotInfo slots = 13;
+    
+    // CRC32 校验 (对整个消息计算)
+    uint32 crc32 = 20;
+}
+```
+
+### 4.5 SnapshotManager 完整 API
+
+```cpp
+// 文件: src/datasystem/worker/object_cache/snapshot_manager.h (新增)
+
+class SnapshotManager {
+public:
+    // 初始化: data_dir = FLAGS_checkpoint_data_dir
+    explicit SnapshotManager(const std::string &data_dir);
+    ~SnapshotManager();
+    
+    // === 快照生命周期 ===
+    
+    // CreateSnapshot: 创建当前状态的快照
+    // 内部流程:
+    //   1. PauseNewWrites() — 标记 "快照进行中", 新写入排队
+    //   2. IterateObjectTable() → ObjectMetaEntry[]
+    //   3. IterateHashRing() → HashRingEntry[]
+    //   4. IterateTTLMap() → TTLEntry[]
+    //   5. SerializeProtobuf() + CRC32
+    //   6. write(fd, pb_data) + fdatasync(fd)
+    //   7. ResumeWrites()
+    //   8. 返回 snapshot_id
+    Status CreateSnapshot(uint64_t *snapshot_id);
+    
+    // RestoreFromLatest: 从最新的快照恢复
+    // 内部流程:
+    //   1. ListSnapshots() → 取最新
+    //   2. VerifySnapshot(snapshot_id) → CRC32 + 版本检查
+    //   3. read(fd) → protobuf 反序列化
+    //   4. ApplyToObjectTable() → 重建内存索引
+    //   5. ApplyToHashRing() → 重建 hash ring 位置
+    //   6. ApplyToTTLMap() → 重建 TTL 映射
+    //   7. 返回恢复的快照 seqno (用于增量对账)
+    Status RestoreFromLatest(uint64_t *restored_seqno);
+    
+    // === 快照管理 ===
+    
+    // ListSnapshots: 列出所有快照
+    Status ListSnapshots(std::vector<SnapshotMeta> *snapshots);
+    
+    // VerifySnapshot: 校验指定快照
+    Status VerifySnapshot(uint64_t snapshot_id, bool *valid);
+    
+    // PruneOldSnapshots: 保留最近 N 个, 删除其余
+    Status PruneOldSnapshots(uint32_t max_keep = 3);
+    
+    // === 状态查询 ===
+    bool HasSnapshot() const;
+    uint64_t GetLatestSnapshotId() const;
+    uint64_t GetLatestSnapshotSeqno() const;
+    size_t GetSnapshotCount() const;
+    
+    // === 统计 ===
+    struct SnapshotStats {
+        uint64_t total_snapshots_created;
+        uint64_t total_snapshots_restored;
+        uint64_t failed_snapshots;
+        uint64_t last_snapshot_size_bytes;
+        uint64_t last_snapshot_duration_us;
+        uint64_t last_restore_duration_us;
+    };
+    SnapshotStats GetStats() const;
+
+private:
+    // 序列化到文件
+    Status WriteSnapshotToFile(const StateSnapshotPb &pb,
+                               uint64_t snapshot_id);
+    
+    // 从文件反序列化
+    Status ReadSnapshotFromFile(uint64_t snapshot_id,
+                                StateSnapshotPb *pb);
+    
+    // CRC32 校验
+    uint32_t ComputeCRC32(const StateSnapshotPb &pb);
+    
+    // 构建快照文件名
+    std::string SnapshotPath(uint64_t snapshot_id) const {
+        return data_dir_ + "/snapshot_" +
+               std::to_string(snapshot_id) + ".pb";
+    }
+    
+    std::string data_dir_;
+    std::mutex snapshot_mutex_;
+    std::atomic<bool> snapshot_in_progress_{false};
+    SnapshotStats stats_;
+};
+```
+
+### 4.6 恢复流程伪代码
+
+```cpp
+// WorkerOCServer::Start() 中加入恢复逻辑 (修改 worker_oc_server.cpp)
+
+Status WorkerOCServer::Start() {
+    // ... 现有初始化 ...
+    
+    // Step 1: Slot 恢复 (已有框架)
+    RETURN_IF_ERR(slotRecoveryOrchestrator_->Init());
+    RETURN_IF_ERR(slotRecoveryOrchestrator_->RepairLocalSlots());
+    
+    // Step 2: 尝试快速恢复 (新增)
+    SnapshotManager snapshot_mgr(FLAGS_checkpoint_data_dir);
+    
+    if (FLAGS_enable_fast_recovery && snapshot_mgr.HasSnapshot()) {
+        uint64_t restored_seqno = 0;
+        Status s = snapshot_mgr.RestoreFromLatest(&restored_seqno);
+        
+        if (s.ok()) {
+            LOG(INFO) << "[FastRecovery] Restored from snapshot, seqno="
+                      << restored_seqno
+                      << ", duration=" << snapshot_mgr.GetStats().last_restore_duration_us << "us";
+            
+            // Step 3: 向 Master 注册为恢复模式
+            RegisterWithRecoveryFlag(restored_seqno);
+            
+            // Step 4: Master 进行增量对账
+            // Master 对比 etcd 中的 seqno 与 restored_seqno
+            // 推送缺失的元数据更新
+            DeltaSync(restored_seqno);
+            
+            return Status::OK();
+        } else {
+            LOG(WARNING) << "[FastRecovery] Snapshot restore failed: " << s.ToString()
+                        << ", falling back to full recovery";
+            // 降级到现有的全量 Slot Recovery 路径
+        }
+    }
+    
+    // Step 5: 回退到现有路径
+    // HandleLocalRestart() → 等 SlotRecoveryManager 的 ETCD 协调恢复
+    RETURN_IF_ERR(slotRecoveryManager_->HandleLocalRestart());
+    
+    return Status::OK();
+}
+```
+
+### 4.7 与现有 SlotRecovery 的集成点
+
+```
+Worker Start
+  ├── SlotRecoveryOrchestrator::RepairLocalSlots()  ← 已有, 本地磁盘修复
+  ├── [NEW] SnapshotManager::RestoreFromLatest()     ← 快速恢复路径
+  │   └── 成功 → RegisterWithRecoveryFlag → DeltaSync
+  └── 失败或无可恢复快照 → SlotRecoveryManager::HandleLocalRestart()
+      ├── ResumeStaleCrossIncidentTasksOnRestart()   ← 已有
+      ├── TakeOverPendingFromSourceIncident()        ← 已有
+      ├── RebuildLocalRestartIncident()              ← 已有
+      └── ScheduleLocalRestartTasks()                ← 已有
+```
+
+**关键: 快照恢复成功后跳过 ETCD 协调的 Slot Recovery (最慢部分), 仅做增量对账 (毫秒级)。**
+
 ---
 
-## 五、代码模块影响分析
+## 五、代码模块影响分析 (已更新)
 
 ### 5.1 修改文件清单
 
