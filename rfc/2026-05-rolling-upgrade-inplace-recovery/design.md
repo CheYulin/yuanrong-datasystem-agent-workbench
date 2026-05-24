@@ -667,6 +667,21 @@ Worker Start
 
 | 风险 | 影响 | 缓解 |
 |------|------|------|
+| Snapshot 文件损坏 | 恢复失败，降级到 SlotRecovery | CRC 校验 + 多版本保留 |
+| 本地 NVMe 写失败 | 周期 Snapshot 跳过 | 连续3次失败 → 停用 Snapshot + 告警 |
+| Snapshot 版本不兼容 | 新旧格式无法解析 | protobuf 向后兼容 + 版本检测降级 |
+| Primary 对象恢复不及时 | Get 请求失败 | EmergencyRecover from Backup (URMA <2ms/obj) |
+
+## 九、引用
+
+- DFX 完整分析: `rfc/shared/dfx-analysis.md`
+- 词汇表: `rfc/shared/glossary.md`
+- FDS 模板: `rfc/shared/fds-template.md`
+- 需求分解: `rfc/shared/requirement-decomposition.md`</parameter>
+
+
+| 风险 | 影响 | 缓解 |
+|------|------|------|
 | Checkpoint 数据损坏 | 恢复失败，等全量重建 | CRC 校验 + 多版本保留 |
 | Snapshot 版本不兼容 | 新旧格式 Snapshot 无法解析 | protobuf 向后兼容 + 版本检测降级 |
 | 升级期间写入丢失 | 数据不一致 | UPGRADING 态保留读、暂停写 |

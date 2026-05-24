@@ -588,3 +588,10 @@ void URMAConnectionPool::HealthCheck(const std::string &peer_id) {
 | 连接池耗尽 | 压测 > pool_size 并发，验证排队 | 排队不超时 |
 | 空闲回收 | idle 5min 后检查连接数 | 连接正确回收 |
 | 海思环境验证 | 类鲲鹏/昇腾节点上实际测试 | Jetty Cache miss < 1% |
+
+## 引用
+
+- 词汇表: `rfc/shared/glossary.md`
+- DFX 完整分析: `rfc/shared/dfx-analysis.md`
+- FDS 模板: `rfc/shared/fds-template.md`
+- 需求分解: `rfc/shared/requirement-decomposition.md`

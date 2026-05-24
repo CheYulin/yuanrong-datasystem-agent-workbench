@@ -876,3 +876,10 @@ def reconcile_replicas(key):
 | 均衡读取 | Conductor 全局调度 | Client 侧 score 选择 | 分散决策，无单点 |
 | NUMA 亲和 | 自动拓扑发现 | 同样 sched_getcpu + Master 偏好 | 等价 |
 | 反亲和 | Slice 级 | Object 级 (key hash) | 更粗粒度，但足够 |
+
+## 引用
+
+- 词汇表: `rfc/shared/glossary.md`
+- DFX 完整分析: `rfc/shared/dfx-analysis.md`
+- FDS 模板: `rfc/shared/fds-template.md`
+- 需求分解: `rfc/shared/requirement-decomposition.md`
