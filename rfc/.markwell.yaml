@@ -1,0 +1,26 @@
+# Markwell Theme Configuration
+# See: markwell themes preview default
+
+extends: default
+
+# Uncomment and customize:
+# colors:
+#   primary: "2B579A"
+#   accent: "4472C4"
+#   text: "333333"
+
+# document:
+#   margins:
+#     top: 1440
+#     bottom: 1440
+#     left: 1440
+#     right: 1440
+#   header: "{title}"
+#   footer: "Page {page}"
+
+# spreadsheet:
+#   headerBackground: "$accent"
+#   headerTextColor: "FFFFFF"
+
+# presentation:
+#   paginate: true
