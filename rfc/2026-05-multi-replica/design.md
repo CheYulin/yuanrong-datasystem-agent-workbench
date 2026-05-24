@@ -717,69 +717,110 @@ key=abc → locations: {
 
 **元数据可靠性挑战：**
 
-| 故障场景 | 影响 | 当前状态 |
-|----------|------|:--:|
-| Master 进程重启 | 内存中 location 缓存丢失，需 etcd 重建 | ⚠️ 有 etcd 恢复 |
-| etcd 集群故障 | 全部 metadata 丢失，所有 key 位置信息消失 | ⚠️ 单 etcd |
-| Master 脑裂 | 双 Master 同时更新 location → 不一致 | ❌ 无保护 |
-| 网络分区 | Partition 一侧的 Master 无法更新 location | ❌ 无处理 |
-| Worker 假死后恢复 | 旧 location 信息残留 → 脏读 | ⚠️ Lease 机制 |
+### 7.1 存储架构
 
-### 7.2 设计方案
+**关键的架构决策: 对象级元数据 (key→location) 不走 etcd。**
 
-**L1: etcd 持久化 (已有)**
-- 所有 `ObjectMetaPb` 持久化到 etcd
-- Master 重启从 etcd 恢复
+| 存储 | 存什么 | 规模 | 性能 |
+|------|--------|------|------|
+| **Master RocksDB** | 对象级元数据 (key→location, TTL, version, seqno) | 千万级 object | 写入 P99=378us (现网) |
+| **Master 内存** | `metaTable_` hash map (RocksDB 的写缓存 + 读缓存) | 与 RocksDB 同步 | 读取 <1us |
+| **etcd** | 集群配置 (HashRing, Slot, Master 选举) | ~KB 级 | — |
+| **Worker RocksDB** | 副本间 WAL 同步 (已有 ReplicationService) | 同 Master | — |
 
-**L2: 客户端缓存 + 版本号 (新增)**
+**为什么不用 etcd 存对象元数据:**
+- etcd 设计目标是配置数据 (KB 级)，不适合千万级对象的高频更新
+- etcd Raft 日志膨胀: 每个 CreateMeta → 一次 Raft 提交，etcd 磁盘和 CPU 无法承受
+- RocksDB 写入 P99=378us vs etcd Raft P99=几ms → **10x 性能差距**
 
-```protobuf
-message ReplicaSetPb {
-  string primary_address = 1;
-  repeated string backup_addresses = 2;
-  uint64 version = 3;          // 单调递增版本号
-  uint64 primary_seqno = 4;    // 主副本当前 seqno
+### 7.2 元数据可靠性: 四层保障
+
+**L1: Master 本地 RocksDB (已有)**
+
+```cpp
+// oc_metadata_manager.cpp:485 — 现有代码路径
+Status CreateMetaFirstTime(key, meta, address) {
+    metaCache.locations[address] = AckState::ACK;
+    objectStore_->CreateOrUpdateMeta(key, meta);  // → RocksDB Write
+    // 失败回滚: objectStore_->RemoveMeta() + metaTable_.erase()
 }
 ```
 
-Client 本地缓存 `ReplicaSetPb`，每次 GetReplicaList 带版本号：
-- Master 返回 `304 Not Modified` (版本不变) → Client 用缓存
-- Master 返回新版本 → Client 更新缓存
+- 每次 CreateMeta/UpdateMeta 同步写入 RocksDB + 内存缓存
+- Master 重启: `metaTable_` 从 RocksDB 恢复 (全量扫描 or Checkpoint)
 
-**L3: Worker 端自声明 (兜底)**
+**L2: Master 主备 RocksDB 复制 (已有, 增强)**
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant Master
-    participant W1 as W1 (old Primary)
-    participant W2 as W2 (new Primary)
+    participant PrimaryM as Primary Master
+    participant RocksDB_P as RocksDB (Primary)
+    participant BackupM as Backup Master
+    participant RocksDB_B as RocksDB (Backup)
 
-    Note over W1: 假死后恢复，不知自己被 Promote
-    Client->>W1: Get(key), 以为 W1 是 Primary
-    W1->>W1: 查本地 seqno=42
-    W1->>Master: 验证: Am I still primary?
-    Master-->>W1: No, W2 is primary (seqno=45)
-    W1-->>Client: Redirect to W2
-    Client->>W2: Get(key)
-    W2-->>Client: OK
+    PrimaryM->>RocksDB_P: CreateMeta(key, locations=[W1,W2])
+    RocksDB_P-->>PrimaryM: OK
+
+    PrimaryM->>BackupM: PushNewLogs (WAL batch, async)
+    BackupM->>RocksDB_B: Apply WAL
+    BackM-->>PrimaryM: ACK
+
+    Note over PrimaryM,BackupM: 已有 ReplicationService:<br/>TryPSync / PushNewLogs / FetchMeta / FetchFile
 ```
 
-Worker 每次处理 Get/Put 时**自检**：
-- 本地 seqno >= Client 期望版本 → 正常服务
-- 本地 seqno < Client 期望版本 → 重定向到 Master 返回的 Primary
+- 已有 `ReplicationService` (TCP PSync, WAL 推送)
+- 已有 `HandleFetchMeta` (RocksDB Checkpoint 全量同步)
+- **增强点**: 每个 CreateMeta 后立即 PushNewLogs (当前是异步批量), 保证 RPO ~0
 
-**L4: Quorum 写入保证一致性**
+**L3: Client 缓存 + Worker 自检 (新增)**
 
 ```
-写入时: Primary Write → 等待 ≥ quorum 个副本 ACK → 返回 Client
-         Primary 写入 etcd: {key: abc, primary: W1, backups: [W2,W3], seqno: N, version: V}
-         
-读取时: Client 从 Master 获取 ReplicaSetPb (version=V, primary=W1)
-        Client → W1 Get(key)
-        W1 自检: 本地 seqno >= 期望版本 → 正常
-        若 W1 故障: Client → Master 刷新 → 获得 promote 后的新 Primary
+Client 侧: 缓存 ReplicaSetPb + version, 减少 Master 查询
+Worker 侧: 每次 Get/Put 自检 "我是否仍是 Primary"
+  → seqno 匹配: 正常服务
+  → seqno 不匹配 (已被 Promote): 重定向到新 Primary
+  → 自检失败: 主动向 Master 验证
 ```
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant M as Master
+    participant W1 as W1 (假死恢复)
+    participant W2 as W2 (已被 Promote)
+
+    C->>W1: Get(key), version_cache=5
+    W1->>W1: seqno=42 vs expected=45 → 不匹配!
+    W1-->>C: Redirect to W2
+    C->>W2: Get(key)
+    W2-->>C: OK
+```
+
+**L4: Quorum 写入 + 故障恢复**
+
+```
+正常写入:
+  Primary Write → SyncReplicate(N Backups, Quorum=N/2+1) → Master CreateMeta(RocksDB + WAL) → OK
+
+Master 故障 (Primary Master 宕机):
+  1. etcd 检测心跳超时 → 选举新 Master (<5s)
+  2. 新 Master 从本地 RocksDB 恢复 metaTable_ (已有 WAL 同步, RPO~0)
+  3. 新 Master 继续服务 CreateMeta/GetReplicaList
+
+Master 故障 (全部 Master 宕机, 极端情况):
+  1. etcd 集群选出新 Master → 从 RocksDB Checkpoint 恢复
+  2. 如 Checkpoint 不可用 → Worker 自声明 (L3): 每个 Worker 上报本地 objects
+  3. Master 重建 key→locations 映射 → 标记修复中
+```
+
+### 7.3 RPO/RTO
+
+| 场景 | RPO | RTO | 恢复方式 |
+|------|-----|-----|---------|
+| Master 进程重启 | 0 | <3s | RocksDB 恢复 `metaTable_` |
+| Master 主备切换 (WAL 同步) | 0 (同步 WAL) / <1s (异步 WAL) | <5s | etcd 选举 + Backup Master 接管 |
+| Master 全部宕机 (RocksDB 可用) | <1s | <30s | 新 Master + RocksDB 恢复 |
+| Master 全部宕机 (RocksDB 损坏) | <10s | <60s | Worker 自声明重建 |
 
 ### 7.3 元数据故障恢复流程
 
