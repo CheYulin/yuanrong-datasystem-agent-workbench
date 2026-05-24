@@ -128,7 +128,7 @@ stateDiagram-v2
 
 缺点:
   - 需要自行管理一致性（利用现有的 SlotRecovery 框架保证）
-  - 大对象数据不在 snapshot 内（仅序列化引用，实际数据复用 RocksDB WAL）
+  - 大对象数据不在 snapshot 内（仅序列化引用，实际数据通过 peer 对账恢复）
 ```
 
 ### 3.3 新增核心对象
@@ -200,42 +200,155 @@ sequenceDiagram
 ```
 
 **关键设计决策 (参考 Mooncake):**
-- 只序列化 metadata（引用），不序列化实际数据块
-- 实际数据通过已有的 RocksDB WAL 或 peer 对账恢复
+- Snapshot 包含三类信息：**Meta**（对象索引）+ **State**（Worker 运行时状态）+ **Data 引用**（SHM 单元 ID）
+- 实际对象数据 (SHM) 不在 Snapshot 内——太大，且有 peer 可用
 - fdatasync 保证落盘（NVMe 上 < 100ms）
 - 暂停新写入时间窗口 < 500ms
 
-### 4.2 快速恢复流程 (mmap 直接加载)
+### 4.2 快速恢复：三类信息分别处理
+
+Worker 需要恢复三类信息，每类的恢复策略不同：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Worker 状态                           恢复方式              │
+├─────────────────────────────────────────────────────────────┤
+│ Meta: 对象索引、key→location、TTL     Snapshot + Master对账 │
+│ Data: SHM 中的实际对象数据             peer 拉取或等恢复     │
+│ State: HashRing 位置、Slot 分配        Master 重新下发       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.3 Meta 恢复 + 对账
+
+Meta 是最关键的一层——必须保证 key→location 映射正确。
 
 ```mermaid
 sequenceDiagram
-    participant Master
-    participant Worker as Worker (Starting)
+    participant Worker as Worker (重启)
     participant SnapshotMgr
-    participant NVMe as Local NVMe
+    participant Master
+    participant Peer as Other Workers
     
-    Worker->>SnapshotMgr: HasSnapshot()?
-    alt Has snapshot
-        SnapshotMgr->>NVMe: open() + read() snapshot file
-        SnapshotMgr->>SnapshotMgr: CRC32 → 校验通过
-        SnapshotMgr->>SnapshotMgr: protobuf → StateSnapshot
-        Note over Worker: 恢复: object_index, hash_ring_pos, ttl_map
-        Worker->>Master: Register(recovery=true, last_seqno=N)
-        Master->>Worker: DeltaSync(from_seqno=N) — 增量对账
-    else No snapshot (fresh start)
-        Worker->>Master: Register(fresh)
-        Master->>Worker: FullSync()
+    Worker->>SnapshotMgr: RestoreFromLatest()
+    SnapshotMgr-->>Worker: StateSnapshot {seqno=N, object_metas, hash_ring, ttl}
+    
+    Note over Worker: Meta 恢复完成 (本机视角, seqno=N)
+    
+    Worker->>Master: Register(recovery=true, snapshot_seqno=N)
+    
+    Note over Master: 对账: 比对 snapshot_seqno 和 etcd 当前状态
+    
+    alt seqno 一致 (短暂重启, <10s 停机)
+        Master-->>Worker: No changes needed
+    else seqno 落后 (长时间停机)
+        Master->>Master: 查询 etcd 中 seqno > N 的变更
+        Master-->>Worker: DeltaSync {新增: [...], 更新: [...], 删除: [...]}
+        Worker->>Worker: 应用增量变更到本地 object_table
     end
-    Worker-->>Worker: Enter RUNNING state (< 3s)
+    
+    Note over Worker: Meta 对账完成, 进入 RUNNING
 ```
 
-**恢复性能:**
-- Snapshot 文件大小 < 500MB → read() < 200ms (NVMe 3GB/s)
-- protobuf 反序列化 < 300ms
-- CRC32 校验 < 50ms
-- 总恢复时间 < 3s (含 Master DeltaSync)
+**Meta 对账的数据来源:**
+- **etcd (Master)**: 权威元数据。etcd 中有所有对象的完整 key→location 映射
+- **对账单位**: seqno。Snapshot 记录了快照时的 etcd seqno，Master 对比当前 seqno 计算 delta
+- **Delta 内容**: 新增对象、删除对象、location 变更、TTL 更新
 
-### 4.3 滚动升级编排
+### 4.4 Data 恢复
+
+实际对象数据 (SHM) 可能是 TB 级，不能序列化到 Snapshot。通过 peer 按需恢复。
+
+```
+Worker 重启恢复后:
+
+对于每个本地 object:
+  Priority 1 (本机是 Primary)：
+    → 必须恢复数据，否则 Client Get 会失败
+    → 策略: 立即从 Snapshot 中记录的 shm_unit_id 校验 SHM 是否完好
+    → 若 SHM 丢失 (进程重启后 SHM 失效): 触发紧急恢复
+        EmergencyRecover() → 从 Backup 拉取数据 (URMA, < 100us)
+    
+  Priority 2 (本机是 Backup)：
+    → 数据可推迟恢复 (Client 优先从 Primary 读)
+    → 策略: 后台异步从 Primary 拉取
+        LazyRecover() → 批量拉取, 不阻塞服务
+    
+  Priority 3 (本机只是临时缓存)：
+    → 不需要恢复 (Client 会从 Primary/Backup 拉取)
+    → 策略: 标记 NeedToDelete, 等待自然淘汰
+```
+
+### 4.5 Worker 状态恢复 + 对账
+
+Worker 重启后，集群中的角色可能已变化：
+
+| 状态项 | Snapshot 中 | 恢复方式 |
+|--------|:--:|------|
+| Hash Ring 位置 | ✅ 有 | 向 Master 重新获取最新 Hash Ring (可能已变化) |
+| Slot 分配 | ✅ 有 | SlotRecoveryManager::HandleLocalRestart() 重新协调 |
+| 副本角色 (Primary/Backup) | ✅ 有 | 对账时 Master 告知是否有 Promote 发生 |
+| 迁移任务 | ❌ 无 | HashRingTaskExecutor::RestoreScalingTask() 恢复 |
+
+**状态对账流程:**
+
+```
+1. Worker → Master: Register(recovery=true)
+2. Master 检查:
+   - 此 Worker 的 Hash Ring 位置是否变化 (扩容/缩容)
+   - 此 Worker 上的 Primary 对象是否已被 Promote 到其他 Worker
+   - 是否有新的 Slot 分配
+3. Master → Worker: StateSync {hash_ring, primary_promotions, slot_assignments}
+4. Worker:
+   - 更新 Hash Ring
+   - 对于被 Promote 的对象: 标记为 Backup
+   - 对于新 Slot: SlotRecoveryManager 处理
+```
+
+### 4.6 三类对账时序
+
+```mermaid
+sequenceDiagram
+    participant W as Worker (重启)
+    participant S as Snapshot
+    participant M as Master
+    participant P as Peer Workers
+
+    W->>S: 1) 读取 Snapshot (< 200ms)
+    Note over W: Meta + State 恢复到内存
+    
+    W->>M: 2) Meta 对账 (< 200ms)
+    M-->>W: DeltaSync (新增/更新/删除)
+    Note over W: object_table 与 etcd 一致
+    
+    W->>M: 3) State 对账 (< 100ms)
+    M-->>W: StateSync (HashRing, Promotions, Slots)
+    Note over W: 角色和位置更新为最新
+    
+    W->>W: 4) Priority 1 Data 恢复
+    Note over W: Primary 对象: 校验本地 SHM
+    Note over W: 损坏/丢失 → EmergencyRecover from Backup
+    
+    W->>P: 5) Priority 2 Data 恢复 (后台)
+    Note over W: Backup 对象: LazyRecover from Primary
+    Note over W: 不阻塞, 后台批量进行
+    
+    Note over W: < 3s 进入 RUNNING (服务可用)
+    Note over W: 后台持续恢复 Priority 2+3 数据
+```
+
+**恢复时间预算:**
+
+| 阶段 | 操作 | 时间 |
+|------|------|:--:|
+| 1 | 读取 Snapshot | < 200ms |
+| 2 | Meta 对账 (DeltaSync) | < 200ms |
+| 3 | State 对账 (StateSync) | < 100ms |
+| 4 | Priority 1 Data 紧急恢复 | < 2ms/object (URMA) |
+| | **服务可用** | **< 3s** ✅ |
+| 5 | Priority 2 Data 后台恢复 | 后台, 不阻塞 |
+
+### 4.7 滚动升级编排
 
 ```mermaid
 flowchart TD
@@ -259,7 +372,7 @@ flowchart TD
 - 每个 Worker 升级间隔 > 30s（确保恢复稳定）
 - 先升级非关键节点（无 Primary 数据），后升级有 Primary 的节点
 
-### 4.4 Protobuf 消息定义
+### 4.8 Protobuf 消息定义
 
 ```protobuf
 // 文件: src/datasystem/protos/state_snapshot.proto (新增)
@@ -316,7 +429,7 @@ message StateSnapshotPb {
 }
 ```
 
-### 4.5 SnapshotManager 完整 API
+### 4.9 SnapshotManager 完整 API
 
 ```cpp
 // 文件: src/datasystem/worker/object_cache/snapshot_manager.h (新增)
@@ -405,7 +518,7 @@ private:
 };
 ```
 
-### 4.6 恢复流程伪代码
+### 4.10 恢复流程伪代码
 
 ```cpp
 // WorkerOCServer::Start() 中加入恢复逻辑 (修改 worker_oc_server.cpp)
@@ -453,7 +566,7 @@ Status WorkerOCServer::Start() {
 }
 ```
 
-### 4.7 与现有 SlotRecovery 的集成点
+### 4.11 与现有 SlotRecovery 的集成点
 
 ```
 Worker Start
@@ -489,7 +602,7 @@ Worker Start
 ### 5.2 不修改的模块
 
 - KV 客户端 — 升级对客户端透明
-- RocksDB 存储层 — 复用已有持久化
+- 本地 NVMe 持久化 — 直接文件 IO，无需通过 RocksDB
 - URMA 传输层 — 不受影响
 - ZMQ RPC — 协议不变
 
@@ -555,6 +668,6 @@ Worker Start
 | 风险 | 影响 | 缓解 |
 |------|------|------|
 | Checkpoint 数据损坏 | 恢复失败，等全量重建 | CRC 校验 + 多版本保留 |
-| RocksDB 版本不兼容 | 新旧版本打开同一 DB 失败 | 版本检测 + 自动降级到全量恢复 |
+| Snapshot 版本不兼容 | 新旧格式 Snapshot 无法解析 | protobuf 向后兼容 + 版本检测降级 |
 | 升级期间写入丢失 | 数据不一致 | UPGRADING 态保留读、暂停写 |
 | 磁盘空间不足 | Checkpoint 失败 | 保留 N 个 + 空间预检 |
