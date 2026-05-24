@@ -65,10 +65,10 @@ flowchart TB
         W3[Worker C<br/>Backup 2]
     end
     
-    C -->|1. Put (sync)| W1
-    W1 -->|2. Replicate (async)| W2
-    W1 -->|3. Replicate (async)| W3
-    C -->|4. Get (load-aware)| W2
+    C -->|1. Put sync| W1
+    W1 -->|2. Replicate async| W2
+    W1 -->|3. Replicate async| W3
+    C -->|4. Get load-aware| W2
 ```
 
 ### 2.2 新增核心对象
