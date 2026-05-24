@@ -199,9 +199,251 @@ flowchart TD
     E --> G
 ```
 
+### 3.5 连接池详细 API 设计
+
+#### ZMQConnectionPool
+
+```cpp
+class ZMQConnectionPool {
+public:
+    struct Config {
+        uint32_t pool_size = 10;           // 每 peer 最大连接数
+        uint32_t max_total_conns = 10000;  // 全局最大连接数
+        uint32_t acquire_timeout_ms = 100; // 获取超时
+        uint32_t idle_timeout_s = 300;     // 空闲回收超时
+        uint32_t health_check_interval_s = 30;  // 健康检查间隔
+        uint32_t prewarm_conns = 100;      // 预热连接数
+    };
+    
+    explicit ZMQConnectionPool(const Config &cfg);
+    
+    // 获取连接 (从池中借出)
+    // 如果 peer 已有 idle socket → 复用
+    // 如果 pool 未满 → 异步创建新 socket
+    // 如果 pool 已满 → 等待 acquire_timeout_ms 或返回错误
+    Status Acquire(const std::string &peer_id,
+                   std::shared_ptr<zmq::socket_t> *socket);
+    
+    // 归还连接 (不关闭, 放回 idle 队列)
+    void Release(const std::string &peer_id,
+                 std::shared_ptr<zmq::socket_t> socket);
+    
+    // 预热连接 — 扩容时提前建连
+    void Prewarm(const std::vector<std::string> &hot_peers);
+    
+    // 健康检查 — 检测断连并重建
+    void HealthCheck();
+    
+    // 回收空闲 — 周期性调用
+    void PruneIdle();
+    
+    struct PoolStats {
+        uint64_t total_acquisitions;
+        uint64_t cache_hits;          // 复用次数
+        uint64_t cache_misses;        // 新建次数
+        uint64_t acquire_timeouts;    // 超时次数
+        size_t current_active;        // 当前使用中
+        size_t current_idle;          // 当前空闲
+        double hit_rate;              // 命中率
+    };
+    PoolStats Stats() const;
+
+private:
+    struct PeerPool {
+        std::deque<std::shared_ptr<zmq::socket_t>> idle;    // 空闲队列
+        std::set<std::shared_ptr<zmq::socket_t>> active;    // 使用中
+        uint64_t last_used_us;                              // 最后使用时间
+        size_t create_count;                                // 总创建数
+    };
+    
+    std::mutex mutex_;
+    std::unordered_map<std::string, PeerPool> pools_;  // peer_id → pool
+    std::atomic<size_t> total_conns_{0};
+    Config cfg_;
+    PoolStats stats_;
+};
+```
+
+#### URMAConnectionPool
+
+```cpp
+class URMAConnectionPool {
+public:
+    struct Config {
+        uint32_t qp_pool_size = 10;         // 每 peer 最大 QP 数
+        uint32_t prewarm_count = 100;       // 预热 QP 数
+        uint32_t idle_timeout_s = 600;      // 空闲回收超时 (比 ZMQ 长, QP 创建更贵)
+        uint32_t max_inflight_per_qp = 64;  // 每 QP 最大飞行请求数
+    };
+    
+    explicit URMAConnectionPool(std::shared_ptr<UrmaResource> resource,
+                                const Config &cfg);
+    
+    // 获取或创建 QP
+    Status GetOrCreateQP(const std::string &peer_id,
+                         std::shared_ptr<UrmaJetty> *jetty,
+                         std::shared_ptr<UrmaTargetJetty> *target_jetty);
+    
+    // 预热 QP — 扩容时调用, 批量预建
+    void Warmup(const std::vector<std::string> &hot_peers);
+    
+    // 回收空闲 QP
+    void PruneIdle();
+    
+    // Peer 断开时清理
+    void RemovePeer(const std::string &peer_id);
+    
+    struct QPPoolStats {
+        uint64_t total_creates;
+        uint64_t total_reuses;
+        uint64_t total_deletes;
+        uint64_t create_timeouts;
+        size_t current_active_qps;
+    };
+    QPPoolStats Stats() const;
+
+private:
+    std::shared_ptr<UrmaResource> resource_;
+    std::unordered_map<std::string, std::deque<QPair>> peer_qps_;
+    std::mutex mutex_;
+    Config cfg_;
+};
+```
+
+#### JettyManager
+
+```cpp
+class JettyManager {
+public:
+    struct Config {
+        uint32_t max_ctp_per_jetty = 8;     // 每 Jetty 最大 CTP 数
+        AllocationMode mode = LEAST_LOADED;  // 分配策略
+        bool enable_numa_affinity = true;    // NUMA 亲和性
+    };
+    
+    enum AllocationMode { LEAST_LOADED, ROUND_ROBIN, NUMA_AWARE };
+    
+    struct AllocResult {
+        urma_jetty_t *jetty;        // 分配的 Jetty 句柄
+        uint32_t ctp_id;            // 分配的 CTP ID
+        float jetty_load;           // 分配后的负载
+    };
+    
+    explicit JettyManager(std::shared_ptr<UrmaContext> ctx,
+                          const Config &cfg);
+    
+    // 分配一个 CTP 到负载最低的 Jetty
+    Status AllocateCTP(AllocResult *result);
+    
+    // 释放 CTP
+    Status ReleaseCTP(urma_jetty_t *jetty, uint32_t ctp_id);
+    
+    // 获取 Jetty 负载 (0-1)
+    float GetJettyLoad(urma_jetty_t *jetty) const;
+    
+    // 获取所有 Jetty 的负载分布
+    std::vector<float> GetJettyLoads() const;
+    
+    struct JettyStats {
+        uint32_t total_jetties;
+        uint32_t total_ctps;
+        uint32_t allocated_ctps;
+        float max_load;
+        float avg_load;
+        float load_variance;
+    };
+    JettyStats Stats() const;
+
+private:
+    struct JettySlot {
+        urma_jetty_t *jetty;
+        std::bitset<256> ctp_mask;  // bitmask 标记已分配的 CTP
+        uint32_t allocated_count;
+        uint8_t numa_node;
+        uint8_t chip_id;
+    };
+    
+    std::string SelectLeastLoadedJetty();
+    std::string SelectRoundRobinJetty();
+    std::string SelectNUMAAwareJetty(uint8_t preferred_numa);
+    
+    std::vector<JettySlot> jetties_;
+    size_t rr_index_ = 0;  // Round-robin 指针
+    std::mutex mutex_;
+    Config cfg_;
+};
+```
+
+### 3.6 连接池集成点 (与现有代码的对接)
+
+```
+当前代码路径 → 修改后
+
+ZMQ Stub 创建:
+  ZmqStubImpl::InitConn()
+    → ZmqStubConnMgr::GetConn()        // 当前: 直接创建 ZMQ socket
+    → [修改为] ZMQConnectionPool::Acquire()  // 从池中获取
+    
+URMA 数据传输:
+  WorkerWorkerOCServiceImpl::GetObjectRemote()
+    → UrmaWritePayload(urmaInfo, ...)             // 当前: 直接使用已创建 QP
+    → [修改为] URMAConnectionPool::GetOrCreateQP()  // 从池中获取
+    
+Jetty 分配:
+  UrmaJetty::Create(resource, type, &jetty)       // 当前: 每次新 Jetty
+    → [修改为] JettyManager::AllocateCTP()          // 管理化分配
+```
+
+### 3.7 健康检查与恢复
+
+```cpp
+// ZMQ Pool 健康检查 (每 30s)
+void ZMQConnectionPool::HealthCheck() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto &[peer_id, pool] : pools_) {
+        // 检查 idle 队列
+        auto it = pool.idle.begin();
+        while (it != pool.idle.end()) {
+            int events = 0;
+            size_t events_len = sizeof(events);
+            zmq_getsockopt((*it)->handle(), ZMQ_EVENTS, &events, &events_len);
+            
+            if (!(events & ZMQ_POLLOUT)) {
+                // Socket 不可写 → 连接断开 → 移除
+                it = pool.idle.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        
+        // 检查 active 集合
+        for (auto &sock : pool.active) {
+            int events = 0;
+            size_t events_len = sizeof(events);
+            zmq_getsockopt(sock->handle(), ZMQ_EVENTS, &events, &events_len);
+            if (!(events & ZMQ_POLLIN)) {
+                // Socket 不可读 → 标记为待替换
+                MarkForReplacement(peer_id, sock);
+            }
+        }
+    }
+}
+
+// URMA QP 健康检查
+void URMAConnectionPool::HealthCheck(const std::string &peer_id) {
+    auto &qps = peer_qps_[peer_id];
+    for (auto &qp : qps) {
+        if (!qp.connection->IsStable()) {
+            // QP 不稳定 → 重建
+            qp.connection->ReCreateJetty();
+        }
+    }
+}
+```
+
 ---
 
-## 四、代码模块影响
+## 四、代码模块影响 (已更新)
 
 | 模块 | 文件 | 改动类型 | 说明 |
 |------|------|:--:|------|
