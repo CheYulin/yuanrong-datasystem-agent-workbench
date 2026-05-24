@@ -262,7 +262,374 @@ sequenceDiagram
 
 ---
 
-## 四、代码模块影响
+## 四、接口与协议定义
+
+### 4.1 新增 Proto 消息
+
+```protobuf
+// === SyncReplicate: Primary → Backup 同步复制 RPC ===
+message SyncReplicateReqPb {
+    string object_key = 1;
+    uint64 seqno = 2;              // 单调递增序列号
+    uint64 version = 3;            // Object 版本
+    uint64 data_size = 4;          // 数据总大小
+    uint32 ttl_second = 5;         // TTL
+    string primary_address = 6;    // 主副本地址
+    WriteMode write_mode = 7;      // NONE / L2_CACHE / WRITE_THROUGH
+    // 数据通过 URMA RDMA 传输, 不在 Proto 内
+}
+
+message SyncReplicateRspPb {
+    bool ack = 1;                  // true = 写入成功
+    uint64 local_seqno = 2;        // Backup 确认的本地 seqno
+    int32 status_code = 3;         // 0=OK, 非0=错误码
+}
+
+// === ReplicaSetPb: Client 缓存的副本集信息 ===
+message ReplicaSetPb {
+    string primary_address = 1;
+    repeated string backup_addresses = 2;
+    uint64 version = 3;            // 副本集版本号 (每次变更递增)
+    uint64 primary_seqno = 4;      // 主副本当前 seqno
+}
+
+// === PromoteReplicaReqPb: Master → Backup 提升为 Primary ===
+message PromoteReplicaReqPb {
+    string object_key = 1;
+    string new_primary = 2;        // 要提升的 Worker 地址
+    uint64 failover_seqno = 3;     // 故障切换时的 seqno
+}
+
+// === RecoverReplicaReqPb: Primary → Backup 全量恢复 ===
+message RecoverReplicaReqPb {
+    string object_key = 1;
+    string source_worker = 2;      // 数据源 Worker
+    string target_worker = 3;      // 要恢复的 Worker
+    uint64 from_seqno = 4;         // 增量起点 (0=全量)
+}
+```
+
+### 4.2 ReplicaManager 完整 API
+
+```cpp
+// 文件: src/datasystem/worker/object_cache/replica_manager.h
+
+class ReplicaManager {
+public:
+    // === 生命周期 ===
+    Status Init(const std::string &local_address,
+                std::shared_ptr<WorkerWorkerOCService> ww_service,
+                std::shared_ptr<MasterWorkerOCService> master_api);
+    void Shutdown();
+
+    // === 写入路径 ===
+    
+    // CreateReplicas: 同步写入 N 个副本, 等待 Quorum 后返回
+    // 调用点: PublishObject() 中, CreateMeta 之前
+    // 输入: key, data (已在 SHM), 本地 seqno, 副本数
+    // 输出: 达到 Quorum 则 OK, 否则错误码
+    Status CreateReplicas(const std::string &key,
+                          const ReplicaConfig &config,
+                          ReplicaResult *result);
+    
+    struct ReplicaConfig {
+        uint32_t replica_count = 2;        // N
+        uint32_t quorum_size = 2;          // N/2+1
+        uint64_t local_seqno = 0;
+        uint32_t timeout_ms = 500;         // 单个 Backup 超时
+        std::string object_data_addr;      // SHM 数据地址
+        uint64_t object_data_size = 0;     // 数据大小
+        std::vector<std::string> backup_addresses;  // 已选择的 Backup
+    };
+    
+    struct ReplicaResult {
+        uint32_t acks_received = 0;        // 收到的 ACK 数
+        uint32_t quorum_required = 0;      // 需要的 Quorum
+        bool quorum_reached = false;       // 是否达到 Quorum
+        std::vector<std::string> successful;  // 写入成功的 Backup
+        std::vector<std::string> failed;      // 写入失败的 Backup
+    };
+
+    // === 读取路径 ===
+    
+    // GetBestReplica: 根据评分选择最优副本
+    // 调用点: Client 或 Worker Get 前
+    Status GetBestReplica(const std::string &key,
+                          const ReplicaReadHint &hint,
+                          std::string *best_address);
+    
+    struct ReplicaReadHint {
+        uint8_t local_numa_id;          // Client 本地 NUMA node
+        bool prefer_local = true;       // 是否优先本地
+        uint64_t min_seqno = 0;         // 最低 seqno 要求
+    };
+
+    // === 故障切换 ===
+    
+    // PromoteToPrimary: Master 调用, 提升 Backup 为 Primary
+    Status PromoteToPrimary(const std::string &key,
+                            const std::string &new_primary);
+    
+    // HandlePrimaryFailure: 检测到 Primary 故障后的处理
+    Status HandlePrimaryFailure(const std::string &failed_primary,
+                                std::vector<std::string> *affected_keys);
+
+    // === 数据修复 ===
+    
+    // RecoverReplica: 从 source 复制数据到 target
+    Status RecoverReplica(const std::string &key,
+                          const std::string &source,
+                          const std::string &target,
+                          uint64_t from_seqno);
+    
+    // ReconcileReplicas: 定期对账, 修复不一致
+    Status ReconcileReplicas(uint64_t *repaired_count);
+
+    // === 状态查询 ===
+    struct ReplicaHealth {
+        std::string address;
+        ReplicaRole role;          // PRIMARY / BACKUP
+        ReplicaState state;        // INIT / SYNCING / READY / STALE
+        uint64_t seqno;            // 当前 seqno
+        uint32_t health_score;     // 0-100
+        uint64_t last_heartbeat_us;
+        uint32_t active_requests;
+    };
+    
+    Status GetReplicaHealth(const std::string &key,
+                            std::vector<ReplicaHealth> *health);
+    
+    // === 统计 ===
+    struct ReplicaStats {
+        uint64_t total_replicate_calls;
+        uint64_t total_replicate_bytes;
+        uint64_t failed_replicate_calls;
+        uint64_t successful_failovers;
+        uint64_t replica_recoveries;
+        double avg_replicate_latency_us;
+    };
+    
+    ReplicaStats GetStats() const;
+
+private:
+    // 并行发送 SyncReplicate 到所有 Backup
+    Status FanOutSyncReplicate(const std::string &key,
+                               const ReplicaConfig &config,
+                               ReplicaResult *result);
+    
+    // 单个 Backup 的 SyncReplicate RPC
+    Status SyncReplicateToOne(const std::string &backup_addr,
+                              const SyncReplicateReqPb &req,
+                              SyncReplicateRspPb *rsp,
+                              uint32_t timeout_ms);
+    
+    std::string local_address_;
+    std::shared_ptr<WorkerWorkerOCService> ww_service_;
+    std::shared_ptr<MasterWorkerOCService> master_api_;
+    ReplicaStats stats_;
+};
+```
+
+### 4.3 副本放置算法
+
+```cpp
+// 文件: src/datasystem/master/object_cache/replica_placement.h
+
+class ReplicaPlacementPolicy {
+public:
+    // SelectReplicas: 为 key 选择 N 个副本位置
+    // 输入: key, 副本数 N, Client NUMA hint
+    // 输出: N 个 Worker 地址 (按优先级: [0]=Primary, [1..N-1]=Backups)
+    Status SelectReplicas(const std::string &key,
+                          uint32_t replica_count,
+                          const PlacementHint &hint,
+                          std::vector<std::string> *selected);
+    
+    struct PlacementHint {
+        uint8_t client_numa_id;        // Client 所在 NUMA
+        uint8_t client_chip_id;        // Client 所在 chip (HCCS)
+        bool avoid_cross_hccs;         // 不跨 HCCS (Primary)
+        uint32_t min_health_score;     // 最低健康分数
+    };
+    
+private:
+    // 获取候选 Worker 列表并按 NUMA 亲和度排序
+    void GetCandidates(const std::string &key,
+                       const PlacementHint &hint,
+                       std::vector<ScoredWorker> *candidates);
+    
+    struct ScoredWorker {
+        std::string address;
+        int32_t numa_distance;     // 0=同NUMA, 1=同Chip, 2=同Rack, 3=同DC, 4=其他
+        int32_t health_score;      // 0-100
+        int32_t active_replicas;   // 当前已担负的副本数
+        int32_t load_score;        // 负载 (越低越好)
+        
+        int32_t total_score() const {
+            // 权重: NUMA 距离最重要, 其次健康, 最后负载
+            return numa_distance * -100 + health_score * 2 - load_score - active_replicas * 5;
+        }
+    };
+    
+    // 检查反亲和约束
+    bool CheckAntiAffinity(const ScoredWorker &w,
+                           const std::vector<ScoredWorker> &already_selected,
+                           AntiAffinityLevel level);
+    
+    enum AntiAffinityLevel {
+        NODE,    // 不同节点
+        RACK,    // 不同机架
+        ZONE,    // 不同可用区
+    };
+};
+```
+
+#### 放置策略伪代码
+
+```
+SelectReplicas(key, N=2, hint):
+    candidates = hash_ring.GetNodes(key, topK=10)  // 取 hash ring 上前 10 个节点
+    scored = []
+    
+    for each worker in candidates:
+        if worker.health_score < hint.min_health_score: skip
+        s.numa_distance = compute_numa_distance(hint.client_numa_id, worker.numa_id)
+        s.health_score = worker.health_score
+        s.active_replicas = count_replicas_on(worker)
+        s.load_score = worker.current_load
+        scored.append(s)
+    
+    sort scored by total_score() descending
+    
+    selected = []
+    for each s in scored:
+        if check_anti_affinity(s, selected, RACK):  // N=2: 至少跨 Rack
+            selected.append(s)
+        if len(selected) == N: break
+    
+    // selected[0] = Primary (最优), selected[1..] = Backups
+    return selected
+```
+
+### 4.4 故障切换状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> NORMAL: 副本集创建 (CreateMeta)
+    
+    state NORMAL {
+        PRIMARY_READY: Primary 正常服务
+        BACKUP_READY: Backups 同步中
+    }
+    
+    NORMAL --> PRIMARY_FAILING: Primary 心跳超时 (3s)
+    
+    PRIMARY_FAILING --> PROMOTING: Master 选择新 Primary
+    PRIMARY_FAILING --> NORMAL: Primary 恢复 (假死)
+    
+    PROMOTING --> BACKUP_DEGRADED: 新 Primary 就绪
+    PROMOTING --> ALL_FAILED: 无可用 Backup
+    
+    BACKUP_DEGRADED --> RECOVERING: 触发副本恢复
+    RECOVERING --> NORMAL: 新 Backup 加入且同步完成
+    
+    ALL_FAILED --> [*]: 数据不可用 (告警)
+```
+
+### 4.5 新增 StatusCode
+
+```cpp
+// 文件: include/datasystem/utils/status.h (新增)
+
+// 多副本相关 (1011-1020)
+K_REPLICA_UNAVAILABLE = 1011,      // 所有副本不可用 (没有可用 Backup)
+K_REPLICA_OUT_OF_SYNC = 1012,      // 副本数据落后于 Primary (seqno 不匹配)
+K_REPLICA_WRITE_TIMEOUT = 1013,    // 副本写入超时 (单个 Backup 超时)
+K_REPLICA_QUORUM_FAILED = 1014,    // 未达到 Quorum (成功的 Backup < N/2+1)
+K_REPLICA_PLACEMENT_FAILED = 1015, // 找不到满足反亲和的副本位置
+K_REPLICA_RECOVERING = 1016,       // 副本正在恢复中 (暂时不可读)
+K_REPLICA_VERSION_MISMATCH = 1017, // 副本版本不匹配 (Client 缓存过期)
+K_REPLICA_PROMOTE_FAILED = 1018,   // 故障切换提升失败
+```
+
+### 4.6 同步写入伪代码
+
+```cpp
+// Primary Worker 上 PublishObject 中的复制逻辑
+Status PublishObjectWithReplication(const std::string &key,
+                                     const char *data, size_t size,
+                                     const SetParam &param) {
+    // Phase 1: 本地写入
+    AllocateResult alloc;
+    RETURN_IF_ERR(AllocateMemoryForObject(key, size, &alloc));
+    MemoryCopy(alloc.shm_addr, data, size);
+    
+    // Phase 2: 选择副本位置
+    std::vector<std::string> replicas;
+    ReplicaPlacementPolicy::PlacementHint hint{
+        .client_numa_id = sched_getcpu_numa(),
+        .client_chip_id = NumaIdToChipId(hint.client_numa_id),
+        .avoid_cross_hccs = true,
+        .min_health_score = 60
+    };
+    RETURN_IF_ERR(master->SelectReplicas(key, param.replica_count, hint, &replicas));
+    // replicas[0] = Primary (本机), replicas[1..] = Backups
+    
+    uint64_t local_seqno = GetNextSeqno();
+    
+    // Phase 3: 同步复制到 Backups
+    ReplicaManager::ReplicaConfig config{
+        .replica_count = param.replica_count,
+        .quorum_size = param.replica_count / 2 + 1,  // N/2+1
+        .local_seqno = local_seqno,
+        .timeout_ms = 500,
+        .object_data_addr = alloc.shm_addr,
+        .object_data_size = size,
+        .backup_addresses = {replicas.begin() + 1, replicas.end()}
+    };
+    
+    ReplicaManager::ReplicaResult result;
+    Status s = replica_mgr->CreateReplicas(key, config, &result);
+    
+    if (!result.quorum_reached) {
+        // 回滚: 释放 Primary 上的 SHM
+        FreeMemoryForObject(key, alloc);
+        return Status(K_REPLICA_QUORUM_FAILED,
+                     "quorum failed: " + std::to_string(result.acks_received) +
+                     "/" + std::to_string(result.quorum_required));
+    }
+    
+    // Phase 4: 元数据同步到 Master
+    CreateMetaReqPb req;
+    req.set_object_key(key);
+    req.set_data_size(size);
+    req.set_primary_address(local_address_);
+    for (const auto &b : result.successful) {
+        req.add_backup_addresses(b);
+    }
+    req.set_seqno(local_seqno);
+    req.set_quorum_size(config.quorum_size);
+    req.set_replica_count(config.replica_count);
+    
+    CreateMetaRspPb rsp;
+    RETURN_IF_ERR(master->CreateMeta(req, &rsp));
+    
+    // Phase 5: 标记对象为已发布
+    safeObj->stateInfo.SetPrimaryCopy(true);
+    safeObj->stateInfo.SetCacheInvalid(false);
+    safeObj->local_seqno_ = local_seqno;
+    safeObj->replica_group_ = ReplicaGroupPb{
+        .primary_id = local_address_,
+        .replicas = {local_address_} + result.successful
+    };
+    
+    return Status::OK();
+}
+```
+
+---
+
+## 五、代码模块影响 (已更新)
 
 | 模块 | 文件 | 改动类型 | 说明 |
 |------|------|:--:|------|
