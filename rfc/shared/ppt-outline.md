@@ -62,7 +62,7 @@
 
 ## Slide 10: RFC2+3 多副本 — 方案
 - Primary + N×Backup (N=2 default)
-- 写入: PutStart → Write(Primary) → Replicate(async) → PutEnd
+- 写入: PutStart → Write(Primary) → SyncReplicate → PutEnd
 - 故障切换: Master Promote → Client 无感重路由 <5ms
 - 均衡读取: score(副本) = NUMA+Health+Load-RTT
 

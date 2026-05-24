@@ -21,7 +21,7 @@
 |------|------|------|
 | 故障切换 P99.99 | 分钟级 (Client 重试) | **< 5ms** |
 | 8MB KV Get P99.99 | ~10ms (单 Worker) | **< 5ms** (备副本分担) |
-| 写入 P99 (副本同步) | ~1ms (单写) | **< 3ms** (主写 + 备异步确认) |
+| 写入 P99 | ~1ms (单写) | **< 3ms** (主写 + 备同步确认) |
 | QPS 提升 (1写10读) | 基准 100% | **+30%** |
 | 副本数 | 1 | 2 (默认) |
 | 数据丢失窗口 | 分钟级 | 0 (同步写入) |
@@ -66,8 +66,8 @@ flowchart TB
     end
     
     C -->|1. Put sync| W1
-    W1 -->|2. Replicate async| W2
-    W1 -->|3. Replicate async| W3
+    W1 -->|2. SyncReplicate| W2
+    W1 -->|3. SyncReplicate| W3
     C -->|4. Get load-aware| W2
 ```
 
