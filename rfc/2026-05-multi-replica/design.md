@@ -828,7 +828,58 @@ Worker 处理 Get/Put 时自检:
   4. 不是 → 重定向到正确的 Meta Owner
 ```
 
-### 7.3 故障恢复
+### 7.3 故障场景全量分析 (18 场景)
+
+#### 写入路径故障
+
+| 场景 | 严重 | 能否 | 处理 |
+|------|:--:|:--:|------|
+| W1: Client→Meta Owner RPC超时 | 低 | ✅ | hash_ring.GetNode(key,1)重试Meta Backup, 500us超时, 最多2次 |
+| W2: SyncReplicate到1个Backup失败 | 低 | ✅ | 后台标记STALE, Reconcile周期补齐, Client无感 |
+| W3: RegisterLocation到Meta Owner失败 | 中 | ✅ | 后台指数退避重试(100ms→500ms→1s), 数据已在Primary不丢 |
+| W4: Put到Primary时Primary中途crash | 高 | ⚠️ | Client超时后重新Put→触发Promote→等Lease3s→新Primary写。丢失3s内写入 |
+| W5: 所有Backup不可用 | 低 | ✅ | Primary仍接受写入, 降级运行。Master后台分配新Backup全量同步 |
+| W6: Meta Owner在RegisterLocation后宕机 | 中 | ✅ | Meta Backup有副本(SyncReplicate已推)。Client查Meta Backup |
+
+#### 读取路径故障
+
+| 场景 | 严重 | 能否 | 处理 |
+|------|:--:|:--:|------|
+| R1: Client→Meta Owner超时 | 低 | ✅ | 重试Meta Backup。缓存命中直接跳过(304 Not Modified) |
+| R2: Client→Data Primary超时3s | 中 | ✅ | 降级到Data Backup, 按score排序逐个试, 最多3次 |
+| R3: Client→Data Backup也超时 | 高 | ✅ | 全部不可用→返回REPLICA_UNAVAILABLE→等待Promote |
+| R4: Meta返回过期Primary(已宕未Promote) | 中 | ⚠️ | Client连旧Primary失败→触发Promote→3s后Meta更新→3s窗口内需额外RTT |
+
+#### 连续故障
+
+| 场景 | 严重 | 能否 | 处理 |
+|------|:--:|:--:|------|
+| C1: Primary宕→Promote→旧Primary假死恢复(脑裂) | 高 | ✅ | Lease栅栏: 旧P检测Lease过期→自动降级Backup→从新P补齐 |
+| C2: Primary在SyncReplicate中途宕(Backup半写) | 高 | ✅ | Backup seqno不完整→Promote后Reconcile补齐。seqno判高下 |
+| C3: Primary+MetaOwner同时宕(双故障) | 高 | ✅ | 各自独立Promote。Data Backup和Meta Backup分别接管。3s后恢复 |
+| C4: Primary→Backup→连续故障 | 高 | ✅ | 继续Promote下一个。只要≥1个有数据副本存活即可恢复 |
+| C5: 网络分区(可达Primary不可达MetaOwner) | 中 | ✅ | Client用缓存ReplicaSetPb。缓存过期等分区恢复 |
+
+#### 恢复场景
+
+| 场景 | 严重 | 能否 | 处理 |
+|------|:--:|:--:|------|
+| RC1: Promote的Backup seqno=100, 最新=105 | 中 | ✅ | 新Primary等待补齐(从其他副本)。补齐窗口暂停写可读 |
+| RC2: 旧P恢复seqno=108, 新P seqno=107 | 高 | ✅ | Lease过期+seqno裁决: 旧P数据更新→以旧P为准→新P降级 |
+| RC3: MetaOwner重启, Snapshot恢复, 元数据落后 | 中 | ✅ | DeltaSync补齐。Meta Backup仍在服务→Client无阻塞 |
+
+#### 关键设计保障
+
+| 机制 | 覆盖场景 | 说明 |
+|------|---------|------|
+| **Seqno 单调递增** | W3,W4,C2,RC1,RC2 | 每次写入递增, 用于判断数据新旧, 谁高谁说了算 |
+| **Lease 3s软/10s硬** | W4,R4,C1 | 防脑裂: Promote前等旧Primary Lease过期 |
+| **HashRing→Meta Backup** | W1,W6,R1,R3,C3,RC3 | Meta失败自动降级到Backup, 透明切换 |
+| **后台Reconcile** | W2,W3,W5,C2 | 周期性对账补齐, 不阻塞Client |
+| **Client缓存ReplicaSetPb** | R1,R4,C5 | 减少Meta查询, 分区时仍可服务 |
+| **降级不降写** | W5,C4 | 即使0个Backup也接受写入, 后台补齐 |
+
+### 7.4 故障恢复 (RPO/RTO)
 
 | 场景 | metadata 影响 | 恢复方式 | RTO |
 |------|-------------|---------|:--:|
