@@ -135,7 +135,7 @@ Mooncake 的负载均衡：
 **连接管理：**
 - Transfer Engine 内部 16KB slice 切分 + 多路径并行
 - GPUDirect RDMA：GPU VRAM ↔ remote DRAM 零拷贝
-- 支持 NVLink（节点内）、RDMA（节点间）、Ascend HCCS（华为 NPU）
+- 支持 NVLink（节点内）、RDMA（节点间）、Ascend HCCS（[厂商] NPU）
 
 **大规模特殊处理：**
 - 预测性早拒绝（Conductor 预估负载，HTTP 429 提前拒绝）
@@ -155,7 +155,7 @@ Mooncake 的负载均衡：
 
 1. **NUMA 亲和是写性能的关键** — Mooncake 的 topology matrix 思路可直接借鉴
 2. **连接复用需从 ZMQ/URMA 两个层面做**：ZMQ 侧连接池、URMA 侧 QP 复用
-3. **Jetty 问题是海思特有的**，Mooncake 用 NVLink/RDMA 不存在此问题——需要自主设计
+3. **Jetty 问题是[芯片厂商]特有的**，Mooncake 用 NVLink/RDMA 不存在此问题——需要自主设计
 
 ---
 

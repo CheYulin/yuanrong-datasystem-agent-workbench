@@ -27,8 +27,8 @@
 | **Jetty Flow Receive** | JFR | 接收端 Jetty 的缓冲队列 |
 | **Jetty Flow Completion** | JFC | 完成队列，轮询获取 URMA 操作结果 |
 | **Remote Jetty Flow Receive** | rJFR | 导入的远端 JFR 句柄 |
-| **CTP** | CTP | Chip Transport Path，海思芯片上的传输路径 |
-| **HCCS** | HCCS | Huawei Cache Coherent System，海思片上互连总线 |
+| **CTP** | CTP | Chip Transport Path，[芯片厂商]芯片上的传输路径 |
+| **HCCS** | HCCS | [厂商] Cache Coherent System，[芯片厂商]片上互连总线 |
 | **NUMA** | NUMA | Non-Uniform Memory Access，非一致性内存访问架构 |
 | **Connection Pool** | CP | 连接池，复用 socket/QP 减少创建开销 |
 | **Service Requirement** | SR | 系统需求，可独立测试验收 |

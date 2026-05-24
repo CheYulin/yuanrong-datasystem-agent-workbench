@@ -7,7 +7,7 @@
 | 子需求 ID | 名称 | 描述 | 优先级 |
 |-----------|------|------|:--:|
 | CO-01 | ZMQ 连接池 | Worker 间 ZMQ socket 复用，避免每请求新建连接 | P0 |
-| CO-02 | Jetty 复用 | 单 Jetty 多 CTP 连接，降低海思片上 Jetty Cache 压力 | P0 |
+| CO-02 | Jetty 复用 | 单 Jetty 多 CTP 连接，降低[芯片厂商]片上 Jetty Cache 压力 | P0 |
 | CO-03 | URMA QP 池化 | URMA QP 预建 + 复用，避免扩缩容建链毛刺 | P1 |
 | CO-04 | 连接预热 | 扩容时预建连接，避免冷启动性能毛刺 | P1 |
 | CO-05 | 连接数治理 | 连接数上限控制、LRU 淘汰、空闲回收 | P1 |
@@ -20,12 +20,12 @@
 | ZMQ socket 创建耗时 | ~50ms/socket | < 1ms (池化复用) |
 | URMA QP 创建耗时 | ~100ms/QP | < 1ms (预建) |
 | 扩缩容毛刺 (P99.99) | > 100ms | < 10ms |
-| 海思 Jetty Cache 压力 | 每连接独占 | 单 Jetty 多路复用 |
+| [芯片厂商] Jetty Cache 压力 | 每连接独占 | 单 Jetty 多路复用 |
 | 连接内存占用 | ~500MB | ~100MB |
 
 ### 1.3 问题根因分析
 
-**海思 Jetson 片上 Jetty Cache 不足：**
+**[芯片厂商] Jetson 片上 Jetty Cache 不足：**
 ```
 HCCS 互联拓扑: 每个 chip 有固定数量的 Jetty (片上互连单元)
 1024 节点场景: Worker-Worker 全连接 → O(N²) = ~1M 连接
@@ -127,7 +127,7 @@ flowchart LR
 当前 (每连接独占 Jetty):
   1024 节点 → 每个 Worker 维护 ~1024 个 Jetty
   总 Jetty 数: O(N²) ≈ 1M
-  海思芯片每 chip Jetty Cache Line 有限 → LRU 抖动 → 性能下降
+  [芯片厂商]芯片每 chip Jetty Cache Line 有限 → LRU 抖动 → 性能下降
 
 目标 (Jetty 复用):
   单 Jetty 承载 8 个 CTP 连接 → 每 Worker Jetty 数 = 1024/8 = 128
@@ -565,14 +565,14 @@ void URMAConnectionPool::HealthCheck(const std::string &peer_id) {
 | 维度 | Mooncake | 我们方案 |
 |------|---------|---------|
 | 连接管理 | Transfer Engine 多路复用 (16KB slice) | ZMQ Pool + URMA Pool 双通道 |
-| NUMA 感知 | 自动拓扑发现 + NUMA 绑定 RDMA NIC | 类似 + Jetty 独立管理 (海思特有) |
+| NUMA 感知 | 自动拓扑发现 + NUMA 绑定 RDMA NIC | 类似 + Jetty 独立管理 ([芯片厂商]特有) |
 | 连接预热 | TE 内置 | 显式 Prewarm API |
-| Jetty 问题 | 无 (NVLink/RDMA) | **自主解决** (海思 HCCS 特有) |
+| Jetty 问题 | 无 (NVLink/RDMA) | **自主解决** ([芯片厂商] HCCS 特有) |
 | 1K 节点 | 产线验证 (Kimi) | **设计目标** |
 
 ### 我们的优势
 1. **双通道解耦**: ZMQ 控制面 + URMA 数据面独立池化，互不影响
-2. **Jetty 分配器**: 解决海思片上 Jetty Cache 不足问题（Mooncake 不涉及）
+2. **Jetty 分配器**: 解决[芯片厂商]片上 Jetty Cache 不足问题（Mooncake 不涉及）
 3. **Prewarm API**: 扩容场景显式控制，更精确
 4. **连接治理**: 空闲回收 + LRU + 健康检查，避免连接泄漏
 
@@ -587,7 +587,7 @@ void URMAConnectionPool::HealthCheck(const std::string &peer_id) {
 | Jetty 负载均衡 | 写入压力下统计各 Jetty 使用率 | 偏差 < 15% |
 | 连接池耗尽 | 压测 > pool_size 并发，验证排队 | 排队不超时 |
 | 空闲回收 | idle 5min 后检查连接数 | 连接正确回收 |
-| 海思环境验证 | 类鲲鹏/昇腾节点上实际测试 | Jetty Cache miss < 1% |
+| [芯片厂商]环境验证 | 类鲲鹏/昇腾节点上实际测试 | Jetty Cache miss < 1% |
 
 ## 引用
 

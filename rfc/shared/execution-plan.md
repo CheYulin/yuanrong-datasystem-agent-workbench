@@ -128,7 +128,7 @@ Week 1   Week 2   Week 3   Week 4   Week 5   Week 6   Week 7   Week 8
 
 | 风险 | 概率 | 影响 | 缓冲 |
 |------|:--:|------|------|
-| URMA Jetty 海思驱动 bug | 高 | Jetty 复用不可用 | +2w (移至 W9-10) |
+| URMA Jetty [芯片厂商]驱动 bug | 高 | Jetty 复用不可用 | +2w (移至 W9-10) |
 | 多副本性能不达标 | 中 | P99 > 3ms | +1w (优化 batch/并行度) |
 | 1024 节点测试环境 | 高 | 无法验收 | 100 节点验证逻辑正确性 |
 | Snapshot 恢复期间对账冲突 | 中 | Meta 不一致 | +1w (加强 DeltaSync) |

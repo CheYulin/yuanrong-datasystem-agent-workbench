@@ -31,7 +31,7 @@
 - **最大副本数**: 3 (主 + 2 备)
 - **适用场景**: KV 8MB 对象、精排 Decode 1 写 10 读
 - **NUMA 亲和**: 写请求路由到同 NUMA node Worker
-- **跨 NUMA 容忍**: 不跨 HCCS (Huawei Cache Coherent System)
+- **跨 NUMA 容忍**: 不跨 HCCS ([厂商] Cache Coherent System)
 
 ---
 

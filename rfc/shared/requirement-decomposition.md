@@ -109,9 +109,9 @@
 
 | ID | 子需求 (SR) | 验收标准 (AR) | 验证方法 |
 |----|-----------|-------------|---------|
-| SR-12.1 | 单 Jetty 多 CTP | 每 Jetty 承载 8 个 CTP，总连接数下降 | 海思环境测试 |
+| SR-12.1 | 单 Jetty 多 CTP | 每 Jetty 承载 8 个 CTP，总连接数下降 | [芯片厂商]环境测试 |
 | SR-12.2 | 负载均衡 | 各 Jetty 使用率偏差 < 15% | 监控指标 |
-| SR-12.3 | Jetty Cache miss | 海思环境 Cache miss rate < 1% | 性能分析 |
+| SR-12.3 | Jetty Cache miss | [芯片厂商]环境 Cache miss rate < 1% | 性能分析 |
 
 ### IR-13: URMA QP 池化
 
