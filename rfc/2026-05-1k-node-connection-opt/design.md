@@ -65,7 +65,77 @@ flowchart LR
     Old -->|重构| New
 ```
 
-### 2.2 新增核心对象
+### 2.2 URMA Jetty/JFR 连接模型
+
+#### 核心概念
+
+| 概念 | 全称 | 作用 |
+|------|------|------|
+| **Jetty** | URMA Jetty | URMA 层的 QP (Queue Pair)，负责发送/接收 |
+| **JFS** | Jetty Flow Send? | 发送端 Jetty (带发送队列) |
+| **JFR** | Jetty Flow Receive | 接收端 Jetty 的接收缓冲区 |
+| **JFC** | Jetty Flow Completion | 完成队列，轮询获取操作结果 |
+| **JFCE** | Jetty Flow Completion Event | 事件通道，JFC 的事件通知 |
+| **rJFR** | Remote Jetty Flow Receive | 导入的远端 JFR 句柄 |
+
+#### Jetty 连接与错误恢复模型
+
+```mermaid
+flowchart LR
+    subgraph Node1 ["Node1 (发起端)"]
+        jfs1["jfs1<br/>发送 Jetty"]
+        rjfr1["rjfr1<br/>远端 JFR 句柄"]
+        rjfr2["rjfr2<br/>远端 JFR 句柄"]
+    end
+    
+    subgraph Node2 ["Node2 (目标端)"]
+        jfr1["jfr1<br/>接收 Jetty"]
+        jfc1["JFC<br/>完成队列"]
+    end
+    
+    subgraph Node3 ["Node3 (对端)"]
+        jfr2["jfr2<br/>接收 Jetty"]
+    end
+    
+    jfs1 -->|"urma_write<br/>实线: 数据传输"| jfr1
+    jfc1 -.->|"poll_jfc error<br/>虚线: 错误通知"| rjfr1
+    jfr2 -.->|"urma_import_jfr<br/>虚线: 远端导入"| rjfr2
+```
+
+**数据写入路径 (正常):**
+1. Node1 `urma_post_jetty_send_wr(jfs1, ...)` → 数据通过 RDMA 写入 Node2 的 jfr1 缓冲区
+2. Node2 `poll_jfc` → 轮询完成队列，获取写入成功/失败事件
+3. 成功 → 完成; 失败 → 触发错误恢复
+
+**错误恢复路径 (虚线):**
+1. Node2 的 JFC 轮询检测到 `URMA_CR_WR_FLUSH_ERR_DONE` (写入刷新错误)
+2. Node2 → Node1: 通过 rjfr1 句柄通知 Node1 "写入失败"
+3. Node1 收到错误 → 触发 `UrmaConnection::ReCreateJetty()`:
+   - `MarkInvalid()` 原子标记旧 Jetty
+   - `UrmaResource::CreateJetty()` 创建新 Jetty
+   - `BindConnection()` 绑定新 Jetty
+   - `AsyncModifyJettyToError()` 异步销毁旧 Jetty
+
+**远端导入路径 (虚线):**
+1. Node3 的 jfr2 → Node1 `urma_import_jetty(ctx, remote_jetty, token)` → 创建 rjfr2
+2. rjfr2 是 Node1 本地对 Node3 远端 JFR 的引用
+3. Node1 可以通过 rjfr2 向 Node3 发起 `urma_write`
+
+#### Jetty 复用核心思想
+
+```
+当前 (每连接独占 Jetty):
+  1024 节点 → 每个 Worker 维护 ~1024 个 Jetty
+  总 Jetty 数: O(N²) ≈ 1M
+  海思芯片每 chip Jetty Cache Line 有限 → LRU 抖动 → 性能下降
+
+目标 (Jetty 复用):
+  单 Jetty 承载 8 个 CTP 连接 → 每 Worker Jetty 数 = 1024/8 = 128
+  总 Jetty 数: O(N×K) ≈ 100K (K=pool_size)
+  Jetty Cache 压力降低 8× → Cache miss < 1%
+```
+
+### 2.3 新增核心对象
 
 **ZMQConnectionPool** — ZMQ socket 连接池：
 
