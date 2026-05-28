@@ -1,7 +1,10 @@
 logs
-# Local verification outputs (see results/README.md)
-/results/*
-!/results/README.md
+# Performance exploration (2026-05-25)
+!/results/2026-05-25_perf_explore/scripts/
+!/results/2026-05-25_perf_explore/logs/.gitkeep
+!/results/2026-05-25_perf_explore/metrics/.gitkeep
+!/results/2026-05-25_perf_explore/reports/.gitkeep
+
 
 # Large intermediate run artifacts under plans
 /plans/**/runs/

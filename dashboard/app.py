@@ -19,7 +19,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 
 from flask import Flask, request, jsonify, Response
-import pandas as pd
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+    pd = None
 
 # =============================================================================
 # Config
