@@ -1,0 +1,2 @@
+[console_scripts]
+dashboard = dashboard.__main__:main

@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# dashboard — Example Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Copy this file to ~/.config/dashboard.yaml and edit to suit your setup.
+# On first run, dashboard will create one automatically with these defaults.
+#
+# The actual config is always at: ~/.config/dashboard.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+connections:
+  # ── Add one block per remote node ──────────────────────────────────────
+  - name: xqyun-32c32g
+    host: xqyun-32c32g        # SSH alias (resolved via ~/.ssh/config)
+    port: 22
+    username: root
+    auth_type: key             # "key" or "password"
+    key_path: ~/.ssh/id_ed25519  # ignored if auth_type is "password"
+    password: ""                # used only if auth_type is "password"
+    note: GPU 机器 · 32c32g
+
+  # ── Another example ───────────────────────────────────────────────────
+  # - name: backup-server
+  #   host: 192.168.1.100
+  #   port: 22
+  #   username: deploy
+  #   auth_type: key
+  #   key_path: ~/.ssh/id_rsa
+  #   password: ""
+  #   note: 内网备份机
+
+mappings:
+  # ── One block per local ↔ remote directory pair ──────────────────────
+# local_path  : relative to LOCAL_BASE (default: ~/workspace/git-repos)
+# remote_path : absolute path on the remote host (e.g. /root/workspace/myproject) — NO ~ ALLOWED
+  - name: yuanrong-datasystem → xqyun
+    connection: xqyun-32c32g    # must match a connection name above
+    local_path: yuanrong-datasystem
+    remote_path: /root/workspace/git-repos/yuanrong-datasystem
+    exclude_patterns:
+      - .git/
+      - build/
+      - build_cov/
+      - .cache/
+      - bazel-*
+      - __pycache__/
+      - "*.pyc"
+      - CMakeCache.txt
+      - CMakeFiles/
+      - compile_commands.json
+      - node_modules/
+    auto_sync: false            # future: watch local_path for changes
+
+  - name: agent-workbench → xqyun
+    connection: xqyun-32c32g
+    local_path: yuanrong-datasystem-agent-workbench
+    remote_path: /root/workspace/git-repos/yuanrong-datasystem-agent-workbench
+    exclude_patterns:
+      - .git/
+      - __pycache__/
+      - "*.pyc"
+      - .venv/
+      - node_modules/
+    auto_sync: false
+
+  # ── Another example ───────────────────────────────────────────────────
+  # - name: my-project → backup
+  #   connection: backup-server
+  #   local_path: my-project
+  #   remote_path: /home/deploy/my-project
+  #   exclude_patterns:
+  #     - .git/
+  #     - node_modules/
+  #     - dist/
+  #   auto_sync: false
+
+settings:
+  default_connection: ""        # pre-selected connection on startup (optional)

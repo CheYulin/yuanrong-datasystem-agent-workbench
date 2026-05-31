@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yche.me · Deploy Panel</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" crossorigin="anonymous"/>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js" crossorigin="anonymous"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f5f7fa;--card:#fff;--border:#d0d7de;--accent:#2563eb;--accent_h:#0969da;
+  --green:#166534;--green_bg:#dcfce7;--red:#c03030;--red_bg:#fee2e2;
+  --yellow:#9a6700;--yellow_bg:#fef9c3;--text:#333;--text2:#656d76;--text3:#aaa;
+  --r:6px;--shadow:0 1px 3px rgba(0,0,0,.08);--shadow-lg:0 4px 16px rgba(0,0,0,.1);
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --mono:'Cascadia Code','Fira Code',monospace;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;font-size:13px}
+
+/* ── Header ── */
+header{
+  background:var(--card);border-bottom:1px solid var(--border);padding:0 20px;
+  display:flex;align-items:center;gap:10px;height:52px;position:sticky;top:0;z-index:100;
+}
+.logo{font-size:18px;font-weight:700;color:var(--accent);text-decoration:none;letter-spacing:-.4px}
+.sep{color:var(--border)}
+.subtitle{color:var(--text2);font-size:13px}
+.spacer{flex:1}
+.chip{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;border:1px solid var(--border);color:var(--text2);display:flex;align-items:center;gap:5px}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+
+/* ── Layout ── */
+.container{max-width:1200px;margin:0 auto;padding:16px 20px 60px}
+.tabs{display:flex;gap:2px;padding:0 0 0 0;margin-bottom:16px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.tab{
+  padding:9px 20px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:none;
+  color:var(--text2);border-right:1px solid var(--border);transition:all .15s;white-space:nowrap;
+}
+.tab:last-child{border-right:none}
+.tab:hover{background:#f6f8fa;color:var(--text)}
+.tab.active{background:var(--accent);color:#fff}
+.panel{display:none}
+.panel.active{display:block}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.card h3{font-size:13px;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px}
+.card h3 .icon{font-size:14px}
+
+/* ── Buttons ── */
+.btn{
+  display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:var(--r);
+  border:1px solid var(--border);background:var(--card);color:var(--text);
+  font-size:12px;font-weight:500;cursor:pointer;text-decoration:none;
+  transition:all .15s;font-family:var(--font);
+}
+.btn:hover{background:var(--accent);color:#fff;border-color:var(--accent);text-decoration:none}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.primary:hover{background:var(--accent_h)}
+.btn.success{background:var(--green_bg);color:var(--green);border-color:rgba(22,101,52,.2)}
+.btn.success:hover{background:#bbf7d0}
+.btn.danger{background:var(--red_bg);color:var(--red);border-color:rgba(192,48,48,.2)}
+.btn.danger:hover{background:#fecaca}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:disabled:hover{background:var(--card);color:var(--text);border-color:var(--border)}
+.btn-full{width:100%;justify-content:center}
+.btn-sm{padding:4px 9px;font-size:11px}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap}
+.tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}
+.tag-ok{background:var(--green_bg);color:var(--green)}
+.tag-err{background:var(--red_bg);color:var(--red)}
+.tag-warn{background:var(--yellow_bg);color:var(--yellow)}
+
+/* ── Form ── */
+.form{Display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-full{grid-column:1/-1}
+input,select,textarea{
+  padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;
+  font-family:var(--font);background:var(--card);color:var(--text);outline:none;width:100%;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:80px;line-height:1.5}
+label{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.form-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.form-row label{min-width:80px}
+.toggle-row{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);cursor:pointer}
+.toggle{position:relative;width:30px;height:17px}
+.toggle input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:9px;cursor:pointer;transition:.2s}
+.toggle-slider::before{content:'';position:absolute;height:11px;width:11px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+.toggle input:checked + .toggle-slider{background:rgba(22,101,52,.25)}
+.toggle input:checked + .toggle-slider::before{transform:translateX(13px);background:var(--green)}
+.help-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:50%;border:1px solid var(--border);
+  font-size:9px;font-weight:700;color:var(--text2);cursor:help;
+  text-decoration:none;line-height:1;
+}
+.help-btn:hover{background:var(--yellow_bg);color:var(--yellow);border-color:var(--yellow)}
+
+/* ── Status bar ── */
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px}
+.stat-card .label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.stat-card .value{font-size:18px;font-weight:700}
+.stat-card.green .value{color:var(--green)}
+.stat-card.blue .value{color:var(--accent)}
+
+/* ── Connection list ── */
+.conn-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:7px;background:var(--bg)}
+.conn-item .info{flex:1}
+.conn-item .name{font-weight:600;font-size:13px}
+.conn-item .addr{font-size:11px;color:var(--text2);font-family:var(--mono)}
+.conn-item .note{font-size:10px;color:var(--text3);margin-top:2px}
+.conn-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px}
+.conn-badge.ok{background:var(--green_bg);color:var(--green)}
+.conn-badge.err{background:var(--red_bg);color:var(--red)}
+.conn-badge.off{background:var(--bg);color:var(--text3)}
+
+/* ── Mapping list ── */
+.mapping-item{
+  display:grid;grid-template-columns:auto 1fr auto;
+  gap:10px;align-items:center;
+  padding:10px 12px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:7px;background:var(--bg);
+}
+.mapping-item .map-name{font-weight:600;font-size:13px;min-width:120px}
+.mapping-item .map-paths{font-size:11px;color:var(--text2);font-family:var(--mono)}
+.mapping-item .map-paths .local{color:var(--accent)}
+.mapping-item .map-paths .remote{color:var(--green)}
+.mapping-item .map-status{font-size:11px;min-width:80px;text-align:center}
+.mapping-item .map-actions{display:flex;gap:5px}
+
+/* ── File tree ── */
+.tree-wrap{max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)}
+.tree-search{padding:6px 10px;border-bottom:1px solid var(--border);background:#f6f8fa}
+.tree-search input{width:100%;border:1px solid var(--border);border-radius:5px;padding:5px 9px;font-size:12px;background:var(--card);color:var(--text);outline:none}
+.tree-search input:focus{border-color:var(--accent)}
+.tree-item{display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;border-left:2px solid transparent;transition:background .1s;white-space:nowrap;font-size:12px}
+.tree-item:hover{background:#f6f8fa}
+.tree-item.active{background:rgba(37,99,235,.07);border-left-color:var(--accent)}
+.tree-item.dir{color:var(--green)}
+.tree-toggle{color:var(--text3);font-size:10px;width:14px;text-align:center;flex-shrink:0}
+.tree-toggle.open::before{content:'▾'}
+.tree-toggle.closed::before{content:'▸'}
+.fname{flex:1;overflow:hidden;text-overflow:ellipsis}
+.fsize{font-size:10px;color:var(--text3);flex-shrink:0}
+.tree-children{display:none}
+.tree-item.open+.tree-children{display:block}
+
+/* ── Diff ── */
+.diff-stats{display:flex;gap:8px;padding:8px 12px;background:var(--bg);border-radius:var(--r);margin-bottom:8px}
+.diff-stat{display:flex;flex-direction:column;align-items:center;flex:1}
+.diff-stat .n{font-size:17px;font-weight:700}
+.diff-stat .l{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px}
+.diff-stat.add .n{color:var(--green)}
+.diff-stat.del .n{color:var(--red)}
+.diff-stat.mod .n{color:var(--yellow)}
+.diff-lines{font-family:var(--mono);font-size:11px;line-height:1.6;max-height:200px;overflow-y:auto;padding:8px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);white-space:pre-wrap;word-break:break-all;color:var(--text2);max-height:160px}
+.sync-output{font-family:var(--mono);font-size:11px;line-height:1.5;max-height:300px;overflow-y:auto;padding:8px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);white-space:pre-wrap;word-break:break-all;color:var(--text2)}
+.d-add{color:var(--green)}.d-del{color:var(--red)}.d-mod{color:var(--yellow)}.d-info{color:var(--text3)}
+
+/* ── Remote Browser ── */
+.remote-browser{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.remote-tree-wrap{position:relative}
+.remote-breadcrumb{
+  padding:6px 10px;background:#f6f8fa;border:1px solid var(--border);border-bottom:none;
+  border-radius:var(--r) var(--r) 0 0;font-size:11px;font-family:var(--mono);color:var(--text2);
+  display:flex;align-items:center;gap:4px;overflow-x:auto;white-space:nowrap;
+}
+.remote-breadcrumb span{cursor:pointer;color:var(--accent)}
+.remote-breadcrumb span:hover{text-decoration:underline}
+.breadcrumb-root{cursor:pointer;color:var(--accent)}
+.breadcrumb-sep{color:var(--text3)}
+
+/* ── Queue ── */
+#queue{margin-bottom:12px}
+.q-empty{text-align:center;padding:14px;color:var(--text3);font-size:12px}
+.q-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:5px;background:var(--card);animation:slideIn .2s}
+@keyframes slideIn{from{opacity:0;transform:translateY(-4px)}}
+.q-icon{font-size:15px;flex-shrink:0}
+.q-info{flex:1;min-width:0}
+.q-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-size{font-size:10px;color:var(--text2);margin-top:1px}
+.q-bar{height:2px;background:#eee;border-radius:2px;margin-top:3px;overflow:hidden}
+.q-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),#22c55e);border-radius:2px;transition:width .3s}
+.q-status{font-size:11px;font-weight:600;flex-shrink:0}
+.q-status.queued{color:var(--text2)}.q-status.uploading{color:var(--accent)}.q-status.rsync{color:var(--yellow)}.q-status.done{color:var(--green)}.q-status.err{color:var(--red)}
+.q-remove{background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px}
+.q-remove:hover{color:var(--red)}
+.dropzone{
+  border:2px dashed var(--border);border-radius:var(--r);padding:24px 20px;
+  text-align:center;cursor:pointer;transition:all .2s;background:var(--bg);margin-bottom:10px;
+}
+.dropzone:hover,.dropzone.dragover{border-color:var(--accent);background:rgba(37,99,235,.04)}
+.dropzone.dragover{transform:scale(1.01)}
+.dropzone-icon{font-size:28px;margin-bottom:6px}
+.dropzone-title{font-size:13px;font-weight:600;margin-bottom:3px}
+.dropzone-sub{font-size:11px;color:var(--text2)}
+#file-input{display:none}
+
+/* ── Shell ── */
+#shell-input{width:100%;border:1px solid var(--border);border-radius:var(--r);padding:7px 10px;font-family:var(--mono);font-size:12px;background:var(--card);color:var(--text);outline:none;resize:none}
+#shell-input:focus{border-color:var(--accent)}
+#shell-output{display:none;margin-top:8px;padding:8px 12px;background:#0d1117;color:#e6edf3;border-radius:var(--r);font-family:var(--mono);font-size:11px;line-height:1.6;white-space:pre-wrap;max-height:160px;overflow-y:auto}
+#shell-output .prompt{color:#58a6ff}
+#shell-output .err{color:#f85149}
+
+/* ── Modal ── */
+.modal{display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal-box{background:var(--card);border-radius:10px;padding:24px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.modal-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.modal-head h2{font-size:14px;margin:0}
+.modal-head .spacer{flex:1}
+.modal-close{background:none;border:none;font-size:17px;cursor:pointer;color:var(--text2)}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:12px;border-top:1px solid #eee}
+.modal-foot .spacer{flex:1}
+
+/* ── Toast ── */
+#toast{position:fixed;bottom:20px;right:20px;padding:9px 16px;border-radius:var(--r);font-size:12px;font-weight:500;z-index:99999;background:var(--card);border:1px solid var(--border);color:var(--text);opacity:0;transition:opacity .3s,transform .3s;transform:translateY(8px);pointer-events:none;box-shadow:var(--shadow-lg)}
+#toast.show{opacity:1;transform:translateY(0)}
+#toast.ok{border-color:rgba(22,101,52,.4);color:var(--green)}
+#toast.err{border-color:rgba(192,48,48,.4);color:var(--red)}
+.spinner{display:inline-block;width:11px;height:11px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:rot .7s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.badge-new{background:var(--green_bg);color:var(--green);font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px}
+
+/* ── Shell Panel ── */
+.shell-layout{display:flex;flex-direction:column;height:calc(100vh - 180px);min-height:400px}
+.shell-toolbar{display:flex;align-items:center;gap:6px;padding:6px 8px;background:#f6f8fa;border:1px solid var(--border);border-bottom:none;border-radius:var(--r) var(--r) 0 0;flex-shrink:0;flex-wrap:wrap}
+.shell-tabs{display:flex;gap:2px;align-items:center;flex:1;overflow-x:auto;min-width:0}
+.shell-tab{
+  display:flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid var(--border);
+  border-radius:5px;font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;background:var(--card);
+  color:var(--text2);transition:all .15s;max-width:160px;
+}
+.shell-tab:hover{background:var(--bg)}
+.shell-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.shell-tab .tlabel{overflow:hidden;text-overflow:ellipsis;max-width:100px}
+.shell-tab .tclose{opacity:.6;font-size:10px;padding:0 2px;border-radius:2px}
+.shell-tab .tclose:hover{opacity:1;background:rgba(0,0,0,.15)}
+.shell-tab .ttype{font-size:9px;opacity:.7;text-transform:uppercase}
+.shell-add{
+  display:flex;align-items:center;gap:0;padding:4px 8px;border:1px dashed var(--border);
+  border-radius:5px;font-size:11px;cursor:pointer;background:none;color:var(--text2);
+  transition:all .15s;white-space:nowrap;
+}
+.shell-add:hover{border-color:var(--accent);color:var(--accent);background:rgba(37,99,235,.05)}
+.shell-body{
+  flex:1;border:1px solid var(--border);border-radius:0 0 var(--r) var(--r);
+  overflow:hidden;display:flex;flex-direction:column;min-height:0;
+}
+.shell-empty{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:var(--text3);gap:10px;
+}
+.shell-empty-icon{font-size:36px}
+.shell-empty-title{font-size:13px;font-weight:600}
+.shell-empty-sub{font-size:11px}
+.shell-terminal-wrap{flex:1;min-height:0;position:relative}
+.shell-terminal-wrap .xterm{min-height:100%;height:100%}
+.shell-terminal-wrap .xterm-viewport{overflow-y:auto!important}
+.shell-new-menu{
+  position:relative;
+}
+.shell-new-dropdown{
+  display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
+  background:var(--card);border:1px solid var(--border);border-radius:var(--r);
+  box-shadow:var(--shadow-lg);min-width:180px;overflow:hidden;
+}
+.shell-new-dropdown.show{display:block}
+.shell-new-item{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;cursor:pointer;
+  color:var(--text);border:none;background:none;width:100%;text-align:left;
+}
+.shell-new-item:hover{background:var(--bg)}
+.shell-new-item .ntype{font-size:10px;background:var(--accent);color:#fff;padding:1px 5px;border-radius:3px}
+.shell-new-item .nlocal .ntype{background:var(--green)}
+.shell-new-item .nssh .ntype{background:var(--accent)}
+.shell-status{font-size:10px;color:var(--text3);white-space:nowrap}
+/* xterm overrides */
+.shell-terminal-wrap .xterm{min-height:100%;height:100%;padding:4px}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <a href="/" class="logo">yche.me</a>
+  <span class="sep">/</span>
+  <span class="subtitle">Deploy Panel</span>
+  <div class="spacer"></div>
+  <button class="btn btn-sm" onclick="openSettings()">⚙️</button>
+</header>
+
+<!-- Main -->
+<div class="container">
+
+  <!-- Status row -->
+  <div class="stat-row">
+    <div class="stat-card green"><div class="label">Mappings</div><div class="value" id="stat-maps">—</div></div>
+    <div class="stat-card"><div class="label">Connections</div><div class="value" id="stat-conns">—</div></div>
+    <div class="stat-card"><div class="label">Queue</div><div class="value" id="stat-q">0</div></div>
+    <div class="stat-card blue"><div class="label">Uptime</div><div class="value" id="stat-uptime" style="font-size:14px">—</div></div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="deploy" onclick="switchTab(this)">🚀 Deploy</button>
+    <button class="tab" data-tab="connections" onclick="switchTab(this)">🔌 Connections</button>
+    <button class="tab" data-tab="mappings" onclick="switchTab(this)">📂 Mappings</button>
+    <button class="tab" data-tab="shell" onclick="switchTab(this)">💻 Shell</button>
+  </div>
+
+  <!-- ── Deploy Panel ── -->
+  <div class="panel active" id="panel-deploy">
+    <!-- Mapping selector -->
+    <div class="card">
+      <h3><span class="icon">📡</span> 当前 Mapping</h3>
+      <div class="form-row">
+        <label>选择 Mapping</label>
+        <select id="sel-mapping" style="flex:1" onchange="onMappingChange()">
+          <option value="">— 选择一个 mapping —</option>
+        </select>
+        <button class="btn btn-sm" onclick="previewMapping()">🔍 预览</button>
+        <button class="btn btn-sm success" onclick="syncMapping()">🚀 同步</button>
+        <label class="toggle-row">
+          <span class="toggle"><input type="checkbox" id="chk-mirror"/><span class="toggle-slider"></span></span>
+          mirror
+          <span class="help-btn" title="开启后 rsync 会加 --delete，把远端有而本地没有的文件也删掉，使两边完全一致。慎用！">?</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Two-col browser -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <!-- Local browser -->
+      <div class="card">
+        <h3><span class="icon">💻</span> 本地 <span id="local-breadcrumb" style="font-size:10px;color:var(--text2);font-weight:400;margin-left:8px"></span></h3>
+        <div class="tree-wrap" id="local-tree-wrap">
+          <div class="tree-search"><input type="text" placeholder="搜索…" oninput="filterLocalTree(this.value)"/></div>
+          <div id="local-tree"></div>
+        </div>
+      </div>
+
+      <!-- Remote browser -->
+      <div class="card">
+        <h3>
+          <span class="icon">☁️</span> 远端 <span id="remote-breadcrumb" style="font-size:10px;color:var(--text2);font-weight:400;margin-left:8px"></span>
+          <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--text3)" id="remote-conn-label"></span>
+        </h3>
+        <div class="remote-browser">
+          <div class="remote-tree-wrap" style="grid-column:1/-1">
+            <div class="remote-breadcrumb" id="remote-breadcrumb-bar">
+              <span class="breadcrumb-root" onclick="remoteBrowse('')">/</span>
+            </div>
+            <div class="tree-wrap" id="remote-tree-wrap">
+              <div class="tree-search"><input type="text" placeholder="搜索远端…" oninput="filterRemoteTree(this.value)"/></div>
+              <div id="remote-tree"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diff preview -->
+    <div class="card">
+      <h3><span class="icon">⚡</span> 变更预览</h3>
+      <div id="diff-stats" class="diff-stats" style="display:none">
+        <div class="diff-stat add"><div class="n" id="ds-add">0</div><div class="l">新增</div></div>
+        <div class="diff-stat del"><div class="n" id="ds-del">0</div><div class="l">删除</div></div>
+        <div class="diff-stat mod"><div class="n" id="ds-mod">0</div><div class="l">变更</div></div>
+      </div>
+      <div id="diff-lines" class="diff-lines">选择 mapping 后点击「预览」查看变更</div>
+    </div>
+
+    <!-- Sync output -->
+    <div class="card" id="sync-output-card" style="display:none">
+      <h3><span class="icon">📋</span> 同步输出 <span id="sync-output-title" style="font-size:11px;font-weight:400;color:var(--text2);margin-left:6px"></span></h3>
+      <div id="sync-output" class="sync-output"></div>
+    </div>
+
+    <!-- Upload -->
+    <div class="card">
+      <h3><span class="icon">📤</span> 上传文件</h3>
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+        <div class="dropzone-icon">⬆</div>
+        <div class="dropzone-title">拖拽文件到此处</div>
+        <div class="dropzone-sub">或 <a style="color:var(--accent)">浏览</a> · 将上传到当前 mapping 的本地目录</div>
+      </div>
+      <input type="file" id="file-input" multiple />
+      <div class="q-empty" id="q-empty">暂无排队文件</div>
+      <div id="queue"></div>
+      <button class="btn primary btn-full" id="btn-upload" onclick="doUpload()" disabled>
+        <span id="btn-icon">⬆</span><span id="btn-text">选择文件开始上传</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Connections Panel ── -->
+  <div class="panel" id="panel-connections">
+    <div class="card">
+      <h3><span class="icon">🔌</span> SSH 连接 <button class="btn btn-sm" style="margin-left:auto" onclick="openConnForm()">+ 添加</button></h3>
+      <div id="conn-list"></div>
+    </div>
+  </div>
+
+  <!-- ── Mappings Panel ── -->
+  <div class="panel" id="panel-mappings">
+    <div class="card">
+      <h3><span class="icon">📂</span> Deployment Mappings <button class="btn btn-sm" style="margin-left:auto" onclick="openMappingForm()">+ 添加</button></h3>
+      <div id="mapping-list"></div>
+    </div>
+  </div>
+
+  <!-- ── Shell Panel ── -->
+  <div class="panel" id="panel-shell">
+    <!-- Shell toolbar -->
+    <div class="shell-toolbar">
+      <!-- Session tabs -->
+      <div class="shell-tabs" id="shell-tabs"></div>
+      <!-- New shell button -->
+      <div class="shell-new-menu">
+        <button class="shell-add" id="btn-new-shell" onclick="toggleShellMenu()">+ 新终端</button>
+        <div class="shell-new-dropdown" id="shell-new-dropdown">
+          <button class="shell-new-item nlocal" onclick="createShell('local')">
+            <span class="ntype">本地</span>
+            <span>启动本地 Shell</span>
+          </button>
+          <button class="shell-new-item nssh" onclick="createShell('ssh')">
+            <span class="ntype">SSH</span>
+            <span>连接到远端</span>
+          </button>
+        </div>
+      </div>
+      <span class="shell-status" id="shell-status"></span>
+    </div>
+    <!-- Terminal area -->
+    <div class="shell-body" id="shell-body">
+      <div class="shell-empty" id="shell-empty">
+        <div class="shell-empty-icon">🖥</div>
+        <div class="shell-empty-title">暂无终端</div>
+        <div class="shell-empty-sub">点击右上角「+ 新终端」创建本地或 SSH 终端</div>
+      </div>
+      <div class="shell-terminal-wrap" id="shell-workspace" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- ── Connection Form Modal ── -->
+<div id="conn-modal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span style="font-size:17px">🔌</span>
+      <h2 id="conn-modal-title">添加连接</h2>
+      <div class="spacer"></div>
+      <button class="modal-close" onclick="closeConnModal()">✕</button>
+    </div>
+    <input type="hidden" id="conn-edit-name" />
+    <div class="form-full" style="margin-bottom:10px">
+      <label>连接名称</label>
+      <input id="conn-name" type="text" placeholder="e.g. xqyun-32c32g" />
+    </div>
+    <div class="form">
+      <div>
+        <label>Host / IP</label>
+        <input id="conn-host" type="text" placeholder="192.168.1.100" />
+      </div>
+      <div>
+        <label>Port</label>
+        <input id="conn-port" type="number" value="22" />
+      </div>
+      <div>
+        <label>Username</label>
+        <input id="conn-user" type="text" placeholder="root" />
+      </div>
+      <div>
+        <label>Auth Type</label>
+        <select id="conn-auth" onchange="toggleAuthFields()">
+          <option value="key">🔑 Key (默认)</option>
+          <option value="password">🔐 Password</option>
+        </select>
+      </div>
+      <div class="form-full" id="field-keypath">
+        <label>Key Path</label>
+        <input id="conn-keypath" type="text" value="~/.ssh/id_ed25519" />
+      </div>
+      <div class="form-full" id="field-password" style="display:none">
+        <label>Password</label>
+        <input id="conn-password" type="password" placeholder="leave blank to use key" />
+      </div>
+      <div class="form-full">
+        <label>备注 (可选)</label>
+        <input id="conn-note" type="text" placeholder="e.g. 32c32g GPU 机器" />
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeConnModal()">取消</button>
+      <button class="btn" id="btn-test-conn" onclick="testConn()">
+        <span id="test-spinner" class="spinner" style="display:none"></span>
+        🔗 测试连接
+      </button>
+      <button class="btn primary" onclick="saveConn()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Mapping Form Modal ── -->
+<div id="map-modal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span style="font-size:17px">📂</span>
+      <h2 id="map-modal-title">添加 Mapping</h2>
+      <div class="spacer"></div>
+      <button class="modal-close" onclick="closeMapModal()">✕</button>
+    </div>
+    <input type="hidden" id="map-edit-name" />
+    <div class="form-full" style="margin-bottom:10px">
+      <label>Mapping 名称</label>
+      <input id="map-name" type="text" placeholder="e.g. datasystem-to-xqyun" />
+    </div>
+    <div class="form">
+      <div>
+        <label>连接</label>
+        <select id="map-conn">
+          <option value="">— 选择连接 —</option>
+        </select>
+      </div>
+      <div>
+        <label>Auto Sync</label>
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          <label class="toggle" style="margin:0">
+            <input type="checkbox" id="map-auto" />
+            <span class="toggle-slider"></span>
+          </label>
+          <span style="font-size:11px;color:var(--text2)">文件变化自动同步</span>
+        </div>
+      </div>
+      <div class="form-full">
+        <label>本地目录 (相对于 {{ local_base }})</label>
+        <input id="map-local" type="text" placeholder="yuanrong-datasystem" />
+      </div>
+      <div class="form-full">
+        <label>远端目录 (绝对路径)</label>
+        <input id="map-remote" type="text" placeholder="~/workspace/git-repos/yuanrong-datasystem" />
+      </div>
+      <div class="form-full">
+        <label>Ignore Patterns (每行一个)</label>
+        <textarea id="map-excludes" rows="5" placeholder=".git/&#10;build/&#10;*.pyc"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeMapModal()">取消</button>
+      <button class="btn primary" onclick="saveMapping()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings Modal ── -->
+<div id="settings-modal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span style="font-size:17px">⚙️</span>
+      <h2>Settings</h2>
+      <div class="spacer"></div>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:16px">配置文件：<code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:11px">~/.config/dashboard.yaml</code></p>
+    <div class="btn-group">
+      <button class="btn btn-sm" onclick="reloadConfig()">↻ 重新加载</button>
+      <button class="btn btn-sm" onclick="exportConfig()">📤 导出</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const LOCAL = "{{ local_base }}";
+let config = {};         // full config
+let connections = [];
+let mappings = [];
+let curMapping = null;
+let queue = [];
+let selectedLocalPath = '';
+
+// Remote browse state
+let remoteConn = '';
+let remotePath = '.';
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+(async function init() {
+  await loadConfig();
+  const up = document.getElementById('stat-uptime');
+  const s = Date.now();
+  setInterval(()=>{
+    const sec=Math.floor((Date.now()-s)/1000);
+    const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60);
+    up.textContent=h>0?`${h}h ${m}m`:m>0?`${m}m`:'just now';
+  }, 1000);
+})();
+
+async function loadConfig() {
+  const r = await fetch('/api/config');
+  config = await r.json();
+  connections = config.connections || [];
+  mappings = config.mappings || [];
+  renderAll();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════════════════════
+function renderAll() {
+  renderStats();
+  renderConnList();
+  renderMappingList();
+  renderMappingSelect();
+  renderRemoteConnLabel();
+  loadLocalTree('');
+}
+
+function renderStats() {
+  document.getElementById('stat-maps').textContent = mappings.length;
+  document.getElementById('stat-conns').textContent = connections.length;
+  document.getElementById('stat-q').textContent = queue.filter(q=>q.state==='queued').length;
+}
+
+function renderConnList() {
+  const el = document.getElementById('conn-list');
+  if (!connections.length) {
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">暂无连接，添加一个开始使用</div>';
+    return;
+  }
+  el.innerHTML = connections.map(c => {
+    const badge = c._status === undefined ? 'off' : c._status ? 'ok' : 'err';
+    const label = c._status === undefined ? '未测试' : c._status ? '✓ 已连接' : '✗ 连接失败';
+    return `<div class="conn-item">
+      <div class="info">
+        <div class="name">${esc(c.name)}</div>
+        <div class="addr">${esc(c.username)}@${esc(c.host)}:${c.port}</div>
+        ${c.note?`<div class="note">${esc(c.note)}</div>`:''}
+      </div>
+      <span class="conn-badge ${badge}">${label}</span>
+      <button class="btn btn-sm" onclick="editConn('${esc(c.name)}')">✏️</button>
+      <button class="btn btn-sm danger" onclick="delConn('${esc(c.name)}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function renderMappingList() {
+  const el = document.getElementById('mapping-list');
+  if (!mappings.length) {
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">暂无 mapping</div>';
+    return;
+  }
+  el.innerHTML = mappings.map(m => {
+    const conn = connections.find(c=>c.name===m.connection) || {};
+    return `<div class="mapping-item">
+      <div>
+        <div class="map-name">${esc(m.name)}</div>
+        <div class="map-paths">
+          <div><span class="local">💻 ${m.local_path||'/'}</span></div>
+          <div><span class="remote">☁️ ${m.remote_path||'/'}</span></div>
+        </div>
+      </div>
+      <div class="map-status" id="map-status-${esc(m.name)}">—</div>
+      <div class="map-actions">
+        <button class="btn btn-sm" onclick="editMapping('${esc(m.name)}')">✏️</button>
+        <button class="btn btn-sm success" onclick="selectAndDeploy('${esc(m.name)}')">🚀</button>
+        <button class="btn btn-sm danger" onclick="delMapping('${esc(m.name)}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderMappingSelect() {
+  const sel = document.getElementById('sel-mapping');
+  sel.innerHTML = '<option value="">— 选择一个 mapping —</option>' +
+    mappings.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.local_path)} → ${esc(m.remote_path)})</option>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════════════════
+function switchTab(btn) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CONNECTION MODAL
+// ═══════════════════════════════════════════════════════════════
+function openConnForm(name) {
+  document.getElementById('conn-edit-name').value = name || '';
+  document.getElementById('conn-modal-title').textContent = name ? '编辑连接' : '添加连接';
+  document.getElementById('conn-name').value = '';
+  document.getElementById('conn-host').value = '';
+  document.getElementById('conn-port').value = '22';
+  document.getElementById('conn-user').value = '';
+  document.getElementById('conn-auth').value = 'key';
+  document.getElementById('conn-keypath').value = '~/.ssh/id_ed25519';
+  document.getElementById('conn-password').value = '';
+  document.getElementById('conn-note').value = '';
+  toggleAuthFields();
+  document.getElementById('conn-modal').classList.add('show');
+  if (name) {
+    const c = connections.find(x=>x.name===name);
+    if (c) {
+      document.getElementById('conn-name').value = c.name;
+      document.getElementById('conn-host').value = c.host;
+      document.getElementById('conn-port').value = c.port;
+      document.getElementById('conn-user').value = c.username;
+      document.getElementById('conn-auth').value = c.auth_type || 'key';
+      document.getElementById('conn-keypath').value = c.key_path || '~/.ssh/id_ed25519';
+      document.getElementById('conn-password').value = c.password || '';
+      document.getElementById('conn-note').value = c.note || '';
+      toggleAuthFields();
+    }
+  }
+}
+function closeConnModal() { document.getElementById('conn-modal').classList.remove('show'); }
+function editConn(name) { openConnForm(name); }
+
+function toggleAuthFields() {
+  const auth = document.getElementById('conn-auth').value;
+  document.getElementById('field-keypath').style.display = auth==='key' ? '' : 'none';
+  document.getElementById('field-password').style.display = auth==='password' ? '' : 'none';
+}
+
+async function testConn() {
+  const name = document.getElementById('conn-name').value.trim();
+  const host = document.getElementById('conn-host').value.trim();
+  const port = parseInt(document.getElementById('conn-port').value) || 22;
+  const username = document.getElementById('conn-user').value.trim();
+  const auth_type = document.getElementById('conn-auth').value;
+  const key_path = document.getElementById('conn-keypath').value.trim();
+  const password = document.getElementById('conn-password').value;
+  const note = document.getElementById('conn-note').value.trim();
+
+  if (!name || !host || !username) { toast('请填写完整', 'err'); return; }
+
+  // Save first
+  await fetch('/api/connections', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, host, port, username, auth_type, key_path, password, note})});
+
+  // Test
+  document.getElementById('test-spinner').style.display = 'inline-block';
+  document.getElementById('btn-test-conn').disabled = true;
+  try {
+    const r = await fetch(`/api/connections/${encodeURIComponent(name)}/test`, {method:'POST'});
+    const d = await r.json();
+    if (d.ok) { toast(`✓ 连接成功: ${host}`, 'ok'); }
+    else { toast(`✗ 连接失败: ${d.error}`, 'err'); }
+  } finally {
+    document.getElementById('test-spinner').style.display = 'none';
+    document.getElementById('btn-test-conn').disabled = false;
+  }
+}
+
+async function saveConn() {
+  const name = document.getElementById('conn-name').value.trim();
+  const host = document.getElementById('conn-host').value.trim();
+  const port = parseInt(document.getElementById('conn-port').value) || 22;
+  const username = document.getElementById('conn-user').value.trim();
+  const auth_type = document.getElementById('conn-auth').value;
+  const key_path = document.getElementById('conn-keypath').value.trim();
+  const password = document.getElementById('conn-password').value;
+  const note = document.getElementById('conn-note').value.trim();
+
+  if (!name || !host || !username) { toast('请填写完整', 'err'); return; }
+
+  const r = await fetch('/api/connections', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, host, port, username, auth_type, key_path, password, note})});
+  const d = await r.json();
+  if (d.ok) {
+    await loadConfig();
+    closeConnModal();
+    toast(`✓ 连接已保存: ${name}`, 'ok');
+  }
+}
+
+async function delConn(name) {
+  if (!confirm(`删除连接「${name}」？`)) return;
+  await fetch(`/api/connections/${encodeURIComponent(name)}`, {method:'DELETE'});
+  await loadConfig();
+  toast(`连接「${name}」已删除`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAPPING MODAL
+// ═══════════════════════════════════════════════════════════════
+function openMappingForm(name) {
+  document.getElementById('map-edit-name').value = name || '';
+  document.getElementById('map-modal-title').textContent = name ? '编辑 Mapping' : '添加 Mapping';
+  document.getElementById('map-name').value = '';
+  document.getElementById('map-local').value = '';
+  document.getElementById('map-remote').value = '';
+  document.getElementById('map-excludes').value = '.git/\nbuild/\n__pycache__/\n*.pyc\nnode_modules/';
+  document.getElementById('map-auto').checked = false;
+  // Populate connection select
+  const sel = document.getElementById('map-conn');
+  sel.innerHTML = '<option value="">— 选择连接 —</option>' +
+    connections.map(c => `<option value="${esc(c.name)}">${esc(c.name)} (${esc(c.host)})</option>`).join('');
+  document.getElementById('map-modal').classList.add('show');
+  if (name) {
+    const m = mappings.find(x=>x.name===name);
+    if (m) {
+      document.getElementById('map-name').value = m.name;
+      document.getElementById('map-conn').value = m.connection;
+      document.getElementById('map-local').value = m.local_path;
+      document.getElementById('map-remote').value = m.remote_path;
+      document.getElementById('map-excludes').value = (m.exclude_patterns || []).join('\n');
+      document.getElementById('map-auto').checked = m.auto_sync;
+    }
+  }
+}
+function closeMapModal() { document.getElementById('map-modal').classList.remove('show'); }
+function editMapping(name) { openMappingForm(name); }
+
+async function saveMapping() {
+  const editName = document.getElementById('map-edit-name').value;
+  const name = document.getElementById('map-name').value.trim();
+  const connection = document.getElementById('map-conn').value;
+  const local_path = document.getElementById('map-local').value.trim();
+  const remote_path = document.getElementById('map-remote').value.trim();
+  const exclude_patterns = document.getElementById('map-excludes').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const auto_sync = document.getElementById('map-auto').checked;
+
+  if (!name || !connection || !local_path || !remote_path) { toast('请填写完整', 'err'); return; }
+
+  const r = await fetch('/api/mappings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, connection, local_path, remote_path, exclude_patterns, auto_sync})});
+  const d = await r.json();
+  if (d.ok) {
+    await loadConfig();
+    closeMapModal();
+    toast(`✓ Mapping 已保存: ${name}`, 'ok');
+  }
+}
+
+async function delMapping(name) {
+  if (!confirm(`删除 Mapping「${name}」？`)) return;
+  await fetch(`/api/mappings/${encodeURIComponent(name)}`, {method:'DELETE'});
+  await loadConfig();
+  toast(`Mapping「${name}」已删除`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOCAL FILE TREE
+// ═══════════════════════════════════════════════════════════════
+async function loadLocalTree(path, parentEl) {
+  const res = await fetch(`/api/local/tree?path=${encodeURIComponent(path)}`);
+  const data = await res.json();
+  if (data.error) { console.error('[loadLocalTree]', data.error); return; }
+  const container = parentEl || document.getElementById('local-tree');
+  if (!path && !parentEl) container.innerHTML = '';
+  document.getElementById('local-breadcrumb').textContent = path || '/';
+
+  for (const item of data.items) {
+    const el = document.createElement('div');
+    const sz = item.size<1024?item.size+'B':item.size<1048576?(item.size/1024).toFixed(0)+'K':(item.size/1048576).toFixed(1)+'M';
+    if (item.type==='dir') {
+      el.className='tree-item dir';
+      el.innerHTML=`<span class="tree-toggle closed"></span><span class="fname">${item.name}/</span>`;
+      el.onclick = e => {
+        e.stopPropagation();
+        const ch=el.nextElementSibling, tog=el.querySelector('.tree-toggle');
+        const open=tog.classList.contains('open');
+        tog.className=`tree-toggle ${open?'closed':'open'}`;
+        if (!open) {
+          if (ch.innerHTML==='') loadLocalTree(item.rel, ch);
+          ch.style.display='block';
+        } else {
+          ch.style.display='none';
+        }
+        el.classList.toggle('open', !open);
+        if (!open) setSelectedLocal(item.rel);
+      };
+      const child = document.createElement('div');
+      child.className='tree-children';
+      // MUST append el first, then insert child after it — otherwise el has no parent yet
+      container.appendChild(el);
+      container.insertBefore(child, el.nextSibling);
+    } else {
+      el.className='tree-item';
+      el.innerHTML=`<span class="tree-toggle" style="visibility:hidden"></span><span class="fname">${item.name}</span><span class="fsize">${sz}</span>`;
+      el.onclick = () => { setSelectedLocal(item.rel); document.querySelectorAll('#local-tree .tree-item.active').forEach(x=>x.classList.remove('active')); el.classList.add('active'); };
+      container.appendChild(el);
+    }
+  }
+}
+
+function setSelectedLocal(rel) {
+  selectedLocalPath = rel;
+}
+
+function filterLocalTree(q) {
+  q=q.toLowerCase();
+  document.querySelectorAll('#local-tree .tree-item').forEach(el=>{
+    el.style.display=!q||el.querySelector('.fname').textContent.toLowerCase().includes(q)?'':'none';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DEPLOY / MAPPING SELECTION
+// ═══════════════════════════════════════════════════════════════
+function selectAndDeploy(name) {
+  document.getElementById('sel-mapping').value = name;
+  onMappingChange();
+  switchTab(document.querySelector('.tab[data-tab=deploy]'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelector('.tab[data-tab=deploy]').classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-deploy').classList.add('active');
+}
+
+async function onMappingChange() {
+  const name = document.getElementById('sel-mapping').value;
+  curMapping = mappings.find(m=>m.name===name) || null;
+  if (!curMapping) return;
+
+  // Set local path and load tree
+  selectedLocalPath = curMapping.local_path;
+  document.getElementById('local-breadcrumb').textContent = curMapping.local_path || '/';
+  document.getElementById('local-tree').innerHTML = '';
+  await loadLocalTree(curMapping.local_path);
+
+  // Load remote tree
+  remoteConn = curMapping.connection;
+  remotePath = '.';
+  document.getElementById('remote-breadcrumb').textContent = curMapping.remote_path || '/';
+  renderRemoteConnLabel();
+  await loadRemoteTree(curMapping.remote_path || '.');
+
+  // Reset diff
+  document.getElementById('diff-stats').style.display='none';
+  document.getElementById('diff-lines').textContent='选择 mapping 后点击「预览」查看变更';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  REMOTE FILE BROWSER (SFTP)
+// ═══════════════════════════════════════════════════════════════
+function renderRemoteConnLabel() {
+  const conn = connections.find(c=>c.name===remoteConn);
+  document.getElementById('remote-conn-label').textContent = conn ? `${conn.username}@${conn.host}` : '';
+}
+
+function renderRemoteBreadcrumb(path) {
+  const parts = path === '.' || path === '/' ? [] : path.trim('/').split('/');
+  const bar = document.getElementById('remote-breadcrumb-bar');
+  let html = `<span class="breadcrumb-root" onclick="remoteBrowse('')">/</span>`;
+  let acc = '';
+  for (const p of parts) {
+    acc += '/' + p;
+    html += `<span class="breadcrumb-sep">/</span><span onclick="remoteBrowse('${esc(acc)}')">${esc(p)}</span>`;
+  }
+  bar.innerHTML = html;
+}
+
+async function loadRemoteTree(path) {
+  if (!remoteConn) { toast('请先选择一个 mapping', 'err'); return; }
+  document.getElementById('remote-tree').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px"><span class="spinner"></span> 加载中…</div>';
+  try {
+    const res = await fetch(`/api/connections/${encodeURIComponent(remoteConn)}/sftp?path=${encodeURIComponent(path)}`);
+    if (!res.ok) {
+      const d = await res.json();
+      document.getElementById('remote-tree').innerHTML = `<div style="padding:16px;text-align:center;color:var(--red);font-size:12px">${esc(d.error||'加载失败')}</div>`;
+      return;
+    }
+    const data = await res.json();
+    const container = document.getElementById('remote-tree');
+    container.innerHTML = '';
+    renderRemoteBreadcrumb(path);
+
+    for (const item of data.items) {
+      const el = document.createElement('div');
+      const sz = item.size<1024?item.size+'B':item.size<1048576?(item.size/1024).toFixed(0)+'K':(item.size/1048576).toFixed(1)+'M';
+      if (item.type==='dir') {
+        el.className='tree-item dir';
+        el.innerHTML=`<span class="tree-toggle closed"></span><span class="fname">${item.name}/</span>`;
+        el.onclick = () => { remoteBrowse(item.path); };
+      } else {
+        el.className='tree-item';
+        el.innerHTML=`<span class="tree-toggle" style="visibility:hidden"></span><span class="fname">${item.name}</span><span class="fsize">${sz}</span>`;
+        el.onclick = () => { setSelectedRemote(item.path); document.querySelectorAll('#remote-tree .tree-item.active').forEach(x=>x.classList.remove('active')); el.classList.add('active'); };
+      }
+      container.appendChild(el);
+    }
+    if (!data.items.length) {
+      container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">空目录</div>';
+    }
+  } catch(e) {
+    document.getElementById('remote-tree').innerHTML = `<div style="padding:16px;color:var(--red);font-size:12px">${esc(e)}</div>`;
+  }
+}
+
+async function remoteBrowse(path) {
+  remotePath = path;
+  await loadRemoteTree(path);
+}
+
+function setSelectedRemote(path) {
+  // Can be used for remote path display
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RSYNC PREVIEW & SYNC
+// ═══════════════════════════════════════════════════════════════
+async function previewMapping() {
+  const name = document.getElementById('sel-mapping').value;
+  if (!name) { toast('请先选择 mapping', 'err'); return; }
+  setStatus('预览中…');
+  document.getElementById('diff-lines').textContent='加载中…';
+  document.getElementById('diff-stats').style.display='none';
+  try {
+    const r = await fetch(`/api/mappings/${encodeURIComponent(name)}/preview`, {method:'POST'});
+    const d = await r.json();
+    setStatus('Ready');
+    if (d.error) { toast(d.error, 'err'); return; }
+    document.getElementById('ds-add').textContent = d.added.length;
+    document.getElementById('ds-del').textContent = d.deleted.length;
+    document.getElementById('ds-mod').textContent = d.changed.length;
+    document.getElementById('diff-stats').style.display='flex';
+    const lines = [
+      ...d.added.map(l=>`<div class="d-add">+ ${esc(l)}</div>`),
+      ...d.deleted.map(l=>`<div class="d-del">- ${esc(l)}</div>`),
+      ...d.changed.map(l=>`<div class="d-mod">~ ${esc(l)}</div>`),
+    ];
+    document.getElementById('diff-lines').innerHTML = lines.length ? lines.join('') : '<div style="color:var(--green)">✓ 已同步 — 无变更</div>';
+  } catch(e) { setStatus('Ready'); toast(e, 'err'); }
+}
+
+async function syncMapping() {
+  const name = document.getElementById('sel-mapping').value;
+  const mirror = document.getElementById('chk-mirror').checked;
+  if (!name) { toast('请先选择 mapping', 'err'); return; }
+  const m = mappings.find(x=>x.name===name);
+  const c = connections.find(x=>x.name===m?.connection);
+  if (!confirm(`同步「${name}」→ ${c?.host||'?'} (${m?.remote_path})\n${mirror?'⚠ mirror 模式':''}`)) return;
+
+  setStatus('同步中…');
+  // Show dedicated sync output panel
+  const card = document.getElementById('sync-output-card');
+  const out = document.getElementById('sync-output');
+  document.getElementById('sync-output-title').textContent = `→ ${c?.host||name}`;
+  card.style.display='';
+  out.innerHTML = '';
+
+  try {
+    const r = await fetch(`/api/mappings/${encodeURIComponent(name)}/sync`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({delete:mirror}),
+    });
+    const d = await r.json();
+    if (!d.job_id) { toast(d.error||'失败', 'err'); setStatus('Ready'); return; }
+    streamSync(d.job_id, name);
+  } catch(e) { setStatus('Ready'); toast(e, 'err'); }
+}
+
+async function streamSync(jobId, mapName) {
+  const out = document.getElementById('sync-output');
+  out.innerHTML = '';
+  let lineCount = 0;
+
+  function add(cls, html) {
+    const div = document.createElement('div');
+    div.className = cls;
+    div.textContent = html;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  function addDivider() {
+    const hr = document.createElement('div');
+    hr.style.cssText = 'border-top:1px solid var(--border);margin:4px 0;color:var(--border)';
+    hr.textContent = '─ ─ ─';
+    out.appendChild(hr);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  try {
+    const es = new EventSource('/api/rsync-stream/' + jobId);
+    es.onmessage = function(e) {
+      var d;
+      try { d = JSON.parse(e.data); } catch(_er) { return; }
+      if (d.type === 'started') {
+        add('d-info', '\u27a4 rsync \u2192 ' + (d.host || ''));
+        add('d-info', 'local   ' + (d.local || ''));
+        add('d-info', 'remote  ' + (d.remote || ''));
+        if (d.delete) add('d-err', 'WARNING: --delete mirror mode enabled');
+        addDivider();
+      } else if (d.type === 'line') {
+        var line = d.line || '';
+        var cls = 'd-info';
+        if (d.cls === 'add') cls = 'd-add';
+        else if (d.cls === 'del') cls = 'd-del';
+        else if (d.cls === 'err') cls = 'd-err';
+        add(cls, line);
+        lineCount++;
+      } else if (d.type === 'done') {
+        es.close();
+        setStatus('Ready');
+        addDivider();
+        if (d.stats) {
+          if (d.stats.sent)   add('d-info', 'sent      ' + d.stats.sent);
+          if (d.stats.received) add('d-info', 'received  ' + d.stats.received);
+          if (d.stats.speed)   add('d-info', 'speed     ' + d.stats.speed);
+        }
+        if (d.duration) add('d-info', 'duration  ' + d.duration);
+        if (d.rc === 0) {
+          add('d-info', '\u2713 \u540c\u6b65\u5b8c\u6210  (\u516c  ' + lineCount + ' \u884c\u65e5\u5fd7)');
+          toast('\u2713 \u540c\u6b65\u5b8c\u6210', 'ok');
+        } else {
+          add('d-err', '\u2717 exit ' + d.rc);
+          toast('\u2717 exit ' + d.rc, 'err');
+        }
+      } else if (d.type === 'error') {
+        add('d-err', '\u26a0 ' + (d.msg || ''));
+        es.close();
+        setStatus('Ready');
+      }
+    };
+    es.onerror = function() { es.close(); setStatus('Ready'); };
+  } catch(e) {
+    add('d-err', '\u26a0 \u8fde\u63a5\u9519\u8bef: ' + String(e));
+    setStatus('Ready');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UPLOAD QUEUE
+// ═══════════════════════════════════════════════════════════════
+function addFiles(files) {
+  for (const f of files) queue.push({id:Math.random().toString(36).slice(2),name:f.name,size:f.size,file:f,state:'queued'});
+  renderQueue(); updateBtn();
+}
+function removeQueue(id) { queue=queue.filter(q=>q.id!==id); renderQueue(); updateBtn(); }
+function renderQueue() {
+  const el=document.getElementById('queue');
+  const empty=document.getElementById('q-empty');
+  if (!queue.length) { empty.style.display=''; el.innerHTML=''; return; }
+  empty.style.display='none';
+  document.getElementById('stat-q').textContent=queue.filter(q=>q.state==='queued').length;
+  el.innerHTML = queue.map(q => {
+    const sz = q.size<1024?q.size+'B':q.size<1048576?(q.size/1024).toFixed(1)+'K':(q.size/1048576).toFixed(1)+'M';
+    return `<div class="q-item">
+      <div class="q-icon">📄</div>
+      <div class="q-info">
+        <div class="q-name" title="${esc(q.name)}">${esc(q.name)}</div>
+        <div class="q-size">${sz}</div>
+        ${q.state==='rsync'&&q.pct!==undefined?`<div class="q-bar"><div class="q-bar-fill" style="width:${q.pct}%"></div></div>`:''}
+      </div>
+      <div class="q-status ${q.state}">${stateLabel(q)}</div>
+      ${q.state==='queued'?`<button class="q-remove" onclick="removeQueue('${q.id}')">✕</button>`:''}
+    </div>`;
+  }).join('');
+}
+function updateBtn() {
+  const pending = queue.filter(q=>q.state==='queued').length;
+  document.getElementById('btn-upload').disabled = !pending;
+  document.getElementById('btn-text').textContent = pending ? `上传 ${pending} 个文件` : '准备就绪';
+}
+function stateLabel(q) {
+  if(q.state==='queued')return'排队';
+  if(q.state==='uploading')return'上传中';
+  if(q.state==='rsync')return q.pct!==undefined?`同步 ${q.pct}%`:'同步中';
+  if(q.state==='done')return'完成 ✓';
+  if(q.state==='err')return'失败 ✗';
+  return q.state;
+}
+
+const dz = document.getElementById('dropzone'), di = document.getElementById('file-input');
+di.addEventListener('change',()=>{addFiles(di.files);di.value='';});
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');addFiles(e.dataTransfer.files);});
+
+async function doUpload() {
+  const pending = queue.filter(q=>q.state==='queued');
+  if (!pending.length) return;
+  const name = document.getElementById('sel-mapping').value;
+  const mirror = document.getElementById('chk-mirror').checked;
+  if (!name) { toast('请先选择 mapping', 'err'); return; }
+  setStatus('上传中…');
+
+  // Show sync-output panel for upload progress
+  const out = document.getElementById('sync-output');
+  const card = document.getElementById('sync-output-card');
+  out.innerHTML = '';
+  card.style.display = '';
+  document.getElementById('sync-output-title').textContent = '\u2191 \u4e0a\u4f20 ' + name;
+  out.innerHTML = '<div class="d-info">\u4e0a\u4f20 ' + pending.length + ' \u4e2a\u6587\u4ef6\u5230 ' + name + ' ...</div>';
+
+  const jobIds = [];
+  for (const q of pending) {
+    q.state = 'uploading'; renderQueue();
+    const fd = new FormData();
+    fd.append('files', q.file);
+    fd.append('mapping_name', name);
+    if (mirror) fd.append('delete', 'true');
+    try {
+      const r = await fetch('/api/upload-sync', {method:'POST', body:fd});
+      const d = await r.json();
+      if (d.job_id) {
+        q.state = 'rsync'; q.pct = 0; renderQueue();
+        jobIds.push({q: q, jobId: d.job_id});
+        // Stream this job into the shared sync-output panel
+        streamUploadJob(out, q, d.job_id);
+      } else {
+        q.state = 'err'; renderQueue();
+        out.innerHTML += '<div class="d-err">\u6587\u4ef6 ' + esc(q.name) + ': ' + esc(d.error || 'upload failed') + '</div>';
+      }
+    } catch(e) {
+      q.state = 'err'; renderQueue();
+      out.innerHTML += '<div class="d-err">\u6587\u4ef6 ' + esc(q.name) + ': ' + esc(String(e)) + '</div>';
+    }
+  }
+  // Wait for all jobs then finalise
+  function waitForJobs() {
+    if (jobIds.every(j => j.q.state === 'done' || j.q.state === 'err')) {
+      updateBtn(); setStatus('Ready');
+      const ok = jobIds.filter(j => j.q.state === 'done').length;
+      const bad = jobIds.length - ok;
+      if (bad === 0) toast('\u2713 ' + ok + ' \u4e2a\u6587\u4ef6\u540c\u6b65\u5b8c\u6210', 'ok');
+      else toast('\u2717 ' + ok + '\u6210\u529f\uff0c' + bad + '\u5931\u8d25', 'err');
+    } else {
+      setTimeout(waitForJobs, 500);
+    }
+  }
+  waitForJobs();
+}
+
+async function streamUploadJob(out, q, jobId) {
+  let lineCount = 0;
+  try {
+    const es = new EventSource('/api/rsync-stream/' + jobId);
+    es.onmessage = function(e) {
+      var d;
+      try { d = JSON.parse(e.data); } catch(_e) { return; }
+      if (d.type === 'started') {
+        // Already shown header in doUpload
+      } else if (d.type === 'line') {
+        var line = d.line || '';
+        var cls = 'd-info';
+        if (d.cls === 'add') cls = 'd-add';
+        else if (d.cls === 'del') cls = 'd-del';
+        else if (d.cls === 'err') cls = 'd-err';
+        var div = document.createElement('div');
+        div.className = cls;
+        div.textContent = '\u251c ' + line;
+        out.appendChild(div);
+        out.scrollTop = out.scrollHeight;
+        lineCount++;
+        // Progress from rsync percent
+        var m = line.match(/(\d+)%/);
+        if (m) { q.pct = parseInt(m[1]); renderQueue(); }
+      } else if (d.type === 'done') {
+        es.close();
+        if (d.stats) {
+          if (d.stats.sent)     { var div = document.createElement('div'); div.className = 'd-info'; div.textContent = '  sent      ' + d.stats.sent; out.appendChild(div); }
+          if (d.stats.received) { var div = document.createElement('div'); div.className = 'd-info'; div.textContent = '  received  ' + d.stats.received; out.appendChild(div); }
+          if (d.stats.speed)    { var div = document.createElement('div'); div.className = 'd-info'; div.textContent = '  speed     ' + d.stats.speed; out.appendChild(div); }
+        }
+        if (d.duration) { var div = document.createElement('div'); div.className = 'd-info'; div.textContent = '  duration  ' + d.duration; out.appendChild(div); }
+        var div = document.createElement('div');
+        div.className = d.rc === 0 ? 'd-info' : 'd-err';
+        div.style.cssText = 'font-weight:600';
+        div.textContent = d.rc === 0 ? ('\u2713 ' + q.name + ' \u540c\u6b65\u5b8c\u6210') : ('\u2717 ' + q.name + ' exit ' + d.rc);
+        out.appendChild(div);
+        out.scrollTop = out.scrollHeight;
+        q.state = d.rc === 0 ? 'done' : 'err';
+        renderQueue();
+      } else if (d.type === 'error') {
+        var div = document.createElement('div');
+        div.className = 'd-err';
+        div.textContent = '\u26a0 ' + (d.msg || '');
+        out.appendChild(div);
+        out.scrollTop = out.scrollHeight;
+        es.close();
+        q.state = 'err'; renderQueue();
+      }
+    };
+    es.onerror = function() { es.close(); q.state = 'err'; renderQueue(); };
+  } catch(e) {
+    var div = document.createElement('div');
+    div.className = 'd-err';
+    div.textContent = '\u26a0 connection error: ' + String(e);
+    out.appendChild(div);
+    q.state = 'err'; renderQueue();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SHELL
+// ═══════════════════════════════════════════════════════════════
+async function runShell() {
+  const cmd = document.getElementById('shell-input').value.trim();
+  if (!cmd) return;
+  const out = document.getElementById('shell-output');
+  out.style.display='block';
+  out.innerHTML = `<span class="prompt">$ ${esc(cmd)}</span>\n`;
+  setStatus('Shell…');
+  try {
+    const r = await fetch('/api/shell', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cmd, cwd:LOCAL})});
+    const d = await r.json();
+    setStatus('Ready');
+    if (d.rc!==0) out.innerHTML += `<span class="err">exit ${d.rc}\n</span>`;
+    out.innerHTML += esc(d.stdout+d.stderr);
+    out.scrollTop = out.scrollHeight;
+  } catch(e) { setStatus('Ready'); out.innerHTML += esc(String(e)); }
+}
+function clearShell() { document.getElementById('shell-input').value=''; document.getElementById('shell-output').style.display='none'; }
+
+// ═══════════════════════════════════════════════════════════════
+//  TOAST / STATUS
+// ═══════════════════════════════════════════════════════════════
+function toast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent=msg; t.className='show '+(type==='ok'?'ok':type==='err'?'err':'');
+  setTimeout(()=>t.className='', 3500);
+}
+function setStatus(txt) {
+  document.getElementById('stat-uptime').textContent = txt;
+}
+
+function esc(s) { return s?.replace?.(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') || ''; }
+
+// ═══════════════════════════════════════════════════════════════
+//  SETTINGS / CONFIG
+// ═══════════════════════════════════════════════════════════════
+function openSettings() { document.getElementById('settings-modal').classList.add('show'); }
+function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
+function reloadConfig() { loadConfig(); closeSettings(); toast('配置已重新加载', 'ok'); }
+function exportConfig() {
+  const blob = new Blob([JSON.stringify(config, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='dashboard-config.json'; a.click();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SHELL — WebSocket PTY sessions
+// ═══════════════════════════════════════════════════════════════
+let shellSio = null;
+let shellSessions = {};   // session_id → { term, screenDiv }
+let activeShellId = null;
+let shellMenuOpen = false;
+
+// ── Socket.IO init ───────────────────────────────────────────────────────────
+function initShellSio() {
+  if (shellSio) return;
+  shellSio = io("/", { transports: ["websocket", "polling"] });
+
+  shellSio.on("connect", () => {
+    document.getElementById('shell-status').textContent = '●';
+    document.getElementById('shell-status').style.color = 'var(--green)';
+  });
+  shellSio.on("disconnect", () => {
+    document.getElementById('shell-status').textContent = '○';
+    document.getElementById('shell-status').style.color = 'var(--text3)';
+  });
+  shellSio.on("shell_output", ({ session_id, data }) => {
+    const s = shellSessions[session_id];
+    if (s && s.term) s.term.write(data);
+  });
+  shellSio.on("shell_closed", ({ session_id }) => {
+    if (shellSessions[session_id]) {
+      const s = shellSessions[session_id];
+      if (s.term) { s.term.write("\r\n\x1b[33m[disconnected]\x1b[0m\r\n"); }
+      setTimeout(()=>closeShellTab(session_id), 3000);
+    }
+  });
+  shellSio.on("shell_created", ({ session }) => {
+    addShellTab(session);
+    activateShell(session.session_id);
+  });
+  shellSio.on("shell_list", (list) => {
+    renderShellTabs(list);
+  });
+  shellSio.on("shell_error", ({ error }) => {
+    toast("Shell 错误: " + error, "err");
+  });
+}
+
+// ── Create shell ─────────────────────────────────────────────────────────────
+async function createShell(type) {
+  toggleShellMenu(false);
+  if (!shellSio) initShellSio();
+
+  if (type === 'ssh') {
+    // Show SSH target picker
+    const conns = connections || [];
+    if (!conns.length) { toast("请先添加 SSH 连接", "err"); return; }
+    const connName = conns[0].name; // auto-select first
+    const label = prompt("终端标签（可选）:", `ssh:${conns[0].host}`);
+    shellSio.emit("shell_create", { type: "ssh", connection: connName, label: label || "" });
+  } else {
+    const label = prompt("终端标签（可选）:", "local:zsh");
+    shellSio.emit("shell_create", { type: "local", label: label || "" });
+  }
+}
+
+// ── Tab management ────────────────────────────────────────────────────────────
+function addShellTab(session) {
+  if (shellSessions[session.session_id]) return;
+  const screenDiv = document.createElement("div");
+  screenDiv.style.cssText = "flex:1;min-height:0;display:none;padding:4px";
+  document.getElementById('shell-workspace').appendChild(screenDiv);
+
+  const term = new Terminal({
+    cursorBlink: true,
+    theme: { background: "#0d1117", foreground: "#e6edf3", cursor: "#58a6ff" },
+    fontFamily: "'Cascadia Code','Fira Code',monospace",
+    fontSize: 13,
+    lineHeight: 1.4,
+    scrollback: 5000,
+    allowTransparency: true,
+  });
+  term.open(screenDiv);
+  term.onData(data => {
+    if (shellSio && activeShellId) {
+      shellSio.emit("shell_input", { session_id: activeShellId, data });
+    }
+  });
+  term.onResize(({ cols, rows }) => {
+    if (shellSio && activeShellId) {
+      shellSio.emit("shell_resize", { session_id: activeShellId, rows, cols });
+    }
+  });
+
+  shellSessions[session.session_id] = { term, screenDiv, session };
+  renderAllShellTabs();
+}
+
+function activateShell(sessionId) {
+  // Hide all
+  Object.values(shellSessions).forEach(s => { s.screenDiv.style.display = 'none'; });
+  document.querySelectorAll('.shell-tab').forEach(t => t.classList.remove('active'));
+
+  if (!sessionId || !shellSessions[sessionId]) {
+    document.getElementById('shell-empty').style.display = '';
+    document.getElementById('shell-workspace').style.display = 'none';
+    activeShellId = null;
+    return;
+  }
+
+  document.getElementById('shell-empty').style.display = 'none';
+  document.getElementById('shell-workspace').style.display = '';
+  shellSessions[sessionId].screenDiv.style.display = '';
+  activeShellId = sessionId;
+
+  document.querySelectorAll('.shell-tab').forEach(t => {
+    if (t.dataset.sid === sessionId) t.classList.add('active');
+  });
+
+  // Resize to fill
+  setTimeout(() => {
+    if (shellSessions[sessionId]?.term) {
+      shellSessions[sessionId].term.fitAddon?.fit();
+      shellSessions[sessionId].term.scrollToBottom();
+    }
+  }, 50);
+}
+
+function closeShellTab(sessionId) {
+  if (shellSio) shellSio.emit("shell_close", { session_id: sessionId });
+  const s = shellSessions[sessionId];
+  if (s) {
+    try { s.term.dispose(); } catch(e) {}
+    s.screenDiv.remove();
+    delete shellSessions[sessionId];
+  }
+  if (activeShellId === sessionId) {
+    const remaining = Object.keys(shellSessions)[0];
+    activateShell(remaining || null);
+  }
+  renderAllShellTabs();
+}
+
+function renderShellTabs(list) {
+  // list may not contain all info — merge with local state
+  const ids = Object.keys(shellSessions);
+  document.getElementById('shell-tabs').innerHTML = ids.map(id => {
+    const s = shellSessions[id];
+    if (!s) return '';
+    const isActive = id === activeShellId;
+    const ttype = s.session.session_type === 'ssh' ? 'SSH' : 'LCL';
+    return `<div class="shell-tab${isActive?' active':''}" data-sid="${id}" onclick="activateShell('${id}')">
+      <span class="ttype">${ttype}</span>
+      <span class="tlabel">${esc(s.session.label||id)}</span>
+      <span class="tclose" onclick="event.stopPropagation();closeShellTab('${id}')">✕</span>
+    </div>`;
+  }).join('');
+  renderAllShellTabs();
+}
+
+function renderAllShellTabs() {
+  renderShellTabs(Object.values(shellSessions).map(s => s.session));
+}
+
+// ── Toolbar actions ─────────────────────────────────────────────────────────────
+function toggleShellMenu(show) {
+  shellMenuOpen = show !== undefined ? show : !shellMenuOpen;
+  document.getElementById('shell-new-dropdown').classList.toggle('show', shellMenuOpen);
+}
+
+// Close menu on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.shell-new-menu')) toggleShellMenu(false);
+});
+
+// ── Init: connect to socket.io on load ───────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  initShellSio();
+  // Auto-create one local shell on first load
+  // createShell('local'); // disabled by default — let user choose
+}, { once: true });
+</script>
+</body>
+</html>

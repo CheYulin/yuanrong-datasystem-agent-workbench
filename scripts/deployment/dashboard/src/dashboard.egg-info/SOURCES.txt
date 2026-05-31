@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+src/dashboard/__init__.py
+src/dashboard/__main__.py
+src/dashboard/app.py
+src/dashboard.egg-info/PKG-INFO
+src/dashboard.egg-info/SOURCES.txt
+src/dashboard.egg-info/dependency_links.txt
+src/dashboard.egg-info/entry_points.txt
+src/dashboard.egg-info/requires.txt
+src/dashboard.egg-info/top_level.txt
+tests/test_rsync.py

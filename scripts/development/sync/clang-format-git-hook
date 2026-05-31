@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: clang-format C++ files then auto-stage formatted versions.
+#
+# Install:
+#   cd yuanrong-datasystem
+#   bash ../yuanrong-datasystem-agent-workbench/scripts/development/sync/clang-format-git-hook --install
+#
+# Uninstall:
+#   bash ../yuanrong-datasystem-agent-workbench/scripts/development/sync/clang-format-git-hook --uninstall
+
+set -euo pipefail
+
+CLANG_FORMAT_BIN="${CLANG_FORMAT_BIN:-/home/t14s/.cursor-server/bin/lib/node_modules/clang-format/bin/linux_x64/clang-format}"
+HOOK_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+INSTALL_TARGET=""
+
+usage() {
+  cat <<'EOF'
+Usage: clang-format-git-hook [options]
+
+A git pre-commit hook that auto-formats staged C++ files with clang-format
+and re-stages the formatted versions.
+
+Options:
+  --install   Install this hook into .git/hooks/pre-commit
+  --uninstall  Remove the installed pre-commit hook
+  -h, --help   Show this help
+
+Install example:
+  cd yuanrong-datasystem
+  bash ../yuanrong-datasystem-agent-workbench/scripts/development/sync/clang-format-git-hook --install
+EOF
+}
+
+install_hook() {
+  local target_repo="$1"
+  local hook_dir="${target_repo}/.git/hooks"
+  local target_hook="${hook_dir}/pre-commit"
+
+  if [[ ! -d "$hook_dir" ]]; then
+    echo "Error: not a git repo: $target_repo" >&2
+    exit 1
+  fi
+
+  mkdir -p "$hook_dir"
+
+  # Backup existing hook
+  if [[ -f "$target_hook" && ! -L "$target_hook" ]]; then
+    cp "$target_hook" "${target_hook}.local.bak"
+    echo "Backed up existing hook -> ${target_hook}.local.bak"
+  fi
+
+  ln -sf "$HOOK_SOURCE" "$target_hook"
+  echo "Installed pre-commit hook -> $target_hook"
+}
+
+uninstall_hook() {
+  local target_repo="$1"
+  local target_hook="${target_repo}/.git/hooks/pre-commit"
+
+  if [[ -L "$target_hook" ]]; then
+    rm "$target_hook"
+    echo "Removed pre-commit hook from $target_hook"
+  else
+    echo "No hook installed at $target_hook (or is not a symlink)"
+  fi
+}
+
+# Detect target repo: the repo containing the .git dir closest to this script
+DETECT_REPO() {
+  local dir="$(dirname "$HOOK_SOURCE")"
+  while [[ "$dir" != "/" && "$dir" != "" ]]; do
+    if [[ -d "$dir/.git" ]]; then
+      echo "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+TARGET_REPO=""
+ACTION=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --install)    ACTION="install" ;;
+    --uninstall) ACTION="uninstall" ;;
+    -h|--help)   usage; exit 0 ;;
+    *)           echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [[ -n "$ACTION" ]]; then
+  if [[ -n "${TARGET_REPO:-}" ]]; then
+    REPO="$TARGET_REPO"
+  else
+    REPO="$(DETECT_REPO)" || {
+      echo "Cannot detect git repo. Run from inside a git checkout, or set TARGET_REPO." >&2
+      exit 1
+    }
+  fi
+
+  if [[ "$ACTION" == "install" ]]; then
+    install_hook "$REPO"
+    exit 0
+  else
+    uninstall_hook "$REPO"
+    exit 0
+  fi
+fi
+
+# ── Pre-commit hook logic ──────────────────────────────────────────────────
+
+# Find .clang-format starting from git root
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "Not a git repo" >&2
+  exit 0
+}
+
+find_clang_format() {
+  local dir="$1"
+  while [[ "$dir" != "/" && "$dir" != "" ]]; do
+    if [[ -f "$dir/.clang-format" ]]; then
+      echo "$dir/.clang-format"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+CLANG_FMT_CFG=$(find_clang_format "$GIT_ROOT") || {
+  echo "No .clang-format found in $GIT_ROOT" >&2
+  exit 0
+}
+
+if [[ ! -x "$CLANG_FORMAT_BIN" ]]; then
+  echo "clang-format binary not found at $CLANG_FORMAT_BIN (set CLANG_FORMAT_BIN env var)" >&2
+  exit 0
+fi
+
+# Get list of staged C/C++ files
+STAGED_CPP=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(h|hpp|cpp|cc)$') || true
+
+if [[ -z "$STAGED_CPP" ]]; then
+  exit 0
+fi
+
+formatted=0
+while IFS= read -r file; do
+  [[ -z "$file" ]] && continue
+
+  full_path="$GIT_ROOT/$file"
+  if [[ ! -f "$full_path" ]]; then
+    continue
+  fi
+
+  original=$(cat "$full_path")
+  formatted_out=$("$CLANG_FORMAT_BIN" --style=file:"$CLANG_FMT_CFG" "$full_path" 2>/dev/null) || continue
+
+  if [[ "$original" != "$formatted_out" ]]; then
+    printf '%s' "$formatted_out" > "$full_path"
+    git add "$file"
+    echo "[clang-format] formatted and re-staged: $file"
+    ((formatted++))
+  fi
+done <<< "$STAGED_CPP"
+
+if (( formatted > 0 )); then
+  echo
+  echo "[clang-format] $formatted file(s) were auto-formatted and re-staged."
+  echo "              Review the changes with: git diff --cached"
+fi

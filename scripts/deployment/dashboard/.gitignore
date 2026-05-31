@@ -1,0 +1,24 @@
+# Operational / machine-specific
+dashboard.log
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+src/__pycache__/
+src/dashboard/__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Config (contains user-specific data)
+# Uncomment to ignore the local YAML config (each machine should have its own):
+# dashboard.yaml

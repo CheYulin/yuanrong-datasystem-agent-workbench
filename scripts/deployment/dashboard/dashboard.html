@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yche.me · 部署面板</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg:        #f5f7fa;
+    --card:      #ffffff;
+    --border:    #d0d7de;
+    --accent:    #2563eb;
+    --accent-h:  #0969da;
+    --green:     #166534;
+    --green-bg:  #dcfce7;
+    --red:       #c03030;
+    --red-bg:    #fee2e2;
+    --yellow:    #9a6700;
+    --yellow-bg: #fef9c3;
+    --text:      #333;
+    --text2:     #656d76;
+    --text3:     #aaa;
+    --radius:    8px;
+    --shadow:    0 1px 3px rgba(0,0,0,.08);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,.10);
+    --font:      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --mono:      'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 0 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 58px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header .logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    text-decoration: none;
+    letter-spacing: -0.5px;
+  }
+  header .sep { color: var(--border); }
+  header .subtitle { color: var(--text2); font-size: 14px; }
+  header .spacer { flex: 1; }
+  header .chip {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  header .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  header .chip a { color: inherit; text-decoration: none; }
+  header .chip a:hover { color: var(--accent); }
+
+  /* ── Container ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 28px 40px 60px; }
+
+  /* ── Section / Card ── */
+  .section {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+  }
+  .section h2 {
+    font-size: 15px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+  }
+  .section h2 .icon { font-size: 17px; }
+
+  /* ── Grid ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* ── Stat cards ── */
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .stat-card .label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .stat-card .value { font-size: 22px; font-weight: 700; color: var(--text); }
+  .stat-card .sub { font-size: 11px; color: var(--text3); margin-top: 3px; }
+  .stat-card.green .value { color: var(--green); }
+  .stat-card.red .value { color: var(--red); }
+  .stat-card.blue .value { color: var(--accent); }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all .15s;
+    font-family: var(--font);
+  }
+  .btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); text-decoration: none; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: var(--accent-h); border-color: var(--accent-h); }
+  .btn.success { background: var(--green-bg); color: var(--green); border-color: rgba(22,101,52,.2); }
+  .btn.success:hover { background: #bbf7d0; }
+  .btn.danger { background: var(--red-bg); color: var(--red); border-color: rgba(192,48,48,.2); }
+  .btn.danger:hover { background: #fecaca; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn:disabled:hover { background: var(--card); color: var(--text); border-color: var(--border); }
+  .btn.full { width: 100%; justify-content: center; }
+  .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ── Tags / Badges ── */
+  .tag {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .tag-new { background: var(--green-bg); color: var(--green); }
+  .tag-ok  { background: var(--green-bg); color: var(--green); }
+  .tag-warn{ background: var(--yellow-bg); color: var(--yellow); }
+  .tag-err { background: var(--red-bg); color: var(--red); }
+
+  /* ── Form elements ── */
+  .form-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-row label { font-size: 13px; color: var(--text2); white-space: nowrap; }
+  .form-row select, .form-row input[type="text"] {
+    flex: 1;
+    min-width: 180px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    background: var(--card);
+    color: var(--text);
+    outline: none;
+    font-family: var(--font);
+  }
+  .form-row select:focus, .form-row input:focus { border-color: var(--accent); }
+
+  /* ── Toggle ── */
+  .toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); cursor: pointer; }
+  .toggle { position: relative; width: 34px; height: 20px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 14px; width: 14px;
+    left: 3px; bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: .2s;
+  }
+  .toggle input:checked + .toggle-slider { background: rgba(22,101,52,.25); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(14px); background: var(--green); }
+
+  /* ── Upload drop zone ── */
+  #dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    background: var(--bg);
+    margin-bottom: 14px;
+  }
+  #dropzone:hover, #dropzone.dragover {
+    border-color: var(--accent);
+    background: rgba(37,99,235,.04);
+  }
+  #dropzone.dragover { transform: scale(1.01); }
+  .drop-icon { font-size: 36px; margin-bottom: 10px; }
+  .drop-title { font-size: 15px; font-weight: 600; margin-bottom: 5px; }
+  .drop-sub { font-size: 12px; color: var(--text2); }
+  .drop-sub a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  #file-input { display: none; }
+
+  /* ── Upload queue ── */
+  #queue { margin-bottom: 14px; }
+  .q-empty { text-align: center; padding: 20px; color: var(--text3); font-size: 13px; }
+  .q-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 6px;
+    background: var(--card);
+    animation: slideIn .2s ease;
+  }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-4px); } }
+  .q-icon { font-size: 18px; flex-shrink: 0; }
+  .q-info { flex: 1; min-width: 0; }
+  .q-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q-size { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .q-bar { height: 3px; background: #eee; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .q-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #22c55e); border-radius: 2px; transition: width .3s; }
+  .q-status { font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .q-status.queued { color: var(--text2); }
+  .q-status.uploading { color: var(--accent); }
+  .q-status.rsync { color: var(--yellow); }
+  .q-status.done { color: var(--green); }
+  .q-status.err { color: var(--red); }
+  .q-remove { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 2px; }
+  .q-remove:hover { color: var(--red); }
+
+  /* ── File tree ── */
+  #file-tree { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+  .tree-item {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background .1s, border-color .1s;
+    white-space: nowrap;
+  }
+  .tree-item:hover { background: #f6f8fa; }
+  .tree-item.active { background: rgba(37,99,235,.07); border-left-color: var(--accent); }
+  .tree-item.dir { color: var(--green); }
+  .tree-toggle { color: var(--text3); font-size: 10px; width: 14px; text-align: center; flex-shrink: 0; }
+  .tree-toggle.open::before { content: '▾'; }
+  .tree-toggle.closed::before { content: '▸'; }
+  .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .fsize { font-size: 10px; color: var(--text3); flex-shrink: 0; }
+  .tree-children { display: none; }
+  .tree-item.open + .tree-children { display: block; }
+  .tree-search { padding: 8px 10px; border-bottom: 1px solid var(--border); background: #f6f8fa; }
+  .tree-search input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; background: var(--card); color: var(--text); outline: none; }
+  .tree-search input:focus { border-color: var(--accent); }
+
+  /* ── Diff ── */
+  .diff-stats { display: flex; gap: 12px; padding: 10px 14px; background: var(--bg); border-radius: var(--radius); margin-bottom: 10px; }
+  .diff-stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+  .diff-stat .n { font-size: 20px; font-weight: 700; }
+  .diff-stat .l { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
+  .diff-stat.add .n { color: var(--green); }
+  .diff-stat.del .n { color: var(--red); }
+  .diff-stat.mod .n { color: var(--yellow); }
+  .diff-lines {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text2);
+  }
+  .d-add { color: var(--green); }
+  .d-del { color: var(--red); }
+  .d-mod { color: var(--yellow); }
+  .d-info { color: var(--text3); }
+
+  /* ── Repo cards ── */
+  .repo-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow);
+  }
+  .repo-card-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px; font-weight: 600;
+  }
+  .repo-card-body { padding: 10px 14px; background: var(--card); }
+  .repo-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; }
+  .repo-row .lbl { color: var(--text2); }
+  .repo-row .val { color: var(--text); font-weight: 500; font-family: var(--mono); font-size: 11px; }
+  .repo-card-foot { padding: 8px 14px; border-top: 1px solid var(--border); background: var(--bg); display: flex; gap: 8px; }
+
+  /* ── Shell ── */
+  #shell-input { width: 100%; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-family: var(--mono); font-size: 12px; background: var(--card); color: var(--text); outline: none; resize: none; }
+  #shell-input:focus { border-color: var(--accent); }
+  #shell-output { display: none; margin-top: 8px; padding: 10px 12px; background: #0d1117; color: #e6edf3; border-radius: var(--radius); font-family: var(--mono); font-size: 11px; line-height: 1.6; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+  #shell-output .prompt { color: #58a6ff; }
+  #shell-output .err { color: #f85149; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 10px 18px; border-radius: var(--radius);
+    font-size: 13px; font-weight: 500; z-index: 9999;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text); opacity: 0; transition: opacity .3s, transform .3s;
+    transform: translateY(10px); pointer-events: none;
+    box-shadow: var(--shadow-lg);
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.ok  { border-color: rgba(22,101,52,.4); color: var(--green); }
+  #toast.err { border-color: rgba(192,48,48,.4); color: var(--red); }
+
+  /* ── Spinner ── */
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: rot .7s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <a href="/" class="logo">yche.me</a>
+  <span class="sep">/</span>
+  <span class="subtitle">部署面板</span>
+  <div class="spacer"></div>
+  <div class="chip"><div class="dot"></div><span>API Server</span></div>
+  <div class="chip">📁 {{ base_dir }}</div>
+</header>
+
+<!-- ── Main ── -->
+<div class="container">
+
+  <!-- Stat row -->
+  <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; margin-bottom:20px">
+    <div class="stat-card green">
+      <div class="label">Upload Queue</div>
+      <div class="value" id="stat-queue">0</div>
+      <div class="sub">files pending</div>
+    </div>
+    <div class="stat-card blue">
+      <div class="label">Selected Dir</div>
+      <div class="value" id="stat-dir" style="font-size:14px">—</div>
+      <div class="sub">for rsync</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Sync Status</div>
+      <div class="value" id="stat-sync" style="font-size:16px">Ready</div>
+      <div class="sub" id="stat-sync-sub">idle</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Uptime</div>
+      <div class="value" id="stat-uptime" style="font-size:16px">—</div>
+      <div class="sub" id="stat-uptime-sub">loading…</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+
+    <!-- Left column -->
+    <div>
+
+      <!-- Upload & Sync -->
+      <div class="section">
+        <h2><span class="icon">📤</span> 上传 &amp; 同步</h2>
+
+        <div id="dropzone" onclick="document.getElementById('file-input').click()">
+          <div class="drop-icon">⬆</div>
+          <div class="drop-title">拖拽文件到此处</div>
+          <div class="drop-sub">或 <a>浏览文件</a> · 支持多文件</div>
+        </div>
+        <input type="file" id="file-input" multiple />
+
+        <div class="form-row">
+          <label>目标目录</label>
+          <select id="target-select">
+            <option value=".">根目录 (全部仓库)</option>
+            <option value="yuanrong-datasystem">yuanrong-datasystem</option>
+            <option value="yuanrong-datasystem-agent-workbench">workbench</option>
+          </select>
+          <label class="toggle-row">
+            <span class="toggle"><input type="checkbox" id="mirror-toggle" /><span class="toggle-slider"></span></span>
+            mirror
+          </label>
+        </div>
+
+        <div id="queue">
+          <div class="q-empty" id="q-empty">暂无排队文件</div>
+        </div>
+
+        <button class="btn primary full" id="btn-upload" onclick="doUpload()" disabled>
+          <span id="btn-icon">⬆</span>
+          <span id="btn-text">选择或拖拽文件开始上传</span>
+        </button>
+      </div>
+
+      <!-- File Browser -->
+      <div class="section">
+        <h2><span class="icon">📁</span> 文件浏览器</h2>
+        <div id="file-tree">
+          <div class="tree-search">
+            <input type="text" id="search-input" placeholder="搜索文件…" oninput="filterTree(this.value)" />
+          </div>
+          <div id="tree-root"></div>
+        </div>
+        <div class="btn-group" style="margin-top:12px">
+          <button class="btn" onclick="loadTree('')">↻ 刷新</button>
+          <button class="btn success" id="btn-preview" onclick="runDiff()" disabled>🔍 预览变更</button>
+          <button class="btn primary" id="btn-sync" onclick="runSync()" disabled>🚀 同步到远端</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right column -->
+    <div>
+
+      <!-- Deploy Status -->
+      <div class="section">
+        <h2><span class="icon">🚀</span> 仓库部署状态 <span style="margin-left:auto;font-size:11px;font-weight:400;color:var(--text2)"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="refreshStatus()">↻ 刷新</button></span></h2>
+        <div id="repo-cards"></div>
+      </div>
+
+      <!-- Rsync Preview -->
+      <div class="section">
+        <h2><span class="icon">⚡</span> Rsync 变更预览</h2>
+        <div id="diff-stats" class="diff-stats" style="display:none">
+          <div class="diff-stat add"><div class="n" id="ds-add">0</div><div class="l">新增</div></div>
+          <div class="diff-stat del"><div class="n" id="ds-del">0</div><div class="l">删除</div></div>
+          <div class="diff-stat mod"><div class="n" id="ds-mod">0</div><div class="l">变更</div></div>
+        </div>
+        <div id="diff-lines" class="diff-lines">在左侧选择目录后点击「预览变更」</div>
+      </div>
+
+      <!-- Shell -->
+      <div class="section">
+        <h2><span class="icon">💻</span> Shell</h2>
+        <textarea id="shell-input" rows="3" placeholder="输入命令，Ctrl+Enter 执行…" onkeydown="if(event.ctrlKey&&event.key==='Enter')runShell()"></textarea>
+        <div id="shell-output"></div>
+        <div class="btn-group" style="margin-top:10px">
+          <button class="btn primary" onclick="runShell()">▶ 执行</button>
+          <button class="btn" onclick="clearShell()">清空</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+const BASE      = window.location.origin;
+const HOST      = "{{ remote_host }}";
+const API_BASE  = window.location.origin;
+
+// ── Uptime ───────────────────────────────────────────────────────────────────
+const startMs = Date.now();
+function tickUptime() {
+  const s = Math.floor((Date.now() - startMs) / 1000);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  document.getElementById('stat-uptime').textContent =
+    h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  document.getElementById('stat-uptime-sub').textContent = new Date().toLocaleTimeString();
+}
+setInterval(tickUptime, 1000);
+tickUptime();
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function toast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (type==='ok'?'ok':type==='err'?'err':'');
+  setTimeout(()=>t.className='', 3500);
+}
+function setStatus(txt) {
+  document.getElementById('stat-sync').textContent = txt;
+  document.getElementById('stat-sync-sub').textContent = new Date().toLocaleTimeString();
+}
+
+// ── Upload Queue ─────────────────────────────────────────────────────────────
+let queue = [];
+
+function addFiles(files) {
+  for (const f of files) {
+    queue.push({ id: Math.random().toString(36).slice(2), name: f.name, size: f.size, file: f, state: 'queued' });
+  }
+  renderQueue();
+  updateBtn();
+}
+
+function removeQueue(id) {
+  queue = queue.filter(q => q.id !== id);
+  renderQueue();
+  updateBtn();
+}
+
+function renderQueue() {
+  const el = document.getElementById('queue');
+  const empty = document.getElementById('q-empty');
+  if (!queue.length) { empty.style.display = ''; el.innerHTML = ''; el.appendChild(empty); return; }
+  empty.style.display = 'none';
+  document.getElementById('stat-queue').textContent = queue.filter(q=>q.state==='queued').length;
+  el.innerHTML = queue.map(q => `
+    <div class="q-item">
+      <div class="q-icon">${icon(q.name)}</div>
+      <div class="q-info">
+        <div class="q-name" title="${q.name}">${q.name}</div>
+        <div class="q-size">${fmt(q.size)}</div>
+        ${q.state==='rsync'&&q.pct!==undefined?`<div class="q-bar"><div class="q-bar-fill" style="width:${q.pct}%"></div></div>`:''}
+      </div>
+      <div class="q-status ${q.state}">${stateLabel(q)}</div>
+      ${q.state==='queued'?`<button class="q-remove" onclick="removeQueue('${q.id}')">✕</button>`:''}
+    </div>
+  `).join('');
+}
+
+function updateBtn() {
+  const btn = document.getElementById('btn-upload');
+  const pending = queue.filter(q=>q.state==='queued').length;
+  btn.disabled = !pending;
+  document.getElementById('btn-text').textContent = pending ? `上传 ${pending} 个文件` : '准备就绪';
+  document.getElementById('btn-icon').textContent = pending ? '⬆' : '✓';
+}
+
+function fmt(bytes) {
+  if (bytes < 1024) return bytes+'B';
+  if (bytes < 1048576) return (bytes/1024).toFixed(1)+'K';
+  return (bytes/1048576).toFixed(1)+'M';
+}
+
+function icon(name) {
+  const e = name.split('.').pop().toLowerCase();
+  const m = {py:'🐍',js:'📜',ts:'📘',cpp:'⚙',cc:'⚙',h:'📄',hpp:'📄',html:'🌐',css:'🎨',json:'📋',md:'📝',sh:'💻',yaml:'⚙',yml:'⚙',txt:'📄',png:'🖼',jpg:'🖼',gif:'🖼',pdf:'📕',zip:'🗜',gz:'🗜'};
+  return m[e] || '📄';
+}
+
+function stateLabel(q) {
+  if (q.state==='queued') return '排队';
+  if (q.state==='uploading') return '上传中';
+  if (q.state==='rsync') return q.pct!==undefined?`同步 ${q.pct}%`:`同步中`;
+  if (q.state==='done') return '完成 ✓';
+  if (q.state==='err') return '失败 ✗';
+  return q.state;
+}
+
+// Dropzone
+const dz = document.getElementById('dropzone');
+const di = document.getElementById('file-input');
+di.addEventListener('change', () => { addFiles(di.files); di.value = ''; });
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); addFiles(e.dataTransfer.files); });
+
+// ── Upload & Sync ────────────────────────────────────────────────────────────
+async function doUpload() {
+  const pending = queue.filter(q => q.state === 'queued');
+  if (!pending.length) return;
+  const target = document.getElementById('target-select').value;
+  const mirror = document.getElementById('mirror-toggle').checked;
+  setStatus('上传中…');
+
+  for (const q of pending) {
+    q.state = 'uploading';
+    renderQueue();
+
+    const fd = new FormData();
+    fd.append('files', q.file);
+    fd.append('target', target);
+    if (mirror) fd.append('delete', 'true');
+
+    try {
+      const r = await fetch(API_BASE + '/api/upload-sync', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.job_id) {
+        q.state = 'rsync'; q.pct = 0; renderQueue();
+        streamJob(q, d.job_id);
+      } else {
+        q.state = 'err'; renderQueue();
+      }
+    } catch(e) { q.state = 'err'; renderQueue(); }
+  }
+
+  updateBtn();
+  setStatus('Ready');
+  toast(`${pending.length} 个文件已上传`, 'ok');
+}
+
+async function streamJob(q, jobId) {
+  try {
+    const es = new EventSource(`/api/rsync-stream/${jobId}`);
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === 'line') {
+        const m = d.line.match(/(\d+)%/);
+        if (m) { q.pct = parseInt(m[1]); renderQueue(); }
+      } else if (d.type === 'done') {
+        es.close();
+        q.state = d.rc === 0 ? 'done' : 'err';
+        renderQueue();
+      }
+    };
+    es.onerror = () => { es.close(); q.state = 'err'; renderQueue(); };
+  } catch(e) { q.state = 'err'; renderQueue(); }
+}
+
+// ── File Tree ────────────────────────────────────────────────────────────────
+let selectedDir = '';
+
+async function loadTree(path, parentEl) {
+  const res = await fetch(`/api/tree?path=${encodeURIComponent(path)}`);
+  const data = await res.json();
+  if (data.error) return;
+
+  for (const item of data.items) {
+    const el = document.createElement('div');
+    const size = item.size < 1024 ? item.size+'B' : item.size < 1048576 ? (item.size/1024).toFixed(0)+'K' : (item.size/1048576).toFixed(1)+'M';
+
+    if (item.type === 'dir') {
+      el.className = 'tree-item dir';
+      el.innerHTML = `<span class="tree-toggle closed"></span><span class="fname">${item.name}/</span>`;
+      el.onclick = e => {
+        e.stopPropagation();
+        const ch = el.nextElementSibling;
+        const tog = el.querySelector('.tree-toggle');
+        const open = tog.classList.contains('open');
+        tog.className = `tree-toggle ${open?'closed':'open'}`;
+        if (!open && ch.innerHTML === '') loadTree(item.rel, ch);
+        ch.style.display = open ? 'none' : 'block';
+        el.classList.toggle('open', !open);
+        setSelectedDir(item.rel);
+      };
+      const child = document.createElement('div');
+      child.className = 'tree-children';
+      el.parentNode.insertBefore(child, el.nextSibling);
+    } else {
+      el.className = 'tree-item';
+      el.innerHTML = `<span class="tree-toggle" style="visibility:hidden"></span><span class="fname">${item.name}</span><span class="fsize">${size}</span>`;
+      el.onclick = () => { setSelectedDir(item.rel); document.querySelectorAll('.tree-item.active').forEach(x=>x.classList.remove('active')); el.classList.add('active'); };
+    }
+    (parentEl || document.getElementById('tree-root')).appendChild(el);
+  }
+}
+
+function setSelectedDir(rel) {
+  selectedDir = rel;
+  const name = rel.split('/').pop() || rel;
+  document.getElementById('stat-dir').textContent = rel === '' ? '(root)' : name;
+  document.getElementById('btn-preview').disabled = false;
+  document.getElementById('btn-sync').disabled = false;
+  document.getElementById('diff-stats').style.display = 'none';
+  document.getElementById('diff-lines').textContent = '点击「预览变更」查看 rsync diff';
+}
+
+function filterTree(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.tree-item').forEach(el => {
+    el.style.display = !q || el.querySelector('.fname').textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+// ── Rsync ────────────────────────────────────────────────────────────────────
+async function runDiff() {
+  if (!selectedDir) { toast('请先选择目录', 'err'); return; }
+  setStatus('计算中…');
+  document.getElementById('diff-lines').textContent = '加载中…';
+  document.getElementById('diff-stats').style.display = 'none';
+  try {
+    const res = await fetch(API_BASE + '/api/rsync-preview', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: selectedDir}) });
+    const d = await res.json();
+    setStatus('Ready');
+    if (d.error) { toast(d.error, 'err'); return; }
+    document.getElementById('ds-add').textContent = d.added.length;
+    document.getElementById('ds-del').textContent = d.deleted.length;
+    document.getElementById('ds-mod').textContent = d.changed.length;
+    document.getElementById('diff-stats').style.display = 'flex';
+    const lines = [
+      ...d.added.map(l=>`<div class="d-add">+ ${esc(l)}</div>`),
+      ...d.deleted.map(l=>`<div class="d-del">- ${esc(l)}</div>`),
+      ...d.changed.map(l=>`<div class="d-mod">~ ${esc(l)}</div>`),
+    ];
+    document.getElementById('diff-lines').innerHTML = lines.length ? lines.join('') : '<div style="color:var(--green)">✓ 已同步 — 无变更</div>';
+  } catch(e) { setStatus('Ready'); toast(e, 'err'); }
+}
+
+async function runSync() {
+  if (!selectedDir) { toast('请先选择目录', 'err'); return; }
+  const mirror = document.getElementById('mirror-toggle').checked;
+  if (!confirm(`同步 "${selectedDir}" 到 ${HOST}${mirror?' (mirror模式)':''}？`)) return;
+  setStatus('同步中…');
+  try {
+    const res = await fetch(API_BASE + '/api/rsync-sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path: selectedDir, delete: mirror}) });
+    const d = await res.json();
+    if (!d.job_id) { toast(d.error||'同步失败', 'err'); setStatus('Ready'); return; }
+    streamSync(d.job_id);
+  } catch(e) { setStatus('Ready'); toast(e, 'err'); }
+}
+
+async function streamSync(jobId) {
+  const lines = document.getElementById('diff-lines');
+  lines.innerHTML = '';
+  try {
+    const es = new EventSource(`/api/rsync-stream/${jobId}`);
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === 'line') {
+        const cls = d.line.includes('deleting') ? 'd-del' : d.line.startsWith('>') ? 'd-add' : 'd-mod';
+        lines.innerHTML += `<div class="${cls}">${esc(d.line)}</div>`;
+        lines.scrollTop = lines.scrollHeight;
+      } else if (d.type === 'done') {
+        es.close();
+        setStatus('Ready');
+        if (d.rc === 0) {
+          toast('✓ 同步完成', 'ok');
+          lines.innerHTML += `<div style="color:var(--green);margin-top:8px">✓ 同步成功</div>`;
+          refreshStatus();
+        } else {
+          lines.innerHTML += `<div style="color:var(--red);margin-top:8px">✕ 同步失败 (exit ${d.rc})</div>`;
+        }
+      }
+    };
+    es.onerror = () => { es.close(); setStatus('Ready'); };
+  } catch(e) { setStatus('Ready'); }
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Deploy Status ────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/deploy-status');
+    const d = await res.json();
+    const el = document.getElementById('repo-cards');
+    el.innerHTML = '';
+    for (const [name, info] of Object.entries(d)) {
+      const card = document.createElement('div');
+      card.className = 'repo-card';
+      card.innerHTML = `
+        <div class="repo-card-head">
+          ${name}
+          <span class="tag ${info.exists?'tag-ok':'tag-err'}" style="margin-left:auto">${info.exists?'EXISTS':'MISSING'}</span>
+        </div>
+        <div class="repo-card-body">
+          <div class="repo-row"><span class="lbl">Branch</span><span class="val">${info.branch}</span></div>
+          <div class="repo-row"><span class="lbl">Commit</span><span class="val">${info.commit}</span></div>
+        </div>
+        <div class="repo-card-foot">
+          <button class="btn full" onclick="syncRepo('${name}')">🚀 同步</button>
+        </div>
+      `;
+      el.appendChild(card);
+    }
+  } catch(e) {}
+}
+
+async function syncRepo(name) {
+  document.getElementById('target-select').value = name;
+  setSelectedDir(name);
+  await runDiff();
+  if (!document.getElementById('diff-lines').textContent.includes('无变更')) await runSync();
+}
+
+// ── Shell ────────────────────────────────────────────────────────────────────
+async function runShell() {
+  const cmd = document.getElementById('shell-input').value.trim();
+  if (!cmd) return;
+  const out = document.getElementById('shell-output');
+  out.style.display = 'block';
+  out.innerHTML = `<span class="prompt">$ ${esc(cmd)}</span>\n`;
+  setStatus('Shell…');
+  try {
+    const res = await fetch('/api/shell', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cmd, cwd: BASE}) });
+    const d = await res.json();
+    setStatus('Ready');
+    if (d.rc !== 0) out.innerHTML += `<span class="err">exit ${d.rc}\n</span>`;
+    out.innerHTML += esc(d.stdout + d.stderr);
+    out.scrollTop = out.scrollHeight;
+  } catch(e) { setStatus('Ready'); out.innerHTML += esc(String(e)); }
+}
+function clearShell() {
+  document.getElementById('shell-input').value = '';
+  document.getElementById('shell-output').style.display = 'none';
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+loadTree('');
+refreshStatus();
+setInterval(refreshStatus, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+# dashboard
+
+Local-to-Remote Deployment Dashboard — a Flask web UI for managing `rsync`-over-SSH
+deployments to multiple remote nodes.
+
+**Features**
+
+- **SSH Connection Manager** — add/edit/delete targets; test connectivity with password or SSH key
+- **SFTP Remote Browser** — navigate remote directories in real-time and pick a destination
+- **Deployment Mappings** — one mapping = one local dir ↔ one remote dir, with per-mapping `rsync` ignore patterns
+- **Sync Status** — dry-run diff showing files to add / delete / change before pushing
+- **Drag-and-Drop Upload** — upload files to the mapping's local dir then sync
+- **YAML Config** — all targets, mappings, and patterns persisted in `~/.config/dashboard.yaml`
+
+---
+
+## Quick Start
+
+```bash
+cd scripts/deployment/dashboard
+bash setup.sh          # install dependencies
+bash start.sh         # start in background
+# open http://localhost:8765
+```
+
+```bash
+bash start.sh stop    # stop
+bash start.sh logs     # tail logs
+```
+
+---
+
+## Environment Variables
+
+All defaults can be overridden with environment variables (or `--help` for CLI flags):
+
+| Variable | Default | Description |
+|---|---|---|
+| `DASHBOARD_BASE_DIR` | `~/workspace/git-repos` | Local filesystem root for browsing |
+| `DASHBOARD_CONFIG` | `~/.config/dashboard.yaml` | Config file path |
+| `DASHBOARD_PORT` | `8765` | HTTP port |
+| `DASHBOARD_HOST` | `0.0.0.0` | Bind address |
+
+```bash
+# Example: run on a different port with a custom workspace
+DASHBOARD_PORT=9000 DASHBOARD_BASE_DIR=/projects bash start.sh
+```
+
+---
+
+## Configuration
+
+The config file (`~/.config/dashboard.yaml`) is created automatically with sensible defaults on first run.
+
+A fully-commented **example config** is at [`dashboard.example.yaml`](dashboard.example.yaml):
+
+```bash
+cp dashboard.example.yaml ~/.config/dashboard.yaml
+# then edit ~/.config/dashboard.yaml
+```
+
+---
+
+## CLI Reference
+
+```bash
+python3 -m dashboard --help
+
+Options:
+  --port N        HTTP port (default: 8765)
+  --host ADDR     bind address (default: 0.0.0.0)
+  --base-dir DIR  filesystem root to browse (default: ~/workspace/git-repos)
+  --config FILE   config file path (default: ~/.config/dashboard.yaml)
+  --version       print version
+```
+
+---
+
+## Requirements
+
+- Python ≥ 3.10
+- `rsync` (local and on all remote targets)
+- SSH key access (or password) to remote nodes
+
+---
+
+## Package Structure
+
+```
+dashboard/
+├── pyproject.toml          # pip install -e . metadata
+├── setup.sh                # one-time setup
+├── start.sh                # start / stop / logs
+├── dashboard.example.yaml  # annotated config example
+├── src/dashboard/
+│   ├── __init__.py
+│   ├── __main__.py        # CLI entry point
+│   ├── app.py             # Flask app factory (create_app)
+│   └── index.html         # Web UI
+└── README.md
+```
