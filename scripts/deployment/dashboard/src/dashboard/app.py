@@ -507,8 +507,8 @@ class WatchManager:
 
     def _build_remote_dest(self, conn, mapping):
         resolved = resolve_ssh_host(conn["host"])
-        return (resolved.get("user", conn.get("username", ""))
-                + "@" + resolved["host"] + ":" + mapping["remote_path"])
+        user = resolved.get("user") or conn.get("username", "")
+        return user + "@" + resolved["host"] + ":" + mapping["remote_path"]
 
     # ── Socket.IO event emission ─────────────────────────────────────────
 
