@@ -209,7 +209,8 @@ def _is_clang_file(path):
 
 class _InotifyHandler(FileSystemEventHandler):
     def __init__(self, mapping_name, local_path, exclude_patterns,
-                 remote_dest, delete, logger, debounce=1.5):
+                 remote_dest, delete, logger, debounce=1.5,
+                 pre_sync_hooks=None, socketio=None):
         super().__init__()
         self.mapping_name = mapping_name
         self.local_path = local_path
@@ -220,6 +221,8 @@ class _InotifyHandler(FileSystemEventHandler):
         self.debounce = debounce
         self._timer = None
         self._dirty = False
+        self._hooks = pre_sync_hooks or []
+        self._socketio = socketio
         self._clang_fmt = _find_clang_format(local_path)
         if self._clang_fmt:
             self._clang_cmd = "clang-format --style=file:" + self._clang_fmt
@@ -242,6 +245,33 @@ class _InotifyHandler(FileSystemEventHandler):
         except Exception as e:
             self._logger.warning("[WATCHER] clang-format error on %s: %s", src_path, e)
 
+    def _run_hooks(self, src_path: str):
+        """Run all matching pre-sync hooks for src_path."""
+        import fnmatch
+        for hook in self._hooks:
+            htype = hook.get("type", "")
+            patterns = hook.get("patterns", [])
+            if not any(fnmatch.fnmatch(src_path, p) for p in patterns):
+                continue
+            if htype == "clang-format":
+                self._run_clang_format(src_path)
+            elif htype == "cmd":
+                cmd_tpl = hook.get("cmd", "")
+                if not cmd_tpl:
+                    continue
+                cmd = cmd_tpl.replace("{{path}}", src_path)
+                try:
+                    r = subprocess.run(cmd, shell=True, capture_output=True,
+                                      text=True, timeout=60)
+                    if r.returncode == 0:
+                        self._logger.info("[WATCHER] hook cmd ok: %s  ->  %s",
+                                        src_path, cmd)
+                    else:
+                        self._logger.warning("[WATCHER] hook cmd failed rc=%d: %s",
+                                           r.returncode, cmd)
+                except Exception as e:
+                    self._logger.warning("[WATCHER] hook cmd error: %s  ->  %s", e, cmd)
+
     def _fire_sync(self):
         self._logger.info("[WATCHER] triggered sync for mapping=%s", self.mapping_name)
         job_id = uuid.uuid4().hex[:8]
@@ -254,6 +284,10 @@ class _InotifyHandler(FileSystemEventHandler):
             cmd += " --delete"
 
         def do_sync():
+            if self._socketio:
+                self._socketio.emit("sync_start", {
+                    "mapping": self.mapping_name,
+                }, namespace="/watchers")
             jobs[job_id]["started"] = True
             jobs[job_id]["started_at"] = datetime.datetime.now().isoformat()
             parts = self.remote_dest.split("@")
@@ -275,6 +309,12 @@ class _InotifyHandler(FileSystemEventHandler):
             jobs[job_id]["finished_at"] = datetime.datetime.now().isoformat()
             self._logger.info("[WATCHER] sync done for mapping=%s  rc=%d",
                             self.mapping_name, p.returncode)
+            if self._socketio:
+                self._socketio.emit("sync_done", {
+                    "mapping": self.mapping_name,
+                    "rc": p.returncode,
+                    "auto": True,
+                }, namespace="/watchers")
 
         threading.Thread(target=do_sync, daemon=True).start()
 
@@ -296,8 +336,9 @@ class _InotifyHandler(FileSystemEventHandler):
         src = event.src_path
         if _should_skip(src):
             return
-        if _is_clang_file(src):
-            self._logger.debug("[WATCHER] clang-format event: %s", src)
+        if self._hooks:
+            self._run_hooks(src)
+        elif _is_clang_file(src):
             self._run_clang_format(src)
         self._logger.debug("[WATCHER] inotify event: %s %s",
                          type(event).__name__, src)
@@ -321,7 +362,7 @@ class _PollingSync:
     """Fallback: polls local directories for changes using os.stat() mtime."""
 
     def __init__(self, mapping_name, local_path, exclude_patterns,
-                 remote_dest, delete, logger, interval=5.0):
+                 remote_dest, delete, logger, interval=5.0, socketio=None):
         self.mapping_name = mapping_name
         self.local_path = local_path
         self.exclude_patterns = exclude_patterns
@@ -332,6 +373,7 @@ class _PollingSync:
         self._running = False
         self._mtimes = {}
         self._timer = None
+        self._socketio = socketio
         self._collect_mtimes()
 
     def _prune_dirs(self, dirs):
@@ -386,6 +428,10 @@ class _PollingSync:
             cmd += " --delete"
 
         def do_sync():
+            if self._socketio:
+                self._socketio.emit("sync_start", {
+                    "mapping": self.mapping_name,
+                }, namespace="/watchers")
             jobs[job_id]["started"] = True
             jobs[job_id]["started_at"] = datetime.datetime.now().isoformat()
             parts = self.remote_dest.split("@")
@@ -411,6 +457,12 @@ class _PollingSync:
             self._collect_mtimes()
             self._logger.info("[WATCHER] [polling] sync done for mapping=%s  rc=%d",
                            self.mapping_name, p.returncode)
+            if self._socketio:
+                self._socketio.emit("sync_done", {
+                    "mapping": self.mapping_name,
+                    "rc": p.returncode,
+                    "auto": True,
+                }, namespace="/watchers")
 
         threading.Thread(target=do_sync, daemon=True).start()
 
@@ -541,6 +593,8 @@ class WatchManager:
             delete=mapping.get("delete", False),
             logger=old_handler._logger,
             debounce=1.5,
+            pre_sync_hooks=mapping.get("pre_sync_hooks"),
+            socketio=self._socketio,
         )
         observer = Observer()
         observer.schedule(handler, lp, recursive=True)
@@ -596,6 +650,8 @@ class WatchManager:
             delete=mapping.get("delete", False),
             logger=logger,
             debounce=1.5,
+            pre_sync_hooks=mapping.get("pre_sync_hooks"),
+            socketio=self._socketio,
         )
         observer = Observer()
         observer.schedule(handler, lp, recursive=True)
@@ -616,20 +672,21 @@ class WatchManager:
                 pass
 
         # Fallback: polling
-        poll = _PollingSync(
-            mapping_name=mapping_name,
-            local_path=lp,
-            exclude_patterns=mapping.get("exclude_patterns", []),
-            remote_dest=remote_dest,
-            delete=mapping.get("delete", False),
-            logger=logger,
-            interval=5.0,
-        )
-        poll.start()
-        with self._lock:
-            self._watchers[mapping_name] = (poll, None, "polling")
-        logger.info("[WATCHER] started (polling) for mapping=%s  path=%s", mapping_name, lp)
-        self._start_health_check()
+            poll = _PollingSync(
+                mapping_name=mapping_name,
+                local_path=lp,
+                exclude_patterns=mapping.get("exclude_patterns", []),
+                remote_dest=remote_dest,
+                delete=mapping.get("delete", False),
+                logger=logger,
+                interval=5.0,
+                socketio=self._socketio,
+            )
+            poll.start()
+            with self._lock:
+                self._watchers[mapping_name] = (poll, None, "polling")
+            logger.info("[WATCHER] started (polling) for mapping=%s  path=%s", mapping_name, lp)
+            self._start_health_check()
 
     def stop_watcher(self, mapping_name):
         with self._lock:

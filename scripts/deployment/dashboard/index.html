@@ -1439,6 +1439,7 @@ function initShellSio() {
 // ═══════════════════════════════════════════════════════════════
 let watcherSio = null;
 let watcherStates = {};  // mapping → { mode, alive }
+let syncStates = {};     // mapping → { active: bool, lastRc: number }
 
 function initWatcherSio() {
   if (watcherSio) return;
@@ -1451,6 +1452,7 @@ function initWatcherSio() {
     watcherStates = {};
     (watchers || []).forEach(w => {
       watcherStates[w.mapping] = { mode: w.mode, alive: w.alive };
+      syncStates[w.mapping] = { active: false, lastRc: null };
     });
     updateWatcherStatusUI();
   });
@@ -1464,6 +1466,19 @@ function initWatcherSio() {
     updateWatcherStatusUI();
     toast('🟢 ' + data.message, 'ok');
   });
+  watcherSio.on("sync_start", (data) => {
+    syncStates[data.mapping] = { active: true, lastRc: null };
+    updateWatcherStatusUI();
+  });
+  watcherSio.on("sync_done", (data) => {
+    syncStates[data.mapping] = { active: false, lastRc: data.rc };
+    updateWatcherStatusUI();
+    if (data.rc === 0) {
+      toast('✓ ' + data.mapping + ' 同步完成', 'ok');
+    } else {
+      toast('✗ ' + data.mapping + ' 同步失败 rc=' + data.rc, 'err');
+    }
+  });
 }
 
 function updateWatcherStatusUI() {
@@ -1471,13 +1486,26 @@ function updateWatcherStatusUI() {
     const el = document.getElementById('map-status-' + name);
     if (!el) return;
     const s = watcherStates[name];
-    if (s.alive) {
+    const sync = syncStates[name] || { active: false, lastRc: null };
+    if (!s) return;
+    if (!s.alive) {
+      el.textContent = '✕ 故障';
+      el.style.color = 'var(--red)';
+    } else if (sync.active) {
+      el.textContent = '⚡ 同步中…';
+      el.style.color = 'var(--yellow)';
+    } else if (sync.lastRc === 0) {
+      const dot = s.mode === 'inotify' ? '●' : '◐';
+      el.textContent = dot + ' ✓';
+      el.style.color = 'var(--green)';
+    } else if (sync.lastRc !== null) {
+      const dot = s.mode === 'inotify' ? '●' : '◐';
+      el.textContent = dot + ' ✗';
+      el.style.color = 'var(--red)';
+    } else {
       const dot = s.mode === 'inotify' ? '●' : '◐';
       el.textContent = dot + ' ' + (s.mode === 'inotify' ? 'inotify' : 'polling');
       el.style.color = 'var(--green)';
-    } else {
-      el.textContent = '✕ 故障';
-      el.style.color = 'var(--red)';
     }
   });
 }
