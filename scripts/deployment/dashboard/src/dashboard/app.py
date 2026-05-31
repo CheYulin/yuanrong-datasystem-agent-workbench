@@ -1292,7 +1292,10 @@ def create_app(log_dir: str = None) -> Flask:
             "DASHBOARD_LOG_DIR",
             os.path.expanduser("~/.local/state/dashboard")), "dashboard.log")
         if not os.path.exists(log_file):
-            return jsonify({"error": "Log file not found", "log_file": log_file}), 404
+            return jsonify({
+                "lines": [], "log_file": log_file,
+                "total_lines": 0, "returned_lines": 0,
+            })
         try:
             with open(log_file, "r", encoding="utf-8") as f:
                 all_lines = f.readlines()

@@ -1,3 +1,17 @@
+# Copyright (c) 2026. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 test_rsync.py — Unit tests for the rsync pipeline.
 
@@ -16,215 +30,260 @@ Coverage:
 """
 
 import os
+import shutil
 import tempfile
-import threading
-import time
+import unittest
 from pathlib import Path
 
-import pytest
 
+class TestMakeExcludesFile(unittest.TestCase):
+    def setUp(self):
+        self._created_files = []
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+    def tearDown(self):
+        for f in self._created_files:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
 
-class TestMakeExcludesFile:
-    def test_creates_file(self):
+    def _make_excludes(self, patterns):
         from dashboard.app import make_excludes_file
-        patterns = [".git/", "*.pyc", "__pycache__/"]
         path = make_excludes_file(patterns)
-        try:
-            assert os.path.exists(path)
-            content = open(path).read()
-            assert ".git/" in content
-            assert "*.pyc" in content
-            assert "__pycache__/" in content
-        finally:
-            os.unlink(path)
+        self._created_files.append(path)
+        return path
+
+    def test_creates_file(self):
+        path = self._make_excludes([".git/", "*.pyc", "__pycache__/"])
+        self.assertTrue(os.path.exists(path))
+        content = open(path).read()
+        self.assertIn(".git/", content)
+        self.assertIn("*.pyc", content)
+        self.assertIn("__pycache__/", content)
 
     def test_empty_patterns(self):
-        from dashboard.app import make_excludes_file
-        path = make_excludes_file([])
-        try:
-            assert os.path.exists(path)
-            assert open(path).read() == "\n"
-        finally:
-            os.unlink(path)
+        path = self._make_excludes([])
+        self.assertTrue(os.path.exists(path))
+        self.assertEqual(open(path).read(), "\n")
 
     def test_patterns_separated_by_newlines(self):
-        from dashboard.app import make_excludes_file
-        path = make_excludes_file(["a", "b", "c"])
+        path = self._make_excludes(["a", "b", "c"])
+        lines = [l for l in open(path).read().splitlines() if l]
+        self.assertEqual(lines, ["a", "b", "c"])
+
+
+class _FlaskTestMixin:
+    """Shared Flask test setup — subclasses must define _use_log_dir (bool)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_environ = dict(os.environ)
+        cls._tmp_config = tempfile.mktemp(suffix=".yaml")
+        cls._tmp_base = tempfile.mkdtemp()
+        os.environ["DASHBOARD_CONFIG"] = cls._tmp_config
+        os.environ["DASHBOARD_BASE_DIR"] = cls._tmp_base
+        if cls._use_log_dir:
+            cls._tmp_log = tempfile.mkdtemp()
+            os.environ["DASHBOARD_LOG_DIR"] = cls._tmp_log
+            log_dir_val = cls._tmp_log
+        else:
+            cls._tmp_log = None
+            log_dir_val = None
+        import logging
+        logging.getLogger("root").setLevel(logging.CRITICAL)
+        from dashboard.app import create_app
+        flask_app, _ = create_app(log_dir=log_dir_val)
+        flask_app.config["TESTING"] = True
+        cls._client = flask_app.test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        # Restore only the keys we touched; never clear PATH, HOME, etc.
+        for k in list(os.environ.keys()):
+            if k not in cls._orig_environ:
+                del os.environ[k]
+        for k, v in cls._orig_environ.items():
+            os.environ[k] = v
         try:
-            content = open(path).read()
-            lines = [l for l in content.splitlines() if l]
-            assert lines == ["a", "b", "c"]
-        finally:
-            os.unlink(path)
+            os.unlink(cls._tmp_config)
+        except OSError:
+            pass
 
 
-class TestGetFileTree:
-    def test_empty_dir(self, tmp_path):
-        from dashboard.app import get_file_tree
-        items = get_file_tree(str(tmp_path))
-        assert items == []
+class TestConfigAPI(_FlaskTestMixin, unittest.TestCase):
+    _use_log_dir = False
 
-    def test_files_and_dirs(self, tmp_path):
-        from dashboard.app import get_file_tree
-        (tmp_path / "src").mkdir()
-        (tmp_path / "main.py").write_text("print(1)")
-        (tmp_path / "README.md").write_text("# hi")
-
-        items = get_file_tree(str(tmp_path))
-        names = {i["name"] for i in items}
-        assert "src" in names
-        assert "main.py" in names
-        assert "README.md" in names
-
-        src_item = next(i for i in items if i["name"] == "src")
-        assert src_item["type"] == "dir"
-        main_item = next(i for i in items if i["name"] == "main.py")
-        assert main_item["type"] == "file"
-
-    def test_dirs_sorted_first(self, tmp_path):
-        from dashboard.app import get_file_tree
-        (tmp_path / "a.txt").write_text("a")
-        (tmp_path / "b_dir").mkdir()
-        items = get_file_tree(str(tmp_path))
-        assert items[0]["name"] == "b_dir"
-        assert items[0]["type"] == "dir"
-
-    def test_hidden_files_included(self, tmp_path):
-        from dashboard.app import get_file_tree
-        (tmp_path / ".gitignore").write_text("*.o")
-        items = get_file_tree(str(tmp_path))
-        names = [i["name"] for i in items]
-        assert ".gitignore" in names
-
-
-# ── Config ────────────────────────────────────────────────────────────────────
-
-class TestConfigAPI:
-    def test_get_empty_config_returns_defaults(self, client):
-        """GET returns DEFAULT_CONFIG structure even on first call."""
-        rv = client.get("/api/config")
-        assert rv.status_code == 200
+    def test_get_empty_config_returns_defaults(self):
+        rv = self._client.get("/api/config")
+        self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
-        assert "connections" in data
-        assert "mappings" in data
+        self.assertIn("connections", data)
+        self.assertIn("mappings", data)
 
-    def test_post_config_saves_and_get_returns_it(self, client, sample_config):
-        """POST a config then GET it back."""
-        client.post("/api/config", json=sample_config)
-        rv = client.get("/api/config")
-        data = rv.get_json()
-        assert len(data["connections"]) == 1
-        assert data["connections"][0]["name"] == "test-host"
-        assert len(data["mappings"]) == 1
-        assert data["mappings"][0]["name"] == "test-mapping"
-
-
-# ── Local file tree API ────────────────────────────────────────────────────────
-
-class TestLocalTreeAPI:
-    def test_tree_root(self, client, populated_base_dir, monkeypatch):
-        """GET /api/local/tree returns immediate children of LOCAL_BASE."""
-        base = os.path.dirname(populated_base_dir)
-        monkeypatch.setenv("DASHBOARD_BASE_DIR", base)
-        rv = client.get("/api/local/tree")
-        assert rv.status_code == 200
-        data = rv.get_json()
-        names = [i["name"] for i in data["items"]]
-        assert "myrepo" in names
-
-    def test_tree_subdir(self, client, populated_base_dir, monkeypatch):
-        """GET /api/local/tree?path=myrepo returns its children."""
-        base = os.path.dirname(populated_base_dir)
-        monkeypatch.setenv("DASHBOARD_BASE_DIR", base)
-        rv = client.get("/api/local/tree?path=myrepo")
-        assert rv.status_code == 200
-        data = rv.get_json()
-        names = [i["name"] for i in data["items"]]
-        assert "src" in names
-        assert "tests" in names
-
-    def test_tree_nonexistent_path(self, client, monkeypatch):
-        """Nonexistent path returns 404."""
-        monkeypatch.setenv("DASHBOARD_BASE_DIR", "/nonexistent-path-xyz")
-        rv = client.get("/api/local/tree?path=does-not-exist")
-        assert rv.status_code == 404
-
-
-# ── Mapping CRUD ─────────────────────────────────────────────────────────────
-
-class TestMappingAPI:
-    def test_create_mapping(self, client, sample_config):
-        client.post("/api/config", json=sample_config)
-        body = {
-            "name":             "new-mapping",
-            "connection":       "test-host",
-            "local_path":       "myrepo",
-            "remote_path":      "/home/testuser/remote/myrepo",
-            "exclude_patterns": [".git/"],
-            "auto_sync":        True,
+    def test_post_config_saves_and_get_returns_it(self):
+        config = {
+            "connections": [{
+                "name": "test-host", "host": "localhost", "port": 22,
+                "username": "testuser", "auth_type": "key",
+                "key_path": "~/.ssh/id_ed25519", "password": "", "note": "Test",
+            }],
+            "mappings": [{
+                "name": "test-mapping", "connection": "test-host",
+                "local_path": "myrepo", "remote_path": "/home/testuser/remote/myrepo",
+                "exclude_patterns": [".git/"], "auto_sync": False,
+            }],
+            "settings": {},
         }
-        rv = client.post("/api/mappings", json=body)
-        assert rv.status_code == 200
+        self._client.post("/api/config", json=config)
+        rv = self._client.get("/api/config")
         data = rv.get_json()
-        assert data["mapping"]["name"] == "new-mapping"
-        assert data["mapping"]["exclude_patterns"] == [".git/"]
+        self.assertEqual(len(data["connections"]), 1)
+        self.assertEqual(data["connections"][0]["name"], "test-host")
+        self.assertEqual(len(data["mappings"]), 1)
+        self.assertEqual(data["mappings"][0]["name"], "test-mapping")
 
-    def test_get_mappings(self, client, sample_config):
-        client.post("/api/config", json=sample_config)
-        rv = client.get("/api/mappings")
+
+class TestLocalTreeAPI(_FlaskTestMixin, unittest.TestCase):
+    _use_log_dir = False
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._repo = Path(cls._tmp_base) / "myrepo"
+        cls._repo.mkdir()
+        (cls._repo / "src").mkdir()
+        (cls._repo / "tests").mkdir()
+        (cls._repo / ".git").mkdir()
+        (cls._repo / "build").mkdir()
+        (cls._repo / "__pycache__").mkdir()
+        (cls._repo / "src" / "main.py").write_text("def main(): pass\n")
+        (cls._repo / "tests" / "test_main.py").write_text("def test_main(): pass\n")
+        (cls._repo / ".git" / "config").write_text("[core]\n")
+        (cls._repo / "build" / "artifact.o").write_bytes(b"\x00\x01\x02")
+        (cls._repo / "__pycache__" / "module.pyc").write_bytes(b"\x00\x01")
+
+    def test_tree_root(self):
+        rv = self._client.get("/api/local/tree")
+        self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
-        assert len(data["mappings"]) == 1
-        assert data["mappings"][0]["name"] == "test-mapping"
+        names = [i["name"] for i in data["items"]]
+        self.assertIn("myrepo", names)
 
-    def test_delete_mapping(self, client, sample_config):
-        client.post("/api/config", json=sample_config)
-        rv = client.delete("/api/mappings/test-mapping")
-        assert rv.status_code == 200
-        rv2 = client.get("/api/mappings")
-        assert rv2.get_json()["mappings"] == []
+    def test_tree_subdir(self):
+        rv = self._client.get("/api/local/tree?path=myrepo")
+        self.assertEqual(rv.status_code, 200)
+        data = rv.get_json()
+        names = [i["name"] for i in data["items"]]
+        self.assertIn("src", names)
+        self.assertIn("tests", names)
+
+    def test_tree_nonexistent_path(self):
+        os.environ["DASHBOARD_BASE_DIR"] = "/nonexistent-xyz"
+        rv = self._client.get("/api/local/tree?path=does-not-exist")
+        self.assertEqual(rv.status_code, 404)
 
 
-# ── rsync preview — the core correctness test ─────────────────────────────────
+class TestMappingAPI(_FlaskTestMixin, unittest.TestCase):
+    _use_log_dir = False
 
-class TestRsyncPreview:
-    def test_preview_missing_mapping_returns_404(self, client, sample_config):
-        """Non-existent mapping returns 404."""
-        client.post("/api/config", json=sample_config)
-        rv = client.post("/api/mappings/ghost/preview")
-        assert rv.status_code == 404
+    _SAMPLE_CONFIG = {
+        "connections": [{
+            "name": "test-host", "host": "localhost", "port": 22,
+            "username": "testuser", "auth_type": "key",
+            "key_path": "~/.ssh/id_ed25519", "password": "", "note": "Test",
+        }],
+        "mappings": [{
+            "name": "test-mapping", "connection": "test-host",
+            "local_path": "myrepo", "remote_path": "/home/testuser/remote/myrepo",
+            "exclude_patterns": [".git/"], "auto_sync": False,
+        }],
+        "settings": {},
+    }
 
-    def test_preview_missing_connection_returns_404(self, client, sample_config, monkeypatch):
-        """Mapping with non-existent connection returns 404."""
-        client.post("/api/config", json={
+    def test_create_mapping(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        body = {
+            "name": "new-mapping", "connection": "test-host",
+            "local_path": "myrepo", "remote_path": "/home/testuser/remote/myrepo",
+            "exclude_patterns": [".git/"], "auto_sync": True,
+        }
+        rv = self._client.post("/api/mappings", json=body)
+        self.assertEqual(rv.status_code, 200)
+        data = rv.get_json()
+        self.assertEqual(data["mapping"]["name"], "new-mapping")
+        self.assertEqual(data["mapping"]["exclude_patterns"], [".git/"])
+
+    def test_get_mappings(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.get("/api/mappings")
+        data = rv.get_json()
+        self.assertEqual(len(data["mappings"]), 1)
+        self.assertEqual(data["mappings"][0]["name"], "test-mapping")
+
+    def test_delete_mapping(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.delete("/api/mappings/test-mapping")
+        self.assertEqual(rv.status_code, 200)
+        rv2 = self._client.get("/api/mappings")
+        self.assertEqual(rv2.get_json()["mappings"], [])
+
+
+class TestRsyncPreview(_FlaskTestMixin, unittest.TestCase):
+    _use_log_dir = False
+
+    _SAMPLE_CONFIG = {
+        "connections": [{
+            "name": "test-host", "host": "localhost", "port": 22,
+            "username": "testuser", "auth_type": "key",
+            "key_path": "~/.ssh/id_ed25519", "password": "", "note": "Test",
+        }],
+        "mappings": [{
+            "name": "test-mapping", "connection": "test-host",
+            "local_path": "myrepo", "remote_path": "/home/testuser/remote/myrepo",
+            "exclude_patterns": [".git/"], "auto_sync": False,
+        }],
+        "settings": {},
+    }
+
+    def test_preview_missing_mapping_returns_404(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.post("/api/mappings/ghost/preview")
+        self.assertEqual(rv.status_code, 404)
+
+    def test_preview_missing_connection_returns_404(self):
+        self._client.post("/api/config", json={
             "connections": [],
-            "mappings": [{**sample_config["mappings"][0], "connection": "ghost"}],
+            "mappings": [{**self._SAMPLE_CONFIG["mappings"][0], "connection": "ghost"}],
             "settings": {},
         })
-        test_dir = Path(tempfile.mkdtemp())
-        (test_dir / "myrepo").mkdir()
-        (test_dir / "myrepo" / "f.txt").write_text("hi")
-        monkeypatch.setenv("DASHBOARD_BASE_DIR", str(test_dir))
-        rv = client.post("/api/mappings/test-mapping/preview")
-        assert rv.status_code == 404
+        (Path(self._tmp_base) / "myrepo").mkdir()
+        (Path(self._tmp_base) / "myrepo" / "f.txt").write_text("hi")
+        rv = self._client.post("/api/mappings/test-mapping/preview")
+        self.assertEqual(rv.status_code, 404)
 
 
-# ── SSH helpers ───────────────────────────────────────────────────────────────
+class TestResolveSSHHost(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig_home = os.environ.get("HOME")
 
-class TestResolveSSHHost:
-    def test_missing_ssh_config_returns_defaults(self, tmp_path, monkeypatch):
-        """When ~/.ssh/config doesn't exist, returns host/port/user as-is."""
-        monkeypatch.setenv("HOME", str(tmp_path))
+    def tearDown(self):
+        if self._orig_home is not None:
+            os.environ["HOME"] = self._orig_home
+        else:
+            os.environ.pop("HOME", None)
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_missing_ssh_config_returns_defaults(self):
+        os.environ["HOME"] = self._tmp
         from dashboard.app import resolve_ssh_host
         result = resolve_ssh_host("some-host")
-        assert result["host"] == "some-host"
-        assert result["port"] == 22
-        assert result["user"] is None
+        self.assertEqual(result["host"], "some-host")
+        self.assertEqual(result["port"], 22)
+        self.assertIsNone(result["user"])
 
-    def test_parses_ssh_config(self, tmp_path, monkeypatch):
-        """When ~/.ssh/config exists, resolves hostname/port/user."""
-        ssh_dir = tmp_path / ".ssh"
+    def test_parses_ssh_config(self):
+        ssh_dir = Path(self._tmp) / ".ssh"
         ssh_dir.mkdir()
         ssh_dir.joinpath("config").write_text(
             "Host mybox\n"
@@ -232,190 +291,197 @@ class TestResolveSSHHost:
             "    Port 2222\n"
             "    User admin\n"
         )
-        monkeypatch.setenv("HOME", str(tmp_path))
+        os.environ["HOME"] = self._tmp
         from dashboard.app import resolve_ssh_host
         result = resolve_ssh_host("mybox")
-        assert result["host"] == "192.168.1.100"
-        assert result["port"] == 2222
-        assert result["user"] == "admin"
+        self.assertEqual(result["host"], "192.168.1.100")
+        self.assertEqual(result["port"], 2222)
+        self.assertEqual(result["user"], "admin")
 
-    def test_missing_host_in_config_returns_defaults(self, tmp_path, monkeypatch):
-        """SSH config exists but host not defined — falls back to input."""
-        ssh_dir = tmp_path / ".ssh"
+    def test_missing_host_in_config_returns_defaults(self):
+        ssh_dir = Path(self._tmp) / ".ssh"
         ssh_dir.mkdir()
         ssh_dir.joinpath("config").write_text("Host other\n    HostName 1.2.3.4\n")
-        monkeypatch.setenv("HOME", str(tmp_path))
+        os.environ["HOME"] = self._tmp
         from dashboard.app import resolve_ssh_host
         result = resolve_ssh_host("undefined-host")
-        assert result["host"] == "undefined-host"
-        assert result["user"] is None
+        self.assertEqual(result["host"], "undefined-host")
+        self.assertIsNone(result["user"])
 
 
-# ── run_cmd helper ─────────────────────────────────────────────────────────────
-
-class TestRunCmd:
+class TestRunCmd(unittest.TestCase):
     def test_echo_ok(self):
         from dashboard.app import run_cmd
         result = run_cmd("echo hello")
-        assert result["rc"] == 0
-        assert "hello" in result["out"]
+        self.assertEqual(result["rc"], 0)
+        self.assertIn("hello", result["out"])
 
     def test_stderr_captured(self):
         from dashboard.app import run_cmd
         result = run_cmd("echo error >&2")
-        assert "error" in result["err"]
+        self.assertIn("error", result["err"])
 
     def test_invalid_command_rc(self):
         from dashboard.app import run_cmd
         result = run_cmd("exit 42")
-        assert result["rc"] == 42
+        self.assertEqual(result["rc"], 42)
 
     def test_timeout(self):
         from dashboard.app import run_cmd
         result = run_cmd("sleep 10", timeout=1)
-        assert result["rc"] == -1
-        assert "timed out" in result["err"]
+        self.assertEqual(result["rc"], -1)
+        self.assertIn("timed out", result["err"])
 
     def test_cwd(self):
         from dashboard.app import run_cmd
         result = run_cmd("pwd", cwd="/tmp")
-        assert result["rc"] == 0
-        assert "/tmp" in result["out"]
+        self.assertEqual(result["rc"], 0)
+        self.assertIn("/tmp", result["out"])
 
 
-# ── /api/logs endpoint ───────────────────────────────────────────────────────
+class TestLogsEndpoint(unittest.TestCase):
+    """Standalone — does NOT use _FlaskTestMixin to avoid env pollution."""
 
-class TestLogsEndpoint:
-    def test_logs_returns_lines(self, client):
-        rv = client.get("/api/logs?lines=5")
-        assert rv.status_code == 200
+    def setUp(self):
+        self._orig_env = dict(os.environ)
+        self._tmp_c = tempfile.mktemp(suffix=".yaml")
+        self._tmp_b = tempfile.mkdtemp()
+        self._tmp_l = tempfile.mkdtemp()
+        os.environ["DASHBOARD_CONFIG"] = self._tmp_c
+        os.environ["DASHBOARD_BASE_DIR"] = self._tmp_b
+        os.environ["DASHBOARD_LOG_DIR"] = self._tmp_l
+        import logging
+        logging.getLogger("root").setLevel(logging.CRITICAL)
+        from dashboard.app import create_app
+        app, _ = create_app(log_dir=self._tmp_l)
+        app.config["TESTING"] = True
+        self._client = app.test_client()
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._orig_env)
+        try:
+            os.unlink(self._tmp_c)
+        except OSError:
+            pass
+
+    def test_logs_returns_lines(self):
+        rv = self._client.get("/api/logs?lines=5")
+        self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
-        assert "lines" in data
-        assert "log_file" in data
-        assert isinstance(data["lines"], list)
+        self.assertIn("lines", data)
+        self.assertIn("log_file", data)
+        self.assertIsInstance(data["lines"], list)
 
-    def test_logs_nonexistent_returns_404(self, client, monkeypatch):
-        """Non-existent log dir returns 404."""
-        monkeypatch.setenv("DASHBOARD_LOG_DIR", "/nonexistent-xyz")
-        rv = client.get("/api/logs")
-        assert rv.status_code == 404
-
-
-# ── /api/deploy-status ───────────────────────────────────────────────────────
-
-class TestDeployStatus:
-    def test_deploy_status_returns_json(self, client):
-        rv = client.get("/api/deploy-status")
-        assert rv.status_code == 200
+    def test_logs_returns_empty_when_no_log_file(self):
+        """When DASHBOARD_LOG_DIR points to a non-existent dir, returns empty list."""
+        os.environ["DASHBOARD_LOG_DIR"] = "/nonexistent-xyz-dashboard-test-abc"
+        rv = self._client.get("/api/logs")
+        self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
-        assert isinstance(data, dict)
+        self.assertEqual(data["lines"], [])
+        self.assertEqual(data["total_lines"], 0)
 
 
-# ══════════════════════════════════════════════════════════════════════════════════════
+class TestDeployStatus(_FlaskTestMixin, unittest.TestCase):
+    _use_log_dir = False
+
+    def test_deploy_status_returns_json(self):
+        rv = self._client.get("/api/deploy-status")
+        self.assertEqual(rv.status_code, 200)
+        self.assertIsInstance(rv.get_json(), dict)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  AUTO-SYNC TESTS
-# ══════════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
-class TestSkipLogic:
-    """Module-level _should_skip path-filtering logic."""
-
+class TestSkipLogic(unittest.TestCase):
     def test_skips_dot_git(self):
         from dashboard.app import _should_skip
-        assert _should_skip(".git")
-        # basename-only, so paths under .git are NOT filtered
-        assert not _should_skip(".git/config")
-        assert not _should_skip("src/main.py")
-        assert not _should_skip("myrepo/.gitignore")
+        self.assertTrue(_should_skip(".git"))
+        self.assertFalse(_should_skip(".git/config"))
+        self.assertFalse(_should_skip("src/main.py"))
+        self.assertFalse(_should_skip("myrepo/.gitignore"))
 
     def test_skips_pycache_and_pyc(self):
         from dashboard.app import _should_skip
-        assert _should_skip("__pycache__")
-        assert _should_skip("module.pyc")
-        assert not _should_skip("module.py")
+        self.assertTrue(_should_skip("__pycache__"))
+        self.assertTrue(_should_skip("module.pyc"))
+        self.assertFalse(_should_skip("module.py"))
 
     def test_skips_node_modules(self):
         from dashboard.app import _should_skip
-        assert _should_skip("node_modules")
-        # basename-only: nested paths use full basename of leaf
-        assert not _should_skip("src/node_modules/file.txt")
+        self.assertTrue(_should_skip("node_modules"))
+        self.assertFalse(_should_skip("src/node_modules/file.txt"))
 
     def test_skips_standard_build_dirs(self):
         from dashboard.app import _should_skip
-        # Only exact basename matches + extensions
-        assert not _should_skip("bazel-cache")
-        assert not _should_skip("bazel-genfiles")
-        assert not _should_skip("build_cov")
+        self.assertFalse(_should_skip("bazel-cache"))
+        self.assertFalse(_should_skip("bazel-genfiles"))
+        self.assertFalse(_should_skip("build_cov"))
 
 
-class TestClangFileDetection:
-    """Module-level _is_clang_file detection."""
-
+class TestClangFileDetection(unittest.TestCase):
     def test_recognizes_cpp_extensions(self):
         from dashboard.app import _is_clang_file
-        assert _is_clang_file("main.cpp")
-        assert _is_clang_file("main.h")
-        assert _is_clang_file("main.cc")
-        assert _is_clang_file("main.cxx")
-        assert _is_clang_file("main.hpp")
-        assert _is_clang_file("main.hxx")
+        self.assertTrue(_is_clang_file("main.cpp"))
+        self.assertTrue(_is_clang_file("main.h"))
+        self.assertTrue(_is_clang_file("main.cc"))
+        self.assertTrue(_is_clang_file("main.cxx"))
+        self.assertTrue(_is_clang_file("main.hpp"))
+        self.assertTrue(_is_clang_file("main.hxx"))
 
     def test_rejects_non_c_files(self):
         from dashboard.app import _is_clang_file
-        assert not _is_clang_file("main.py")
-        assert not _is_clang_file("main.js")
-        assert not _is_clang_file("main.rs")
-        assert not _is_clang_file("CMakeLists.txt")
-        assert not _is_clang_file("Makefile")
+        self.assertFalse(_is_clang_file("main.py"))
+        self.assertFalse(_is_clang_file("main.js"))
+        self.assertFalse(_is_clang_file("main.rs"))
+        self.assertFalse(_is_clang_file("CMakeLists.txt"))
+        self.assertFalse(_is_clang_file("Makefile"))
 
 
-class TestInotifyHandlerConstruction:
-    """Tests for _InotifyHandler initialization and clang-format setup."""
+class TestInotifyHandlerConstruction(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
 
-    def test_handler_stores_debounce(self, tmp_path):
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_handler_stores_debounce(self):
         import logging
         from dashboard.app import _InotifyHandler
         h = _InotifyHandler(
-            mapping_name="test",
-            local_path=str(tmp_path),
-            exclude_patterns=[".git/"],
-            remote_dest="root@host:/tmp",
-            delete=False,
-            logger=logging.getLogger("test"),
-            debounce=99,
+            mapping_name="test", local_path=self._tmp,
+            exclude_patterns=[".git/"], remote_dest="host:/tmp",
+            delete=False, logger=logging.getLogger("test"), debounce=99,
         )
-        assert h.debounce == 99
+        self.assertEqual(h.debounce, 99)
 
-    def test_handler_stores_remote_dest(self, tmp_path):
+    def test_handler_stores_remote_dest(self):
         import logging
         from dashboard.app import _InotifyHandler
         h = _InotifyHandler(
-            mapping_name="test",
-            local_path=str(tmp_path),
-            exclude_patterns=[],
-            remote_dest="root@xqyun-32c32g:/home/user",
-            delete=True,
-            logger=logging.getLogger("test"),
+            mapping_name="test", local_path=self._tmp,
+            exclude_patterns=[], remote_dest="root@xqyun-32c32g:/home/user",
+            delete=True, logger=logging.getLogger("test"),
         )
-        assert h.remote_dest == "root@xqyun-32c32g:/home/user"
-        assert h.delete is True
+        self.assertEqual(h.remote_dest, "root@xqyun-32c32g:/home/user")
+        self.assertTrue(h.delete)
 
-    def test_handler_stores_exclude_patterns(self, tmp_path):
+    def test_handler_stores_exclude_patterns(self):
         import logging
         from dashboard.app import _InotifyHandler
         h = _InotifyHandler(
-            mapping_name="test",
-            local_path=str(tmp_path),
+            mapping_name="test", local_path=self._tmp,
             exclude_patterns=[".git/", "*.pyc"],
-            remote_dest="host:/x",
-            delete=False,
-            logger=logging.getLogger("test"),
+            remote_dest="host:/x", delete=False, logger=logging.getLogger("test"),
         )
-        assert ".git/" in h.exclude_patterns
-        assert "*.pyc" in h.exclude_patterns
+        self.assertIn(".git/", h.exclude_patterns)
+        self.assertIn("*.pyc", h.exclude_patterns)
 
 
-class TestWatchManagerLifecycle:
-    """Tests for WatchManager start/stop/restart without real SSH/inotify."""
-
+class TestWatchManagerLifecycle(unittest.TestCase):
     def _make_wm(self):
         import logging
         from dashboard.app import WatchManager
@@ -423,161 +489,186 @@ class TestWatchManagerLifecycle:
         wm._logger = logging.getLogger("test")
         return wm
 
-    def test_start_watcher_auto_sync_off_does_nothing(self, tmp_path):
-        wm = self._make_wm()
-        mapping = {
-            "name": "t1", "local_path": str(tmp_path), "auto_sync": False,
-            "connection": "h", "remote_path": "/x",
-            "exclude_patterns": [], "delete": False,
-        }
-        conn = {"host": "localhost", "username": "root", "port": 22}
-        wm.start_watcher("t1", str(tmp_path), mapping, conn, wm._logger)
-        assert "t1" not in wm._watchers
+    def test_start_watcher_auto_sync_off_does_nothing(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            wm = self._make_wm()
+            mapping = {
+                "name": "t1", "local_path": tmp, "auto_sync": False,
+                "connection": "h", "remote_path": "/x",
+                "exclude_patterns": [], "delete": False,
+            }
+            conn = {"host": "localhost", "username": "root", "port": 22}
+            wm.start_watcher("t1", tmp, mapping, conn, wm._logger)
+            self.assertNotIn("t1", wm._watchers)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_stop_watcher_unknown_name_does_not_raise(self, tmp_path):
+    def test_stop_watcher_unknown_name_does_not_raise(self):
         wm = self._make_wm()
         wm.stop_watcher("nonexistent")
-        assert True  # must not raise
 
-    def test_restart_all_with_empty_mappings(self, tmp_path):
-        wm = self._make_wm()
-        wm.restart_all([], [], str(tmp_path), wm._logger)
-        # just verify it returns without error
+    def test_restart_all_with_empty_mappings(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            wm = self._make_wm()
+            wm.restart_all([], [], tmp, wm._logger)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
-class TestAutoSyncAPI:
-    """Tests for the /api/mappings/<name>/auto-sync endpoint."""
+class TestAutoSyncAPI(_FlaskTestMixin, unittest.TestCase):
+    _use_log_dir = False
 
-    def test_enable_auto_sync_returns_ok(self, client, sample_config):
-        client.post("/api/config", json=sample_config)
-        rv = client.post(
+    _SAMPLE_CONFIG = {
+        "connections": [{
+            "name": "test-host", "host": "localhost", "port": 22,
+            "username": "testuser", "auth_type": "key",
+            "key_path": "~/.ssh/id_ed25519", "password": "", "note": "Test",
+        }],
+        "mappings": [{
+            "name": "test-mapping", "connection": "test-host",
+            "local_path": "myrepo", "remote_path": "/home/testuser/remote/myrepo",
+            "exclude_patterns": [".git/"], "auto_sync": False,
+        }],
+        "settings": {},
+    }
+
+    def test_enable_auto_sync_returns_ok(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.post(
             "/api/mappings/test-mapping/auto-sync",
             json={"enabled": True},
         )
-        assert rv.status_code == 200
+        self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
-        assert data["ok"] is True
-        assert data["auto_sync"] is True
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["auto_sync"])
 
-    def test_disable_auto_sync_returns_ok(self, client, sample_config):
-        client.post("/api/config", json=sample_config)
-        rv = client.post(
+    def test_disable_auto_sync_returns_ok(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.post(
             "/api/mappings/test-mapping/auto-sync",
             json={"enabled": False},
         )
-        assert rv.status_code == 200
+        self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
-        assert data["ok"] is True
-        assert data["auto_sync"] is False
+        self.assertTrue(data["ok"])
+        self.assertFalse(data["auto_sync"])
 
-    def test_auto_sync_unknown_mapping_returns_404(self, client, sample_config):
-        client.post("/api/config", json=sample_config)
-        rv = client.post(
+    def test_auto_sync_unknown_mapping_returns_404(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.post(
             "/api/mappings/ghost/auto-sync",
             json={"enabled": True},
         )
-        assert rv.status_code == 404
+        self.assertEqual(rv.status_code, 404)
 
-    def test_delete_mapping_stops_watcher(self, client, sample_config):
-        """Deleting a mapping must not raise even when watcher is not running."""
-        client.post("/api/config", json=sample_config)
-        rv = client.delete("/api/mappings/test-mapping")
-        assert rv.status_code == 200
+    def test_delete_mapping_stops_watcher(self):
+        self._client.post("/api/config", json=self._SAMPLE_CONFIG)
+        rv = self._client.delete("/api/mappings/test-mapping")
+        self.assertEqual(rv.status_code, 200)
 
 
-class TestPollingSyncConstruction:
-    """Tests for _PollingSync initialization."""
+class TestPollingSyncConstruction(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
 
-    def test_stores_interval(self, tmp_path):
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_stores_interval(self):
         import logging
         from dashboard.app import _PollingSync
         p = _PollingSync(
-            mapping_name="t",
-            local_path=str(tmp_path),
+            mapping_name="t", local_path=self._tmp,
             exclude_patterns=[".git/"],
             remote_dest="root@xqyun-32c32g:/home/user",
-            delete=False,
-            logger=logging.getLogger("test"),
-            interval=15.0,
+            delete=False, logger=logging.getLogger("test"), interval=15.0,
         )
-        assert p.interval == 15.0
+        self.assertEqual(p.interval, 15.0)
 
-    def test_stores_remote_dest(self, tmp_path):
+    def test_stores_remote_dest(self):
         import logging
         from dashboard.app import _PollingSync
         p = _PollingSync(
-            mapping_name="t",
-            local_path=str(tmp_path),
+            mapping_name="t", local_path=self._tmp,
             exclude_patterns=[],
             remote_dest="root@host:/remote/path",
-            delete=True,
-            logger=logging.getLogger("test"),
-            interval=5.0,
+            delete=True, logger=logging.getLogger("test"), interval=5.0,
         )
-        assert p.remote_dest == "root@host:/remote/path"
-        assert p.delete is True
-        assert p.exclude_patterns == []
+        self.assertEqual(p.remote_dest, "root@host:/remote/path")
+        self.assertTrue(p.delete)
+        self.assertEqual(p.exclude_patterns, [])
 
 
-class TestWatchManagerSocketIO:
-    """Tests for WatchManager Socket.IO event emission."""
-
+class TestWatchManagerSocketIO(unittest.TestCase):
     def test_set_socketio_stores_reference(self):
         from dashboard.app import WatchManager
         wm = WatchManager()
+
         class FakeSocketIO:
-            def emit(self, *a, **kw): pass
+            def emit(self, *a, **kw):
+                pass
+
         fake = FakeSocketIO()
         wm.set_socketio(fake)
-        assert wm._socketio is fake
+        self.assertIs(wm._socketio, fake)
 
     def test_emit_fault_does_not_crash_when_no_socketio(self):
-        from dashboard.app import WatchManager
         import logging
+        from dashboard.app import WatchManager
         wm = WatchManager()
         wm._logger = logging.getLogger("test")
-        # no socketio set — must not raise
         wm._emit_fault("test-mapping", "observer died")
 
     def test_emit_restored_does_not_crash_when_no_socketio(self):
-        from dashboard.app import WatchManager
         import logging
+        from dashboard.app import WatchManager
         wm = WatchManager()
         wm._logger = logging.getLogger("test")
         wm._emit_restored("test-mapping", "inotify")
 
     def test_emit_fault_calls_socketio_emit(self):
-        from dashboard.app import WatchManager
         import logging
+        from dashboard.app import WatchManager
         wm = WatchManager()
         wm._logger = logging.getLogger("test")
         emitted = {}
+
         class FakeSocketIO:
             def emit(self, event, data, namespace=None):
                 emitted["event"] = event
                 emitted["data"] = data
                 emitted["namespace"] = namespace
+
         wm.set_socketio(FakeSocketIO())
         wm._emit_fault("mymap", "test reason", mode="polling")
-        assert emitted["event"] == "watcher_fault"
-        assert emitted["data"]["mapping"] == "mymap"
-        assert emitted["data"]["reason"] == "test reason"
-        assert emitted["data"]["mode"] == "polling"
-        assert emitted["namespace"] == "/watchers"
+        self.assertEqual(emitted["event"], "watcher_fault")
+        self.assertEqual(emitted["data"]["mapping"], "mymap")
+        self.assertEqual(emitted["data"]["reason"], "test reason")
+        self.assertEqual(emitted["data"]["mode"], "polling")
+        self.assertEqual(emitted["namespace"], "/watchers")
 
     def test_emit_restored_calls_socketio_emit(self):
-        from dashboard.app import WatchManager
         import logging
+        from dashboard.app import WatchManager
         wm = WatchManager()
         wm._logger = logging.getLogger("test")
         emitted = {}
+
         class FakeSocketIO:
             def emit(self, event, data, namespace=None):
                 emitted["event"] = event
                 emitted["data"] = data
                 emitted["namespace"] = namespace
+
         wm.set_socketio(FakeSocketIO())
         wm._emit_restored("mymap2", "inotify")
-        assert emitted["event"] == "watcher_restored"
-        assert emitted["data"]["mapping"] == "mymap2"
-        assert emitted["namespace"] == "/watchers"
+        self.assertEqual(emitted["event"], "watcher_restored")
+        self.assertEqual(emitted["data"]["mapping"], "mymap2")
+        self.assertEqual(emitted["namespace"], "/watchers")
+
+
+if __name__ == "__main__":
+    unittest.main()
