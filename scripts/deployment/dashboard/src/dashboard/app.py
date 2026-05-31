@@ -448,11 +448,40 @@ class WatchManager:
         self._local_base = None
         self._mappings = []
         self._connections = []
+        self._socketio = None          # injected via set_socketio()
+
+    def set_socketio(self, socketio):
+        self._socketio = socketio
 
     def _build_remote_dest(self, conn, mapping):
         resolved = resolve_ssh_host(conn["host"])
         return (resolved.get("user", conn.get("username", ""))
                 + "@" + resolved["host"] + ":" + mapping["remote_path"])
+
+    # ── Socket.IO event emission ─────────────────────────────────────────
+
+    def _emit(self, event: str, data: dict):
+        if self._socketio is not None:
+            self._socketio.emit(event, data, namespace="/watchers")
+
+    def _emit_fault(self, mapping_name: str, reason: str, mode: str = "inotify"):
+        msg = f"Watcher 故障 [{mapping_name}]: {reason}"
+        self._logger.error("[WATCHER] fault: %s", msg)
+        self._emit("watcher_fault", {
+            "mapping": mapping_name,
+            "reason": reason,
+            "mode": mode,
+            "message": msg,
+        })
+
+    def _emit_restored(self, mapping_name: str, mode: str):
+        msg = f"Watcher 已恢复 [{mapping_name}]"
+        self._logger.info("[WATCHER] restored: %s", msg)
+        self._emit("watcher_restored", {
+            "mapping": mapping_name,
+            "mode": mode,
+            "message": msg,
+        })
 
     def _start_health_check(self):
         if self._health_timer is not None:
@@ -474,6 +503,7 @@ class WatchManager:
                 if mode == "inotify":
                     if observer is not None and not observer.is_alive():
                         dead.append(name)
+                        self._emit_fault(name, "inotify observer died, auto-restart中", mode="inotify")
                         handler._logger.error(
                             "[WATCHER] inotify observer died for mapping=%s  auto-restarting", name)
             # restart dead inotify watchers
@@ -489,16 +519,19 @@ class WatchManager:
                         None,
                     )
                     if conn:
-                        self._unlocked_start_inotify(name, handler, mapping_cfg, conn)
+                        ok = self._unlocked_start_inotify(name, handler, mapping_cfg, conn)
+                        if ok:
+                            self._emit_restored(name, "inotify")
         # reschedule
         if self._watchers:
             self._start_health_check()
 
     def _unlocked_start_inotify(self, mapping_name, old_handler, mapping, conn):
-        """Restart inotify for a mapping (must hold self._lock)."""
+        """Restart inotify for a mapping (must hold self._lock). Returns True if inotify
+        started successfully, False if fell back to polling."""
         lp = os.path.join(self._local_base, mapping["local_path"].lstrip("/"))
         if not os.path.isdir(lp):
-            return
+            return False
         remote_dest = self._build_remote_dest(conn, mapping)
         handler = _InotifyHandler(
             mapping_name=mapping_name,
@@ -515,10 +548,12 @@ class WatchManager:
             observer.start()
             self._watchers[mapping_name] = (handler, observer, "inotify")
             handler._logger.info("[WATCHER] inotify restarted OK for mapping=%s", mapping_name)
+            return True
         except Exception as e:
             handler._logger.warning(
                 "[WATCHER] inotify restart failed for %s: %s  falling back to polling",
                 mapping_name, e)
+            self._emit_fault(mapping_name, f"inotify 启动失败: {e}，已切换轮询", mode="polling")
             try:
                 observer.stop()
             except Exception:
@@ -535,6 +570,7 @@ class WatchManager:
             poll.start()
             self._watchers[mapping_name] = (poll, None, "polling")
             handler._logger.info("[WATCHER] restarted (polling) for mapping=%s", mapping_name)
+            return False
 
     def start_watcher(self, mapping_name, local_base, mapping, conn, logger):
         self.stop_watcher(mapping_name)
@@ -573,6 +609,7 @@ class WatchManager:
         except Exception as e:
             logger.warning("[WATCHER] inotify failed for %s: %s  falling back to polling",
                        mapping_name, e)
+            self._emit_fault(mapping_name, f"inotify 不可用: {e}，已切换轮询", mode="polling")
             try:
                 observer.stop()
             except Exception:
@@ -700,6 +737,7 @@ def create_app(log_dir: str = None) -> Flask:
         engineio_logger=False,
         message_queue=None,
     )
+    watcher.set_socketio(socketio)
 
     jobs: dict[str, dict] = {}
 
@@ -1444,5 +1482,29 @@ def create_app(log_dir: str = None) -> Flask:
         socketio.start_background_task(
             emit, "shell_closed", {"session_id": sid}, namespace="/shells"
         )
+
+    # ── Watcher status namespace ────────────────────────────────────────
+
+    @socketio.on("connect", namespace="/watchers")
+    def on_watchers_connect():
+        pass
+
+    @socketio.on("disconnect", namespace="/watchers")
+    def on_watchers_disconnect():
+        pass
+
+    @socketio.on("watcher_list", namespace="/watchers")
+    def on_watcher_list():
+        with watcher._lock:
+            items = []
+            for name, (handler, observer, mode) in watcher._watchers.items():
+                alive = (observer is not None and observer.is_alive()) if mode == "inotify" else True
+                items.append({
+                    "mapping": name,
+                    "mode": mode,
+                    "alive": alive,
+                    "local_path": getattr(handler, "local_path", ""),
+                })
+        emit("watcher_list", {"watchers": items})
 
     return app, socketio

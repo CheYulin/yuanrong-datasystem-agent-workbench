@@ -131,7 +131,8 @@ label{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase
 .mapping-item .map-paths{font-size:11px;color:var(--text2);font-family:var(--mono)}
 .mapping-item .map-paths .local{color:var(--accent)}
 .mapping-item .map-paths .remote{color:var(--green)}
-.mapping-item .map-status{font-size:11px;min-width:80px;text-align:center}
+.mapping-item .map-status{font-size:11px;min-width:80px;text-align:center;color:var(--text3)}
+.mapping-item .map-status.watcher-pending{color:var(--yellow)}
 .mapping-item .map-actions{display:flex;gap:5px}
 
 /* ── File tree ── */
@@ -680,7 +681,7 @@ function renderMappingList() {
           <div><span class="remote">☁️ ${m.remote_path||'/'}</span></div>
         </div>
       </div>
-      <div class="map-status" id="map-status-${esc(m.name)}">—</div>
+      <div class="map-status${auto ? ' watcher-pending' : ''}" id="map-status-${esc(m.name)}">${auto ? '○ 等待…' : '—'}</div>
       <div class="map-actions">
         <button class="btn btn-sm auto-sync-btn ${auto ? 'active' : ''}"
                 id="btn-auto-${esc(m.name)}"
@@ -1433,6 +1434,54 @@ function initShellSio() {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  WATCHER — inotify/polling status notifications
+// ═══════════════════════════════════════════════════════════════
+let watcherSio = null;
+let watcherStates = {};  // mapping → { mode, alive }
+
+function initWatcherSio() {
+  if (watcherSio) return;
+  watcherSio = io("/watchers", { transports: ["websocket", "polling"] });
+
+  watcherSio.on("connect", () => {
+    watcherSio.emit("watcher_list");
+  });
+  watcherSio.on("watcher_list", ({ watchers }) => {
+    watcherStates = {};
+    (watchers || []).forEach(w => {
+      watcherStates[w.mapping] = { mode: w.mode, alive: w.alive };
+    });
+    updateWatcherStatusUI();
+  });
+  watcherSio.on("watcher_fault", (data) => {
+    watcherStates[data.mapping] = { mode: data.mode, alive: false };
+    updateWatcherStatusUI();
+    toast('🔴 ' + data.message, 'err');
+  });
+  watcherSio.on("watcher_restored", (data) => {
+    watcherStates[data.mapping] = { mode: data.mode, alive: true };
+    updateWatcherStatusUI();
+    toast('🟢 ' + data.message, 'ok');
+  });
+}
+
+function updateWatcherStatusUI() {
+  Object.keys(watcherStates).forEach(name => {
+    const el = document.getElementById('map-status-' + name);
+    if (!el) return;
+    const s = watcherStates[name];
+    if (s.alive) {
+      const dot = s.mode === 'inotify' ? '●' : '◐';
+      el.textContent = dot + ' ' + (s.mode === 'inotify' ? 'inotify' : 'polling');
+      el.style.color = 'var(--green)';
+    } else {
+      el.textContent = '✕ 故障';
+      el.style.color = 'var(--red)';
+    }
+  });
+}
+
 // ── Create shell ─────────────────────────────────────────────────────────────
 async function createShell(type) {
   toggleShellMenu(false);
@@ -1557,6 +1606,7 @@ document.addEventListener('click', e => {
 // ── Init: connect to socket.io on load ───────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   initShellSio();
+  initWatcherSio();
   // Auto-create one local shell on first load
   // createShell('local'); // disabled by default — let user choose
 }, { once: true });

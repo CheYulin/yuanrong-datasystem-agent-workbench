@@ -517,3 +517,67 @@ class TestPollingSyncConstruction:
         assert p.remote_dest == "root@host:/remote/path"
         assert p.delete is True
         assert p.exclude_patterns == []
+
+
+class TestWatchManagerSocketIO:
+    """Tests for WatchManager Socket.IO event emission."""
+
+    def test_set_socketio_stores_reference(self):
+        from dashboard.app import WatchManager
+        wm = WatchManager()
+        class FakeSocketIO:
+            def emit(self, *a, **kw): pass
+        fake = FakeSocketIO()
+        wm.set_socketio(fake)
+        assert wm._socketio is fake
+
+    def test_emit_fault_does_not_crash_when_no_socketio(self):
+        from dashboard.app import WatchManager
+        import logging
+        wm = WatchManager()
+        wm._logger = logging.getLogger("test")
+        # no socketio set — must not raise
+        wm._emit_fault("test-mapping", "observer died")
+
+    def test_emit_restored_does_not_crash_when_no_socketio(self):
+        from dashboard.app import WatchManager
+        import logging
+        wm = WatchManager()
+        wm._logger = logging.getLogger("test")
+        wm._emit_restored("test-mapping", "inotify")
+
+    def test_emit_fault_calls_socketio_emit(self):
+        from dashboard.app import WatchManager
+        import logging
+        wm = WatchManager()
+        wm._logger = logging.getLogger("test")
+        emitted = {}
+        class FakeSocketIO:
+            def emit(self, event, data, namespace=None):
+                emitted["event"] = event
+                emitted["data"] = data
+                emitted["namespace"] = namespace
+        wm.set_socketio(FakeSocketIO())
+        wm._emit_fault("mymap", "test reason", mode="polling")
+        assert emitted["event"] == "watcher_fault"
+        assert emitted["data"]["mapping"] == "mymap"
+        assert emitted["data"]["reason"] == "test reason"
+        assert emitted["data"]["mode"] == "polling"
+        assert emitted["namespace"] == "/watchers"
+
+    def test_emit_restored_calls_socketio_emit(self):
+        from dashboard.app import WatchManager
+        import logging
+        wm = WatchManager()
+        wm._logger = logging.getLogger("test")
+        emitted = {}
+        class FakeSocketIO:
+            def emit(self, event, data, namespace=None):
+                emitted["event"] = event
+                emitted["data"] = data
+                emitted["namespace"] = namespace
+        wm.set_socketio(FakeSocketIO())
+        wm._emit_restored("mymap2", "inotify")
+        assert emitted["event"] == "watcher_restored"
+        assert emitted["data"]["mapping"] == "mymap2"
+        assert emitted["namespace"] == "/watchers"
