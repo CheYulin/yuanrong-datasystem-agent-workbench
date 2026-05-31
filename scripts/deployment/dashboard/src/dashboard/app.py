@@ -26,9 +26,13 @@ import struct
 import subprocess
 import termios
 import threading
+import time
 import uuid
+import weakref
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 import paramiko
 import yaml
@@ -183,7 +187,468 @@ def _parse_rsync_summary(lines: list[str]) -> dict:
     return stats
 
 
-# ── App factory ──────────────────────────────────────────────────────────────
+# ── Auto-sync watcher ─────────────────────────────────────────────────────
+
+_CLANG_EXT = frozenset({".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hxx"})
+_CLANG_FORMAT_CMD = "clang-format --style=file"
+
+def _find_clang_format(local_path):
+    cur = local_path
+    for _ in range(20):
+        cf = os.path.join(cur, ".clang-format")
+        if os.path.isfile(cf):
+            return cf
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return None
+
+def _is_clang_file(path):
+    return any(path.endswith(ext) for ext in _CLANG_EXT)
+
+class _InotifyHandler(FileSystemEventHandler):
+    def __init__(self, mapping_name, local_path, exclude_patterns,
+                 remote_dest, delete, logger, debounce=1.5):
+        super().__init__()
+        self.mapping_name = mapping_name
+        self.local_path = local_path
+        self.exclude_patterns = exclude_patterns
+        self.remote_dest = remote_dest
+        self.delete = delete
+        self._logger = logger
+        self.debounce = debounce
+        self._timer = None
+        self._dirty = False
+        self._clang_fmt = _find_clang_format(local_path)
+        if self._clang_fmt:
+            self._clang_cmd = "clang-format --style=file:" + self._clang_fmt
+        else:
+            self._clang_cmd = _CLANG_FORMAT_CMD
+
+    def _run_clang_format(self, src_path):
+        try:
+            result = subprocess.run(
+                self._clang_cmd.split() + [src_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0 and result.stdout:
+                with open(src_path, "w") as f:
+                    f.write(result.stdout)
+                self._logger.info("[WATCHER] clang-format applied: %s", src_path)
+            else:
+                self._logger.warning("[WATCHER] clang-format failed rc=%d: %s",
+                                  result.returncode, src_path)
+        except Exception as e:
+            self._logger.warning("[WATCHER] clang-format error on %s: %s", src_path, e)
+
+    def _fire_sync(self):
+        self._logger.info("[WATCHER] triggered sync for mapping=%s", self.mapping_name)
+        job_id = uuid.uuid4().hex[:8]
+        jobs[job_id] = {"rc": None, "out": "", "done": False}
+        ignore_file = make_excludes_file(self.exclude_patterns)
+        flags = "-az --exclude-from=" + ignore_file
+        ssh_opts = "-e \"ssh -o ConnectTimeout=10\""
+        cmd = "rsync " + flags + " " + ssh_opts + " " + self.local_path + "/ " + self.remote_dest + "/"
+        if self.delete:
+            cmd += " --delete"
+
+        def do_sync():
+            jobs[job_id]["started"] = True
+            jobs[job_id]["started_at"] = datetime.datetime.now().isoformat()
+            parts = self.remote_dest.split("@")
+            host = parts[1].split(":")[0] if len(parts) > 1 else ""
+            jobs[job_id]["started_info"] = {
+                "host": host, "remote": self.remote_dest,
+                "local": self.local_path, "delete": self.delete, "auto": True,
+            }
+            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True)
+            lines_out = []
+            for line in iter(p.stdout.readline, ""):
+                if line:
+                    lines_out.append(line.rstrip())
+                    jobs[job_id]["out"] = "\n".join(lines_out[-500:])
+            p.wait()
+            jobs[job_id]["rc"] = p.returncode
+            jobs[job_id]["done"] = True
+            jobs[job_id]["finished_at"] = datetime.datetime.now().isoformat()
+            self._logger.info("[WATCHER] sync done for mapping=%s  rc=%d",
+                            self.mapping_name, p.returncode)
+
+        threading.Thread(target=do_sync, daemon=True).start()
+
+    def _schedule(self):
+        self._dirty = True
+        if self._timer is not None:
+            self._timer.cancel()
+        self._timer = threading.Timer(self.debounce, self._fire_and_clear)
+        self._timer.start()
+
+    def _fire_and_clear(self):
+        if self._dirty:
+            self._fire_sync()
+            self._dirty = False
+
+    def _on_event(self, event):
+        if event.is_directory:
+            return
+        src = event.src_path
+        if _should_skip(src):
+            return
+        if _is_clang_file(src):
+            self._logger.debug("[WATCHER] clang-format event: %s", src)
+            self._run_clang_format(src)
+        self._logger.debug("[WATCHER] inotify event: %s %s",
+                         type(event).__name__, src)
+        self._schedule()
+
+    def on_modified(self, event):  self._on_event(event)
+    def on_created(self, event):   self._on_event(event)
+    def on_deleted(self, event):   self._on_event(event)
+    def on_moved(self, event):
+        if _should_skip(event.dest_path):
+            return
+        self._on_event(event)
+
+    def stop(self):
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+
+class _PollingSync:
+    """Fallback: polls local directories for changes using os.stat() mtime."""
+
+    def __init__(self, mapping_name, local_path, exclude_patterns,
+                 remote_dest, delete, logger, interval=5.0):
+        self.mapping_name = mapping_name
+        self.local_path = local_path
+        self.exclude_patterns = exclude_patterns
+        self.remote_dest = remote_dest
+        self.delete = delete
+        self._logger = logger
+        self.interval = interval
+        self._running = False
+        self._mtimes = {}
+        self._timer = None
+        self._collect_mtimes()
+
+    def _prune_dirs(self, dirs):
+        dirs[:] = [d for d in dirs
+                   if d not in _SKIP_BASENAMES and not d.startswith("bazel-")]
+
+    def _collect_mtimes(self):
+        self._mtimes.clear()
+        try:
+            for root, dirs, files in os.walk(self.local_path):
+                self._prune_dirs(dirs)
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    if _should_skip(fpath):
+                        continue
+                    try:
+                        self._mtimes[fpath] = os.path.getmtime(fpath)
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+
+    def _scan(self):
+        changed = []
+        try:
+            for root, dirs, files in os.walk(self.local_path):
+                self._prune_dirs(dirs)
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    if _should_skip(fpath):
+                        continue
+                    try:
+                        mtime = os.path.getmtime(fpath)
+                        if fpath not in self._mtimes or mtime > self._mtimes[fpath]:
+                            changed.append(fpath)
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+        return changed
+
+    def _fire_sync(self):
+        self._logger.info("[WATCHER] [polling] triggered sync for mapping=%s",
+                        self.mapping_name)
+        job_id = uuid.uuid4().hex[:8]
+        jobs[job_id] = {"rc": None, "out": "", "done": False}
+        ignore_file = make_excludes_file(self.exclude_patterns)
+        flags = "-az --exclude-from=" + ignore_file
+        ssh_opts = "-e \"ssh -o ConnectTimeout=10\""
+        cmd = "rsync " + flags + " " + ssh_opts + " " + self.local_path + "/ " + self.remote_dest + "/"
+        if self.delete:
+            cmd += " --delete"
+
+        def do_sync():
+            jobs[job_id]["started"] = True
+            jobs[job_id]["started_at"] = datetime.datetime.now().isoformat()
+            parts = self.remote_dest.split("@")
+            host = parts[1].split(":")[0] if len(parts) > 1 else ""
+            jobs[job_id]["started_info"] = {
+                "host": host, "remote": self.remote_dest,
+                "local": self.local_path, "delete": self.delete, "auto": True,
+            }
+            p = subprocess.Popen(
+                cmd, shell=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True,
+            )
+            lines_out = []
+            for line in iter(p.stdout.readline, ""):
+                if line:
+                    lines_out.append(line.rstrip())
+                    jobs[job_id]["out"] = "\n".join(lines_out[-500:])
+            p.wait()
+            jobs[job_id]["rc"] = p.returncode
+            jobs[job_id]["done"] = True
+            jobs[job_id]["finished_at"] = datetime.datetime.now().isoformat()
+            self._mtimes.clear()
+            self._collect_mtimes()
+            self._logger.info("[WATCHER] [polling] sync done for mapping=%s  rc=%d",
+                           self.mapping_name, p.returncode)
+
+        threading.Thread(target=do_sync, daemon=True).start()
+
+    def _run_loop(self):
+        if not self._running:
+            return
+        self._logger.debug("[WATCHER] [polling] tick for %s  files=%d",
+                          self.mapping_name, len(self._mtimes))
+        changed = self._scan()
+        if changed:
+            self._fire_sync()
+        if self._running:
+            self._timer = threading.Timer(self.interval, self._run_loop)
+            self._timer.start()
+
+    def start(self):
+        self._running = True
+        self._collect_mtimes()
+        self._run_loop()
+
+    def stop(self):
+        self._running = False
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+
+class WatchManager:
+    def __init__(self):
+        self._watchers = {}   # name -> (handler, observer_or_None, mode)
+        self._lock = threading.Lock()
+        self._health_timer = None
+        self._health_interval = 30.0   # check every 30s
+        self._logger = None            # set on first start_watcher
+        self._local_base = None
+        self._mappings = []
+        self._connections = []
+
+    def _build_remote_dest(self, conn, mapping):
+        resolved = resolve_ssh_host(conn["host"])
+        return (resolved.get("user", conn.get("username", ""))
+                + "@" + resolved["host"] + ":" + mapping["remote_path"])
+
+    def _start_health_check(self):
+        if self._health_timer is not None:
+            return
+        self._health_timer = threading.Timer(self._health_interval, self._health_check)
+        self._health_timer.daemon = True
+        self._health_timer.start()
+
+    def _stop_health_check(self):
+        if self._health_timer is not None:
+            self._health_timer.cancel()
+            self._health_timer = None
+
+    def _health_check(self):
+        self._health_timer = None
+        with self._lock:
+            dead = []
+            for name, (handler, observer, mode) in self._watchers.items():
+                if mode == "inotify":
+                    if observer is not None and not observer.is_alive():
+                        dead.append(name)
+                        handler._logger.error(
+                            "[WATCHER] inotify observer died for mapping=%s  auto-restarting", name)
+            # restart dead inotify watchers
+            for name in dead:
+                handler, observer, mode = self._watchers[name]
+                # find the mapping config
+                mapping_cfg = next(
+                    (m for m in self._mappings if m["name"] == name), None
+                )
+                if mapping_cfg:
+                    conn = next(
+                        (c for c in self._connections if c["name"] == mapping_cfg["connection"]),
+                        None,
+                    )
+                    if conn:
+                        self._unlocked_start_inotify(name, handler, mapping_cfg, conn)
+        # reschedule
+        if self._watchers:
+            self._start_health_check()
+
+    def _unlocked_start_inotify(self, mapping_name, old_handler, mapping, conn):
+        """Restart inotify for a mapping (must hold self._lock)."""
+        lp = os.path.join(self._local_base, mapping["local_path"].lstrip("/"))
+        if not os.path.isdir(lp):
+            return
+        remote_dest = self._build_remote_dest(conn, mapping)
+        handler = _InotifyHandler(
+            mapping_name=mapping_name,
+            local_path=lp,
+            exclude_patterns=mapping.get("exclude_patterns", []),
+            remote_dest=remote_dest,
+            delete=mapping.get("delete", False),
+            logger=old_handler._logger,
+            debounce=1.5,
+        )
+        observer = Observer()
+        observer.schedule(handler, lp, recursive=True)
+        try:
+            observer.start()
+            self._watchers[mapping_name] = (handler, observer, "inotify")
+            handler._logger.info("[WATCHER] inotify restarted OK for mapping=%s", mapping_name)
+        except Exception as e:
+            handler._logger.warning(
+                "[WATCHER] inotify restart failed for %s: %s  falling back to polling",
+                mapping_name, e)
+            try:
+                observer.stop()
+            except Exception:
+                pass
+            poll = _PollingSync(
+                mapping_name=mapping_name,
+                local_path=lp,
+                exclude_patterns=mapping.get("exclude_patterns", []),
+                remote_dest=remote_dest,
+                delete=mapping.get("delete", False),
+                logger=old_handler._logger,
+                interval=5.0,
+            )
+            poll.start()
+            self._watchers[mapping_name] = (poll, None, "polling")
+            handler._logger.info("[WATCHER] restarted (polling) for mapping=%s", mapping_name)
+
+    def start_watcher(self, mapping_name, local_base, mapping, conn, logger):
+        self.stop_watcher(mapping_name)
+        # Persist config for health-check restart
+        self._logger = logger
+        self._local_base = local_base
+        if mapping not in self._mappings:
+            self._mappings.append(mapping)
+        if conn not in self._connections:
+            self._connections.append(conn)
+
+        lp = os.path.join(local_base, mapping["local_path"].lstrip("/"))
+        if not os.path.isdir(lp):
+            return
+        remote_dest = self._build_remote_dest(conn, mapping)
+
+        # Try inotify first
+        handler = _InotifyHandler(
+            mapping_name=mapping_name,
+            local_path=lp,
+            exclude_patterns=mapping.get("exclude_patterns", []),
+            remote_dest=remote_dest,
+            delete=mapping.get("delete", False),
+            logger=logger,
+            debounce=1.5,
+        )
+        observer = Observer()
+        observer.schedule(handler, lp, recursive=True)
+        try:
+            observer.start()
+            with self._lock:
+                self._watchers[mapping_name] = (handler, observer, "inotify")
+            logger.info("[WATCHER] started (inotify) for mapping=%s  path=%s", mapping_name, lp)
+            self._start_health_check()
+            return
+        except Exception as e:
+            logger.warning("[WATCHER] inotify failed for %s: %s  falling back to polling",
+                       mapping_name, e)
+            try:
+                observer.stop()
+            except Exception:
+                pass
+
+        # Fallback: polling
+        poll = _PollingSync(
+            mapping_name=mapping_name,
+            local_path=lp,
+            exclude_patterns=mapping.get("exclude_patterns", []),
+            remote_dest=remote_dest,
+            delete=mapping.get("delete", False),
+            logger=logger,
+            interval=5.0,
+        )
+        poll.start()
+        with self._lock:
+            self._watchers[mapping_name] = (poll, None, "polling")
+        logger.info("[WATCHER] started (polling) for mapping=%s  path=%s", mapping_name, lp)
+        self._start_health_check()
+
+    def stop_watcher(self, mapping_name):
+        with self._lock:
+            pair = self._watchers.pop(mapping_name, None)
+        if pair:
+            watcher, observer, mode = pair
+            watcher.stop()
+            if mode == "inotify" and observer is not None:
+                observer.stop()
+                observer.join(timeout=3)
+            watcher._logger.info("[WATCHER] stopped for mapping=%s", mapping_name)
+        if not self._watchers:
+            self._stop_health_check()
+
+    def restart_all(self, mappings, connections, local_base, logger):
+        self._mappings = list(mappings)
+        self._connections = list(connections)
+        self._local_base = local_base
+        current_names = {m["name"] for m in mappings if m.get("auto_sync")}
+        for name in list(self._watchers):
+            if name not in current_names:
+                self.stop_watcher(name)
+        for mapping in mappings:
+            if mapping.get("auto_sync"):
+                conn = next((c for c in connections
+                             if c["name"] == mapping["connection"]), None)
+                if conn:
+                    self.start_watcher(mapping["name"], local_base,
+                                     mapping, conn, logger)
+
+    def stop_all(self):
+        for name in list(self._watchers):
+            self.stop_watcher(name)
+        self._stop_health_check()
+
+
+# ── Global watcher (singleton, lives for process lifetime) ─────────────────
+
+watcher = WatchManager()
+
+
+# ── Auto-sync polling ────────────────────────────────────────────────────
+
+_SKIP_BASENAMES = frozenset({
+    ".git", "__pycache__", "node_modules", ".cache", "bazel-out",
+    "bazel-bin", "bazel-testlogs", ".pytest_cache", ".tox", ".venv",
+    ".idea", ".vscode", ".DS_Store",
+})
+_SKIP_EXTS = frozenset({".pyc", ".pyo", ".swp", ".swo", ".o", ".a", ".so", ".dylib"})
+
+
+def _should_skip(path: str) -> bool:
+    bn = os.path.basename(path)
+    if bn in _SKIP_BASENAMES:
+        return True
+    return any(bn.endswith(ext) for ext in _SKIP_EXTS)
 
 def create_app(log_dir: str = None) -> Flask:
     pkg_dir = Path(__file__).parent.resolve()
@@ -258,6 +723,23 @@ def create_app(log_dir: str = None) -> Flask:
             yaml.safe_dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
         app.logger.info("[CONFIG] saved  path=%s  connections=%d  mappings=%d",
                        config_file, len(cfg.get("connections", [])), len(cfg.get("mappings", [])))
+
+    # ── Start auto-sync (inotify) watchers for mappings with auto_sync=True ──
+    def _start_watchers():
+        try:
+            cfg = load_config()
+            watcher.restart_all(
+                cfg.get("mappings", []),
+                cfg.get("connections", []),
+                local_base,
+                app.logger,
+            )
+            app.logger.info("[WATCHER] initialised  active_mappings=%s",
+                          [m["name"] for m in cfg.get("mappings", []) if m.get("auto_sync")])
+        except Exception as e:
+            app.logger.warning("[WATCHER] failed to start: %s", e)
+
+    threading.Thread(target=_start_watchers, daemon=True).start()
 
     # ── SSH helpers ────────────────────────────────────────────────────
 
@@ -360,6 +842,15 @@ def create_app(log_dir: str = None) -> Flask:
         _save_config(cfg)
         app.logger.info("[CONFIG] updated via API  keys=%s  method=POST  endpoint=/api/config",
                        list(body.keys()))
+        try:
+            watcher.restart_all(
+                cfg.get("mappings", []),
+                cfg.get("connections", []),
+                local_base,
+                app.logger,
+            )
+        except Exception as e:
+            app.logger.warning("[WATCHER] restart after config update failed: %s", e)
         return jsonify({"ok": True, "config": cfg})
 
     @app.route("/api/connections", methods=["GET"])
@@ -456,8 +947,30 @@ def create_app(log_dir: str = None) -> Flask:
         cfg = load_config()
         cfg["mappings"] = [m for m in cfg.get("mappings", []) if m["name"] != name]
         _save_config(cfg)
+        watcher.stop_watcher(name)
         app.logger.info("[MAPPING] deleted  name=%s", name)
         return jsonify({"ok": True})
+
+    @app.route("/api/mappings/<name>/auto-sync", methods=["POST"])
+    def api_mapping_auto_sync(name: str):
+        """Toggle auto-sync for a mapping (or update auto_sync flag for a specific mapping)."""
+        body = request.json or {}
+        enabled = body.get("enabled")
+        cfg = load_config()
+        mapping = next((m for m in cfg.get("mappings", []) if m["name"] == name), None)
+        if not mapping:
+            return jsonify({"error": f"Mapping '{name}' not found"}), 404
+        if enabled is not None:
+            mapping["auto_sync"] = bool(enabled)
+            _save_config(cfg)
+        conn = next((c for c in cfg.get("connections", []) if c["name"] == mapping["connection"]), None)
+        if conn and mapping.get("auto_sync"):
+            watcher.start_watcher(name, local_base, mapping, conn, app.logger)
+            app.logger.info("[WATCHER] enabled for mapping=%s", name)
+        else:
+            watcher.stop_watcher(name)
+            app.logger.info("[WATCHER] disabled for mapping=%s", name)
+        return jsonify({"ok": True, "auto_sync": mapping.get("auto_sync", False)})
 
     @app.route("/api/local/tree")
     def api_local_tree():

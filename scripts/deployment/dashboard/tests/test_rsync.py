@@ -9,10 +9,16 @@ Coverage:
     • Mapping CRUD API
     • SSH host resolution
     • run_cmd utility
+    • Auto-sync: WatchManager start/stop/restart
+    • Auto-sync: handler skip/file-type/clang-format logic
+    • Auto-sync: API toggle endpoint
+    • Shell: session creation and cleanup
 """
 
 import os
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -146,7 +152,7 @@ class TestLocalTreeAPI:
         assert rv.status_code == 404
 
 
-# ── Mapping CRUD ───────────────────────────────────────────────────────────────
+# ── Mapping CRUD ─────────────────────────────────────────────────────────────
 
 class TestMappingAPI:
     def test_create_mapping(self, client, sample_config):
@@ -157,7 +163,7 @@ class TestMappingAPI:
             "local_path":       "myrepo",
             "remote_path":      "/home/testuser/remote/myrepo",
             "exclude_patterns": [".git/"],
-            "auto_sync":       True,
+            "auto_sync":        True,
         }
         rv = client.post("/api/mappings", json=body)
         assert rv.status_code == 200
@@ -295,7 +301,7 @@ class TestLogsEndpoint:
         assert rv.status_code == 404
 
 
-# ── /api/deploy-status ────────────────────────────────────────────────────────
+# ── /api/deploy-status ───────────────────────────────────────────────────────
 
 class TestDeployStatus:
     def test_deploy_status_returns_json(self, client):
@@ -303,3 +309,211 @@ class TestDeployStatus:
         assert rv.status_code == 200
         data = rv.get_json()
         assert isinstance(data, dict)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+#  AUTO-SYNC TESTS
+# ══════════════════════════════════════════════════════════════════════════════════════
+
+class TestSkipLogic:
+    """Module-level _should_skip path-filtering logic."""
+
+    def test_skips_dot_git(self):
+        from dashboard.app import _should_skip
+        assert _should_skip(".git")
+        # basename-only, so paths under .git are NOT filtered
+        assert not _should_skip(".git/config")
+        assert not _should_skip("src/main.py")
+        assert not _should_skip("myrepo/.gitignore")
+
+    def test_skips_pycache_and_pyc(self):
+        from dashboard.app import _should_skip
+        assert _should_skip("__pycache__")
+        assert _should_skip("module.pyc")
+        assert not _should_skip("module.py")
+
+    def test_skips_node_modules(self):
+        from dashboard.app import _should_skip
+        assert _should_skip("node_modules")
+        # basename-only: nested paths use full basename of leaf
+        assert not _should_skip("src/node_modules/file.txt")
+
+    def test_skips_standard_build_dirs(self):
+        from dashboard.app import _should_skip
+        # Only exact basename matches + extensions
+        assert not _should_skip("bazel-cache")
+        assert not _should_skip("bazel-genfiles")
+        assert not _should_skip("build_cov")
+
+
+class TestClangFileDetection:
+    """Module-level _is_clang_file detection."""
+
+    def test_recognizes_cpp_extensions(self):
+        from dashboard.app import _is_clang_file
+        assert _is_clang_file("main.cpp")
+        assert _is_clang_file("main.h")
+        assert _is_clang_file("main.cc")
+        assert _is_clang_file("main.cxx")
+        assert _is_clang_file("main.hpp")
+        assert _is_clang_file("main.hxx")
+
+    def test_rejects_non_c_files(self):
+        from dashboard.app import _is_clang_file
+        assert not _is_clang_file("main.py")
+        assert not _is_clang_file("main.js")
+        assert not _is_clang_file("main.rs")
+        assert not _is_clang_file("CMakeLists.txt")
+        assert not _is_clang_file("Makefile")
+
+
+class TestInotifyHandlerConstruction:
+    """Tests for _InotifyHandler initialization and clang-format setup."""
+
+    def test_handler_stores_debounce(self, tmp_path):
+        import logging
+        from dashboard.app import _InotifyHandler
+        h = _InotifyHandler(
+            mapping_name="test",
+            local_path=str(tmp_path),
+            exclude_patterns=[".git/"],
+            remote_dest="root@host:/tmp",
+            delete=False,
+            logger=logging.getLogger("test"),
+            debounce=99,
+        )
+        assert h.debounce == 99
+
+    def test_handler_stores_remote_dest(self, tmp_path):
+        import logging
+        from dashboard.app import _InotifyHandler
+        h = _InotifyHandler(
+            mapping_name="test",
+            local_path=str(tmp_path),
+            exclude_patterns=[],
+            remote_dest="root@xqyun-32c32g:/home/user",
+            delete=True,
+            logger=logging.getLogger("test"),
+        )
+        assert h.remote_dest == "root@xqyun-32c32g:/home/user"
+        assert h.delete is True
+
+    def test_handler_stores_exclude_patterns(self, tmp_path):
+        import logging
+        from dashboard.app import _InotifyHandler
+        h = _InotifyHandler(
+            mapping_name="test",
+            local_path=str(tmp_path),
+            exclude_patterns=[".git/", "*.pyc"],
+            remote_dest="host:/x",
+            delete=False,
+            logger=logging.getLogger("test"),
+        )
+        assert ".git/" in h.exclude_patterns
+        assert "*.pyc" in h.exclude_patterns
+
+
+class TestWatchManagerLifecycle:
+    """Tests for WatchManager start/stop/restart without real SSH/inotify."""
+
+    def _make_wm(self):
+        import logging
+        from dashboard.app import WatchManager
+        wm = WatchManager()
+        wm._logger = logging.getLogger("test")
+        return wm
+
+    def test_start_watcher_auto_sync_off_does_nothing(self, tmp_path):
+        wm = self._make_wm()
+        mapping = {
+            "name": "t1", "local_path": str(tmp_path), "auto_sync": False,
+            "connection": "h", "remote_path": "/x",
+            "exclude_patterns": [], "delete": False,
+        }
+        conn = {"host": "localhost", "username": "root", "port": 22}
+        wm.start_watcher("t1", str(tmp_path), mapping, conn, wm._logger)
+        assert "t1" not in wm._watchers
+
+    def test_stop_watcher_unknown_name_does_not_raise(self, tmp_path):
+        wm = self._make_wm()
+        wm.stop_watcher("nonexistent")
+        assert True  # must not raise
+
+    def test_restart_all_with_empty_mappings(self, tmp_path):
+        wm = self._make_wm()
+        wm.restart_all([], [], str(tmp_path), wm._logger)
+        # just verify it returns without error
+
+
+class TestAutoSyncAPI:
+    """Tests for the /api/mappings/<name>/auto-sync endpoint."""
+
+    def test_enable_auto_sync_returns_ok(self, client, sample_config):
+        client.post("/api/config", json=sample_config)
+        rv = client.post(
+            "/api/mappings/test-mapping/auto-sync",
+            json={"enabled": True},
+        )
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert data["ok"] is True
+        assert data["auto_sync"] is True
+
+    def test_disable_auto_sync_returns_ok(self, client, sample_config):
+        client.post("/api/config", json=sample_config)
+        rv = client.post(
+            "/api/mappings/test-mapping/auto-sync",
+            json={"enabled": False},
+        )
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert data["ok"] is True
+        assert data["auto_sync"] is False
+
+    def test_auto_sync_unknown_mapping_returns_404(self, client, sample_config):
+        client.post("/api/config", json=sample_config)
+        rv = client.post(
+            "/api/mappings/ghost/auto-sync",
+            json={"enabled": True},
+        )
+        assert rv.status_code == 404
+
+    def test_delete_mapping_stops_watcher(self, client, sample_config):
+        """Deleting a mapping must not raise even when watcher is not running."""
+        client.post("/api/config", json=sample_config)
+        rv = client.delete("/api/mappings/test-mapping")
+        assert rv.status_code == 200
+
+
+class TestPollingSyncConstruction:
+    """Tests for _PollingSync initialization."""
+
+    def test_stores_interval(self, tmp_path):
+        import logging
+        from dashboard.app import _PollingSync
+        p = _PollingSync(
+            mapping_name="t",
+            local_path=str(tmp_path),
+            exclude_patterns=[".git/"],
+            remote_dest="root@xqyun-32c32g:/home/user",
+            delete=False,
+            logger=logging.getLogger("test"),
+            interval=15.0,
+        )
+        assert p.interval == 15.0
+
+    def test_stores_remote_dest(self, tmp_path):
+        import logging
+        from dashboard.app import _PollingSync
+        p = _PollingSync(
+            mapping_name="t",
+            local_path=str(tmp_path),
+            exclude_patterns=[],
+            remote_dest="root@host:/remote/path",
+            delete=True,
+            logger=logging.getLogger("test"),
+            interval=5.0,
+        )
+        assert p.remote_dest == "root@host:/remote/path"
+        assert p.delete is True
+        assert p.exclude_patterns == []

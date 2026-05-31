@@ -67,6 +67,8 @@ header{
 .btn:disabled:hover{background:var(--card);color:var(--text);border-color:var(--border)}
 .btn-full{width:100%;justify-content:center}
 .btn-sm{padding:4px 9px;font-size:11px}
+.auto-sync-btn{color:var(--text2);background:var(--bg)}
+.auto-sync-btn.active{color:var(--yellow);background:rgba(255,200,0,.12)}
 .btn-group{display:flex;gap:6px;flex-wrap:wrap}
 .tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}
 .tag-ok{background:var(--green_bg);color:var(--green)}
@@ -161,12 +163,18 @@ label{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase
 .sync-output{font-family:var(--mono);font-size:11px;line-height:1.5;max-height:300px;overflow-y:auto;padding:8px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);white-space:pre-wrap;word-break:break-all;color:var(--text2)}
 .d-add{color:var(--green)}.d-del{color:var(--red)}.d-mod{color:var(--yellow)}.d-info{color:var(--text3)}
 
-/* ── Remote Browser ── */
-.remote-browser{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.remote-tree-wrap{position:relative}
+/* ── Browser area (Deploy panel) ── */
+.browser-area{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;gap:12px;min-height:360px}
+.browser-area .breadcrumb-row{grid-column:1/-1}
+.browser-area .local-browser,
+.browser-area .remote-browser{display:flex;flex-direction:column}
+.browser-area .local-browser .tree-wrap,
+.browser-area .remote-browser .remote-tree-wrap{flex:1;min-height:0;overflow:auto}
+.browser-area .tree-wrap{max-height:none}
+
 .remote-breadcrumb{
-  padding:6px 10px;background:#f6f8fa;border:1px solid var(--border);border-bottom:none;
-  border-radius:var(--r) var(--r) 0 0;font-size:11px;font-family:var(--mono);color:var(--text2);
+  padding:6px 10px;background:#f6f8fa;border:1px solid var(--border);border-radius:var(--r);
+  font-size:11px;font-family:var(--mono);color:var(--text2);
   display:flex;align-items:center;gap:4px;overflow-x:auto;white-space:nowrap;
 }
 .remote-breadcrumb span{cursor:pointer;color:var(--accent)}
@@ -337,9 +345,16 @@ label{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase
     </div>
 
     <!-- Two-col browser -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="browser-area">
+      <!-- Breadcrumb row (spans both cols) -->
+      <div class="breadcrumb-row remote-breadcrumb" id="remote-breadcrumb-bar">
+        <span class="icon" style="margin-right:4px">☁️</span>
+        <span class="breadcrumb-root" onclick="remoteBrowse('')">/</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--text3)" id="remote-conn-label"></span>
+      </div>
+
       <!-- Local browser -->
-      <div class="card">
+      <div class="card local-browser">
         <h3><span class="icon">💻</span> 本地 <span id="local-breadcrumb" style="font-size:10px;color:var(--text2);font-weight:400;margin-left:8px"></span></h3>
         <div class="tree-wrap" id="local-tree-wrap">
           <div class="tree-search"><input type="text" placeholder="搜索…" oninput="filterLocalTree(this.value)"/></div>
@@ -348,21 +363,11 @@ label{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase
       </div>
 
       <!-- Remote browser -->
-      <div class="card">
-        <h3>
-          <span class="icon">☁️</span> 远端 <span id="remote-breadcrumb" style="font-size:10px;color:var(--text2);font-weight:400;margin-left:8px"></span>
-          <span style="margin-left:auto;font-size:10px;font-weight:400;color:var(--text3)" id="remote-conn-label"></span>
-        </h3>
-        <div class="remote-browser">
-          <div class="remote-tree-wrap" style="grid-column:1/-1">
-            <div class="remote-breadcrumb" id="remote-breadcrumb-bar">
-              <span class="breadcrumb-root" onclick="remoteBrowse('')">/</span>
-            </div>
-            <div class="tree-wrap" id="remote-tree-wrap">
-              <div class="tree-search"><input type="text" placeholder="搜索远端…" oninput="filterRemoteTree(this.value)"/></div>
-              <div id="remote-tree"></div>
-            </div>
-          </div>
+      <div class="card remote-browser">
+        <h3><span class="icon">☁️</span> 远端</h3>
+        <div class="remote-tree-wrap" id="remote-tree-wrap">
+          <div class="tree-search"><input type="text" placeholder="搜索远端…" oninput="filterRemoteTree(this.value)"/></div>
+          <div id="remote-tree"></div>
         </div>
       </div>
     </div>
@@ -666,6 +671,7 @@ function renderMappingList() {
   }
   el.innerHTML = mappings.map(m => {
     const conn = connections.find(c=>c.name===m.connection) || {};
+    const auto = m.auto_sync;
     return `<div class="mapping-item">
       <div>
         <div class="map-name">${esc(m.name)}</div>
@@ -676,12 +682,44 @@ function renderMappingList() {
       </div>
       <div class="map-status" id="map-status-${esc(m.name)}">—</div>
       <div class="map-actions">
+        <button class="btn btn-sm auto-sync-btn ${auto ? 'active' : ''}"
+                id="btn-auto-${esc(m.name)}"
+                onclick="toggleAutoSync('${esc(m.name)}')"
+                title="${auto ? '关闭自动同步' : '开启自动同步'}">
+          ⚡${auto ? ' ON' : ''}
+        </button>
         <button class="btn btn-sm" onclick="editMapping('${esc(m.name)}')">✏️</button>
         <button class="btn btn-sm success" onclick="selectAndDeploy('${esc(m.name)}')">🚀</button>
         <button class="btn btn-sm danger" onclick="delMapping('${esc(m.name)}')">✕</button>
       </div>
     </div>`;
   }).join('');
+}
+
+async function toggleAutoSync(name) {
+  const m = mappings.find(x => x.name === name);
+  if (!m) return;
+  const newVal = !m.auto_sync;
+  try {
+    const r = await fetch('/api/mappings/' + encodeURIComponent(name) + '/auto-sync', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: newVal}),
+    });
+    const d = await r.json();
+    if (d.error) { toast('auto-sync: ' + d.error, 'err'); return; }
+    m.auto_sync = d.auto_sync;
+    // Update button state
+    const btn = document.getElementById('btn-auto-' + name);
+    if (btn) {
+      btn.classList.toggle('active', d.auto_sync);
+      btn.textContent = d.auto_sync ? '⚡ ON' : '⚡';
+      btn.title = d.auto_sync ? '关闭自动同步' : '开启自动同步';
+    }
+    toast(d.auto_sync ? '⚡ 自动同步已开启' : '⚡ 自动同步已关闭', 'ok');
+  } catch(e) {
+    toast('auto-sync toggle failed: ' + e, 'err');
+  }
 }
 
 function renderMappingSelect() {
@@ -940,10 +978,9 @@ async function onMappingChange() {
 
   // Load remote tree
   remoteConn = curMapping.connection;
-  remotePath = '.';
-  document.getElementById('remote-breadcrumb').textContent = curMapping.remote_path || '/';
+  remotePath = curMapping.remote_path || '.';
   renderRemoteConnLabel();
-  await loadRemoteTree(curMapping.remote_path || '.');
+  await loadRemoteTree(remotePath);
 
   // Reset diff
   document.getElementById('diff-stats').style.display='none';
@@ -967,7 +1004,10 @@ function renderRemoteBreadcrumb(path) {
     acc += '/' + p;
     html += `<span class="breadcrumb-sep">/</span><span onclick="remoteBrowse('${esc(acc)}')">${esc(p)}</span>`;
   }
+  // Keep the conn-label (last child) intact
+  const connLabel = bar.querySelector('#remote-conn-label');
   bar.innerHTML = html;
+  if (connLabel) bar.appendChild(connLabel);
 }
 
 async function loadRemoteTree(path) {
@@ -1360,7 +1400,7 @@ let shellMenuOpen = false;
 // ── Socket.IO init ───────────────────────────────────────────────────────────
 function initShellSio() {
   if (shellSio) return;
-  shellSio = io("/", { transports: ["websocket", "polling"] });
+  shellSio = io("/shells", { transports: ["websocket", "polling"] });
 
   shellSio.on("connect", () => {
     document.getElementById('shell-status').textContent = '●';
@@ -1385,8 +1425,8 @@ function initShellSio() {
     addShellTab(session);
     activateShell(session.session_id);
   });
-  shellSio.on("shell_list", (list) => {
-    renderShellTabs(list);
+  shellSio.on("shell_list", () => {
+    renderShellTabs();
   });
   shellSio.on("shell_error", ({ error }) => {
     toast("Shell 错误: " + error, "err");
@@ -1440,7 +1480,7 @@ function addShellTab(session) {
   });
 
   shellSessions[session.session_id] = { term, screenDiv, session };
-  renderAllShellTabs();
+  renderShellTabs();
 }
 
 function activateShell(sessionId) {
@@ -1485,11 +1525,10 @@ function closeShellTab(sessionId) {
     const remaining = Object.keys(shellSessions)[0];
     activateShell(remaining || null);
   }
-  renderAllShellTabs();
+  renderShellTabs();
 }
 
-function renderShellTabs(list) {
-  // list may not contain all info — merge with local state
+function renderShellTabs() {
   const ids = Object.keys(shellSessions);
   document.getElementById('shell-tabs').innerHTML = ids.map(id => {
     const s = shellSessions[id];
@@ -1502,11 +1541,6 @@ function renderShellTabs(list) {
       <span class="tclose" onclick="event.stopPropagation();closeShellTab('${id}')">✕</span>
     </div>`;
   }).join('');
-  renderAllShellTabs();
-}
-
-function renderAllShellTabs() {
-  renderShellTabs(Object.values(shellSessions).map(s => s.session));
 }
 
 // ── Toolbar actions ─────────────────────────────────────────────────────────────
