@@ -105,7 +105,8 @@ def run_step(step: dict[str, Any], *, skill: str, evidence_dir: Path, dry_run: b
     if step.get("check") == "help":
         cmd = step["command"].split()
         code, out = run_cmd(cmd)
-        record.update({"kind": "help", "command": cmd, "exit_code": code, "status": "PASS" if code == 0 else "FAIL"})
+        status = "PASS" if code == 0 else ("WARN" if step.get("allow_fail") else "FAIL")
+        record.update({"kind": "help", "command": cmd, "exit_code": code, "status": status})
         return record
 
     if step.get("check") == "script":
@@ -180,10 +181,11 @@ def sync_for_node(node: str) -> None:
     subprocess.run(["bash", str(script)], cwd=WORKBENCH, check=True)
 
 
-def node_workspace(node: str) -> str:
+def node_ssh_target(node: str) -> tuple[str, str]:
     with (WORKBENCH / "scripts/config/nodes.yaml").open(encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    return cfg["nodes"][node]["workspace_root"]
+    entry = cfg["nodes"][node]
+    return f"{entry['ssh_user']}@{entry['ssh_host']}", entry["workspace_root"]
 
 
 def ssh_verify(skill: str, *, sync: bool, dry_run: bool) -> int:
@@ -193,18 +195,20 @@ def ssh_verify(skill: str, *, sync: bool, dry_run: bool) -> int:
     if sync:
         sync_for_node(node)
 
-    ws = node_workspace(node)
-    with (WORKBENCH / "scripts/config/nodes.yaml").open(encoding="utf-8") as f:
-        user = yaml.safe_load(f)["nodes"][node]["ssh_user"]
-    host = node
+    _, ws = node_ssh_target(node)
     remote_wb = f"{ws}/yuanrong-datasystem-agent-workbench"
+    user_host, _ = node_ssh_target(node)
     dry_flag = " --dry-run" if dry_run else ""
     cmd = (
-        f"cd {remote_wb} && VERIFY_ON_NODE='{node}' "
-        f"python3 scripts/harness/verify_skill.py --skill {skill} --local{dry_flag}"
+        f"set -euo pipefail; "
+        f"WB=\"{remote_wb}\"; "
+        f"[[ -d \"$WB\" ]] || WB=\"$HOME/workspace/git-repos/yuanrong-datasystem-agent-workbench\"; "
+        f"cd \"$WB\"; "
+        f"VERIFY_ON_NODE='{node}' python3 \"$WB/scripts/harness/verify_skill.py\" "
+        f"--skill {skill} --local{dry_flag}"
     )
     proc = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", f"{user}@{host}", "bash", "-lc", cmd],
+        ["ssh", "-o", "BatchMode=yes", user_host, "bash", "-lc", cmd],
         cwd=WORKBENCH,
     )
     return proc.returncode

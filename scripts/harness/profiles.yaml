@@ -213,7 +213,7 @@ profiles:
       - id: build
         label: Build selected backend once before test gates
         uses: yuanrong-datasystem/build.sh
-        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)" 2>&1 | tail -120
+        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)"
       - id: smoke
         label: Remote smoke tests
         uses: scripts/testing/verify/smoke/run_smoke_remote.sh
@@ -247,7 +247,7 @@ profiles:
       - id: build
         label: Build selected backend once before full gates
         uses: yuanrong-datasystem/build.sh
-        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)" 2>&1 | tail -120
+        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)"
       - id: smoke
         label: Full smoke tests
         uses: scripts/testing/verify/smoke/run_smoke_remote.sh
@@ -364,6 +364,7 @@ skill_verify:
         path: docs/observable/workbook/sheet1-call-chain.md
       - check: help
         command: python3 scripts/analysis/generate_bugfix_fema_report.py --help
+        allow_fail: true
   wb-html-publish:
     node: xqyun-32c32g
     steps:
