@@ -124,6 +124,8 @@ class HarnessProfilesContractTest(unittest.TestCase):
             step_ids = [step["id"] for step in profile["steps"]]
             self.assertIn("build", step_ids, profile_name)
             for step in profile["steps"]:
+                if step["id"] == "build":
+                    self.assertNotIn("| tail", step["command"], f"{profile_name}:build")
                 if step["id"] in {"smoke", "ut", "st"}:
                     self.assertIn("--skip-build", step["command"], f"{profile_name}:{step['id']}")
 
@@ -140,6 +142,10 @@ class HarnessProfilesContractTest(unittest.TestCase):
             "datasystem_root.py",
         ):
             self.assertTrue((WORKBENCH / "scripts/lib" / name).is_file(), name)
+
+    def test_verify_skill_entry_exists(self) -> None:
+        self.assertTrue((WORKBENCH / "scripts/harness/verify_skill.sh").is_file())
+        self.assertTrue((WORKBENCH / "scripts/harness/verify_skill.py").is_file())
 
     def test_dry_run_json_and_evidence_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# Run workbench + datasystem skill verification on tiantiyun-80c128g.
-# Local entry: rsync workspace, then SSH to run TDD + L1–L8 user-path ladder.
+# Remote skill verification on tiantiyun (+ TDD on verify node).
 #
-# Usage (from agent-workbench root, or WSL):
+# Usage:
 #   bash scripts/harness/run_skill_verification_remote.sh
 #   bash scripts/harness/run_skill_verification_remote.sh --skip-sync
 #   bash scripts/harness/run_skill_verification_remote.sh --tests-only
 #   bash scripts/harness/run_skill_verification_remote.sh --user-only
+#   bash scripts/harness/run_skill_verification_remote.sh --dry-run
 set -euo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKBENCH_ROOT="$(cd "${HARNESS_DIR}/../.." && pwd)"
-LIB_DIR="${WORKBENCH_ROOT}/scripts/development/lib"
+LIB_DIR="${WORKBENCH_ROOT}/scripts/lib"
 SCRIPT_DIR="${LIB_DIR}"
+# shellcheck source=../lib/load_nodes.sh
 . "${LIB_DIR}/load_nodes.sh"
+# shellcheck source=../lib/common.sh
 . "${LIB_DIR}/common.sh"
+# shellcheck source=../lib/remote_defaults.sh
 . "${LIB_DIR}/remote_defaults.sh"
 
 NODE="$(node_role_default verify_smoke)"
@@ -23,12 +26,14 @@ init_remote "${NODE}"
 SKIP_SYNC=0
 TESTS_ONLY=0
 USER_ONLY=0
+DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-sync) SKIP_SYNC=1; shift ;;
     --tests-only) TESTS_ONLY=1; shift ;;
     --user-only) USER_ONLY=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help)
       sed -n '1,14p' "$0" | tail -n +2
       exit 0
@@ -38,22 +43,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 REMOTE_WB="${REMOTE_BASE}/yuanrong-datasystem-agent-workbench"
-REMOTE_ENV="VERIFY_ON_NODE='${NODE}'"
+VERIFY_OPTS=()
+(( SKIP_SYNC )) || VERIFY_OPTS+=(--sync)
+(( DRY_RUN )) && VERIFY_OPTS+=(--dry-run)
 
-if [[ "${SKIP_SYNC}" -eq 0 ]]; then
-  bash "${HARNESS_DIR}/sync_workspace_to_tiantiyun.sh"
-fi
-
-REMOTE_PARTS=()
 if [[ "${USER_ONLY}" -eq 0 ]]; then
-  REMOTE_PARTS+=("${REMOTE_ENV} bash '${REMOTE_WB}/scripts/run_skill_tests.sh'")
+  log_info "TDD on ${NODE}"
+  ssh_remote "${REMOTE}" "cd '${REMOTE_WB}' && bash scripts/run_skill_tests.sh"
 fi
+
 if [[ "${TESTS_ONLY}" -eq 0 ]]; then
-  REMOTE_PARTS+=("${REMOTE_ENV} bash '${REMOTE_WB}/scripts/run_skill_user_verification.sh'")
+  log_info "Skill verify (tiantiyun skills via verify_skill.sh)"
+  for skill in wb-build wb-dev wb-daily wb-perf wb-docs; do
+    bash "${HARNESS_DIR}/verify_skill.sh" --skill "${skill}" "${VERIFY_OPTS[@]}"
+  done
 fi
 
-REMOTE_CMD="$(IFS=' && '; echo "${REMOTE_PARTS[*]}")"
-log_info "Running on ${NODE} (${REMOTE}): ${REMOTE_CMD}"
-ssh_remote "${REMOTE}" "${REMOTE_CMD}"
-
-log_info "Skill verification finished on ${NODE}. Evidence: ${REMOTE_WB}/results/skill_verification_*"
+log_info "Done."

@@ -13,6 +13,9 @@ LIVE_DOCS = (
     "scripts/harness/README.md",
     "docs/agent/scripts-map.md",
     "INDEX.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".cursor/rules/skills-entry.mdc",
 )
 FORBIDDEN_TOKENS = (
     "remote_build_run_datasystem.sh",
@@ -22,6 +25,10 @@ FORBIDDEN_TOKENS = (
     "wb-verify",
     "wb-log-analysis",
     "wb-perf-research",
+    "run_skill_user_verification.sh",
+    "run_skill_html_verification.sh",
+    "scripts/development/lib/load_nodes",
+    "L1–L8",
 )
 
 
