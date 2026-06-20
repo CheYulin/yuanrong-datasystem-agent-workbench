@@ -22,11 +22,10 @@ Sheet1 表头第二列可悬停批注："本列 = 正向树；逆向用 Sheet5"�
 
 ## 重新生成 xlsx
 
-```bash
-./ops docs.kv_observability_xlsx
-```
+当前仓库内 **尚无** 自动生成脚本；工作簿以 `docs/observable/workbook/kv-client-观测-调用链与URMA-TCP.xlsx` 为已提交产物。  
+新增生成器时放入 `scripts/documentation/`，并在 **wb-docs** skill 登记。
 
-（在 `yuanrong-datasystem-agent-workbench` 仓库根执行，产物写入本目录。）
+（在 `yuanrong-datasystem-agent-workbench` 仓库根执行相关脚本；见 `.cursor/skills/wb-docs/SKILL.md`。）
 
 ## 相关文档
 

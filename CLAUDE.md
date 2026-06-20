@@ -5,9 +5,12 @@ This is the **yuanrong-datasystem-agent-workbench** companion repository for **y
 ## Quick Start
 
 1. Read [`AGENTS.md`](AGENTS.md) — roles, script/Skill/Excel/PPT conventions.
-2. Read [`docs/agent/decision-tree.md`](docs/agent/decision-tree.md) — intent-based routing to the right doc fast.
-3. Read [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md) — when to use which `./ops` command.
-4. Read [`docs/agent/maintenance.md`](docs/agent/maintenance.md) — what to update after making changes.
+2. Read [`INDEX.md`](INDEX.md) — **5 workbench skills** in `.skills/` (L1–L8 verify ladder).
+3. Read [`docs/agent/decision-tree.md`](docs/agent/decision-tree.md) — intent-based routing to the right doc fast.
+4. Read [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md) — which **wb-*** skill and script path to use.
+5. Read [`docs/agent/maintenance.md`](docs/agent/maintenance.md) — what to update after making changes.
+
+Canonical skills: `.skills/wb-verify`, `wb-log-analysis`, `wb-perf-research`, `wb-html-publish`, `wb-docs`.
 
 ## Cross-Repo Notes
 

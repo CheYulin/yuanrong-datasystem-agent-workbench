@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wb-docs · 报告与工作簿交付</title>
+    <link rel="stylesheet" href="/assets/css/site.css">
+    <style>
+      .skill-badge { display:inline-block; padding:0.15rem 0.55rem; border-radius:4px; font-size:0.75rem; font-weight:600; margin-right:0.4rem; }
+      .wb { background:#dbeafe; color:#1e40af; }
+      .ds { background:#d1fae5; color:#065f46; }
+      .meta { color:#656d76; font-size:0.9rem; margin-bottom:1.2rem; }
+      pre { background:#f6f8fa; padding:0.75rem 1rem; border-radius:6px; overflow-x:auto; font-size:0.85rem; }
+      table { width:100%; border-collapse:collapse; margin:0.8rem 0; font-size:0.9rem; }
+      th, td { border:1px solid #d0d7de; padding:0.45rem 0.65rem; text-align:left; }
+      th { background:#f6f8fa; }
+      .nav-back { margin-bottom:1rem; font-size:0.9rem; }
+    </style>
+</head>
+<body>
+<div class="content-area">
+
+<p class="nav-back"><a href="/research/skills-catalog-overview-20260619.html">← Skills 全览</a></p>
+<h1>wb-docs · 报告与工作簿交付</h1>
+<p class="meta"><span class="skill-badge wb">Workbench</span> <strong>Skill ID</strong> <code>wb-docs</code> · <strong>源文件</strong> <code>yuanrong-datasystem-agent-workbench/.cursor/skills/wb-docs/</code> · <strong>TDD</strong> 3/3 contract tests · 2026-06-19</p>
+<p>从日志生成 perf Markdown、Bugfix↔FEMA 覆盖 HTML、commit 草稿。</p>
+
+<h2>何时使用</h2>
+<p>需要可复现表格/报告，而非单次对话摘要。</p>
+<p><strong>典型触发语：</strong>gen_kv_perf_report、FEMA 覆盖、commit message 草稿、workbook</p>
+<p><strong>默认节点/环境：</strong>本地或 CI</p>
+
+<h2>命令与脚本</h2>
+<table><thead><tr><th>用途</th><th>命令</th></tr></thead><tbody><tr><td>KV perf 报告</td><td><code>python3 scripts/metrics/gen_kv_perf_report.py <worker.log> …</code></td></tr><tr><td>Bugfix FEMA HTML</td><td><code>python3 scripts/analysis/generate_bugfix_fema_report.py</code></td></tr><tr><td>Commit 草稿</td><td><code>bash scripts/development/git/generate_commit_message.sh</code></td></tr></tbody></table>
+
+<h2>工作流</h2>
+<ol><li>读 docs/observable/workbook/README.md 假设</li><li>跑脚本，输出路径写入 RFC/报告</li><li>结论级 HTML → wb-html-publish</li></ol>
+
+<h2>相关 Skill</h2>
+<ul><li><a href="/research/skill-wb-html-publish-20260619.html">wb-html-publish</a> — yche.me 发布</li><li><a href="/research/skill-ds-log-analysis-20260619.html">ds-log-analysis</a> — KV 日志 HTML</li></ul>
+
+</div>
+<script src="/assets/js/site.js"></script>
+</body>
+</html>

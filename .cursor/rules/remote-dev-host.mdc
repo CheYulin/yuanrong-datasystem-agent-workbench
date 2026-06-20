@@ -26,6 +26,6 @@ Rules:
 - **Never** rely on the default (which uses a temporary `/tmp/<hash>` that gets wiped).
 - **Never** point `DS_OPENSOURCE_DIR` inside the per-build `build/` directory — when `build/` is removed for a clean build, the cache must survive.
 - If `CMakeCache.txt` records a different `DS_OPENSOURCE_DIR`, delete `CMakeCache.txt` first to force a fresh configure (otherwise the cache won't take effect).
-- Reference implementation: `vibe-coding-files/scripts/build/remote_build_run_datasystem.sh` (handles the cache-mismatch invalidation automatically).
+- Reference implementation: `scripts/harness/sync_workspace_to_tiantiyun.sh`.
 
 If SSH is unavailable in the current session, state that limitation and still provide the exact remote command line for the user to run on **`xqyun-32c32g`**.

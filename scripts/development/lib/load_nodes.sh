@@ -8,6 +8,8 @@
 #
 # Functions:
 #   node_default              - print default node name
+#   node_role_default <role>  - print node name for a role (e.g. verify_smoke, publish_web)
+#   node_web_root <name>      - print web publish root for node (optional)
 #   node_ssh_host <name>      - print SSH host for node
 #   node_ssh_user <name>       - print SSH user for node
 #   node_workspace_root <name> - print workspace root path for node
@@ -24,8 +26,20 @@ set -euo pipefail
 
 _load_yaml_path() {
   local dir="${SCRIPT_DIR}"
-  # caller is in scripts/lib/ → ../config/ is scripts/config/
-  echo "$(cd "${dir}/../config" && pwd)/nodes.yaml"
+  # lib/ may live under scripts/development/lib or scripts/lib
+  local candidates=(
+    "${dir}/../../config/nodes.yaml"
+    "${dir}/../config/nodes.yaml"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      echo "$(cd "$(dirname "${candidate}")" && pwd)/nodes.yaml"
+      return 0
+    fi
+  done
+  echo "load_nodes.sh: nodes.yaml not found (searched ${candidates[*]})" >&2
+  exit 1
 }
 
 _nodes_parse() {
@@ -48,6 +62,9 @@ with open('${yaml_path}', 'r') as f:
 default_node = data.get('default', '')
 print('__DEFAULT__|' + default_node)
 
+for role_name, role_node in (data.get('roles') or {}).items():
+    print('__ROLE__|' + role_name + '|' + str(role_node))
+
 for node_name, cfg in data.get('nodes', {}).items():
     print('__NODE__|' + node_name)
     print('ssh_host|' + str(cfg.get('ssh_host', '')))
@@ -56,6 +73,7 @@ for node_name, cfg in data.get('nodes', {}).items():
     print('hermes_workspace_root|' + str(cfg.get('hermes_workspace_root', '')))
     print('thirdparty_cache|' + str(cfg.get('thirdparty_cache', '')))
     print('pkg_manager|' + str(cfg.get('pkg_manager', '')))
+    print('web_root|' + str(cfg.get('web_root', '')))
 " 2>&1)"
 }
 
@@ -83,6 +101,23 @@ _nodes_find_node() {
 node_default() {
   _nodes_parse
   echo "${_NODES_CACHE}" | grep '^__DEFAULT__|' | cut -d'|' -f2
+}
+
+node_role_default() {
+  local role="${1:?node_role_default: role name required}"
+  _nodes_parse
+  local mapped
+  mapped="$(echo "${_NODES_CACHE}" | grep "^__ROLE__|${role}|" | cut -d'|' -f3 | head -1)"
+  if [[ -n "$mapped" ]]; then
+    echo "$mapped"
+  else
+    node_default
+  fi
+}
+
+node_web_root() {
+  local node="${1:?node_web_root: node name required}"
+  _nodes_find_node "$node" | grep '^web_root|' | cut -d'|' -f2
 }
 
 node_ssh_host() {

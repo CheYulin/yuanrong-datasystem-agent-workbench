@@ -7,7 +7,7 @@
 1. 脚本放在 `scripts/` 合适子目录（build / development / testing / analysis / documentation）。
 2. 更新 [`scripts/README.md`](../../scripts/README.md) 中对应子目录说明。
 3. 更新 [`docs/agent/scripts-map.md`](scripts-map.md) 的按任务选脚本章节。
-4. 若脚本有 `./ops` 入口，确认 `ops` 路由已注册。
+4. 若脚本有用户入口，在对应 **wb-*** skill 与 `docs/agent/scripts-map.md` 登记路径。
 5. 若脚本生成产物（Excel、报告等），在脚本头部注释写明输入输出与依赖。
 
 ## 新增文档

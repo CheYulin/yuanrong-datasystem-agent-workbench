@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench Dev"
+  short_description: "Format, smoke, UT, ST, and matrix gates for PR readiness"
+  default_prompt: "Use $wb-dev to run the daily developer verification loop."

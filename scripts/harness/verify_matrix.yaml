@@ -1,0 +1,91 @@
+# Dev/Test/Verify matrix — maps change types to harness commands.
+# Consumed by ds-harness plan (future) and harness docs.
+# Node roles: see scripts/config/nodes.yaml
+
+version: 1
+
+roles:
+  smoke: verify_smoke    # tiantiyun-80c128g
+  ut: verify_ut
+  st: verify_st
+  publish: publish_web   # xqyun-32c32g
+
+levels:
+  - id: smoke
+    label: Smoke
+    role: verify_smoke
+    command: bash scripts/testing/verify/smoke/run_smoke_remote.sh
+    max_minutes: 5
+
+  - id: ut
+    label: Unit tests
+    role: verify_ut
+    command: bash scripts/testing/verify/ut/run_ut_remote.sh
+    max_minutes: 30
+
+  - id: st
+    label: System tests
+    role: verify_st
+    command: bash scripts/testing/verify/st/run_st_remote.sh
+    max_minutes: 60
+
+change_types:
+  - id: any
+    match: {}
+    minimum: [smoke]
+    recommended: []
+
+  - id: client_hot_path
+    match:
+      paths: ["src/datasystem/client/", "include/datasystem/"]
+    minimum: [smoke]
+    recommended: [ut]
+    ut_filter_hint: "KVClient|ObjectClient"
+
+  - id: worker_runtime
+    match:
+      paths: ["src/datasystem/worker/"]
+    minimum: [smoke]
+    recommended: [ut, st]
+    ut_filter_hint: "worker"
+    st_filter_hint: "object|worker"
+
+  - id: urma_transfer
+    match:
+      paths: ["transfer_engine/", "src/datasystem/common/urma", "urma"]
+      keywords: ["urma", "ub", "jetty", "transfer"]
+    minimum: [smoke]
+    recommended: [st]
+    extra:
+      - bash scripts/testing/verify/validate_urma_tcp_observability_logs.sh
+
+  - id: zmq_rpc
+    match:
+      paths: ["src/datasystem/common/rpc/", "rpc/zmq"]
+      keywords: ["zmq", "rpc"]
+    minimum: [smoke]
+    recommended: [st]
+    extra:
+      - bash scripts/testing/verify/smoke/harness_zmq_metrics_e2e.sh
+
+  - id: etcd_cluster
+    match:
+      paths: ["src/datasystem/master/", "etcd", "cluster-manager"]
+      keywords: ["etcd", "meta", "cluster"]
+    minimum: [smoke]
+    recommended: [st]
+    st_filter_hint: "cluster"
+
+  - id: kvtest_scenario
+    match:
+      keywords: ["kvtest", "bench", "压测"]
+    minimum: []
+    recommended: [bench.kvtest.smoke]
+    notes: "kvtest: tests/kvtest/README.md; dsbench: bench.dsbench.smoke profile"
+
+  - id: docs_context_only
+    match:
+      paths: [".repo_context/", "AGENTS.md", "CLAUDE.md", "docs/"]
+    minimum: []
+    recommended: []
+    notes: "yche.me HTML: wb-html-publish; metadata: validate_module_metadata.py if changed"

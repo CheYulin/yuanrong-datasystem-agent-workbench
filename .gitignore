@@ -1,4 +1,5 @@
 logs
+results
 # Performance exploration (2026-05-25)
 !/results/2026-05-25_perf_explore/scripts/
 !/results/2026-05-25_perf_explore/logs/.gitkeep

@@ -12,16 +12,17 @@
 
 ## 脚本与 Skill
 
-- **新增可执行脚本**：放在仓库根目录 **`scripts/`** 合适子目录，并更新 [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md) 或对应 README。  
-- **同一流程多次重复**：建议沉淀为 **Cursor Agent Skill**。现有 Skill：
-  - [`.cursor/skills/feature-tree-to-docs/`](.cursor/skills/feature-tree-to-docs/SKILL.md) — 特性树 TSV → Markdown 文档
-  - [`.cursor/skills/run-and-verify/`](.cursor/skills/run-and-verify/SKILL.md) — 远程 SSH 编译 → 测试 → 结果检查
-  - [`.cursor/skills/perf-baseline/`](.cursor/skills/perf-baseline/SKILL.md) — 性能基线采集与对比
-  - [`.cursor/skills/new-script-scaffold/`](.cursor/skills/new-script-scaffold/SKILL.md) — 新增脚本脚手架（含文档索引同步）
+- **入口索引：** [`INDEX.md`](INDEX.md)
+- **验证 / 构建：** **wb-verify** L1–L6 + `scripts/testing/verify/*`（**tiantiyun**）
+- **日志分析：** **wb-log-analysis** L7（需 L2 捕获的 `results/smoke_test_*`）
+- **探索 perf：** **wb-perf-research** L8
+- **yche.me HTML：** **wb-html-publish**（xqyun git）
+- **Excel 工作簿：** **wb-docs**
+- **新增脚本：** 放 `scripts/`，登记对应 **wb-*** skill 与 `INDEX.md`
 
 ## Excel / PPT
 
-- **Excel**：表格类交付优先脚本生成；见 [`docs/observable/workbook/README.md`](docs/observable/workbook/README.md)（`./ops docs.kv_observability_xlsx`），新脚本优先放 **`scripts/`**。  
+- **Excel**：表格类交付优先脚本生成；见 [`docs/observable/workbook/README.md`](docs/observable/workbook/README.md)（**wb-docs** skill）；新脚本优先放 **`scripts/`**。
 - **PPT**：以 `docs/observable/*ppt*`、`ppt.md` 等 Markdown 素材为主；自动化导出可再加 `scripts/` 工具。
 
 ## 请先阅读
@@ -51,37 +52,24 @@
 
 ### 远程执行与 rsync 同步（重要）
 
-**当任务需要远程构建、测试或验证时，必须使用 rsync 同步工作流**：
+**节点分工**：
 
-1. **远程主机**：`xqyun-32c32g`（默认）
-2. **同步方式**：使用 `scripts/build/remote_build_run_datasystem.sh` 进行 rsync 同步
-3. **工作流**：
-   ```
-   本地修改 → rsync 同步到远程 → 远程构建/测试 → 结果在远程
-   ```
-4. **关键约束**：
-   - 不要在远程 clone/pull 仓库（远程是纯源码目录，无 .git）
-   - 所有代码修改在本地完成，通过 rsync 同步
-   - 使用 `--skip-sync` 仅在需要重复执行远程步骤时跳过同步
+| 任务 | 节点 | 入口 |
+|------|------|------|
+| Skill 验证 L1–L8、TDD | **tiantiyun-80c128g** | `bash scripts/harness/run_skill_verification_remote.sh` |
+| HTML 发布验证 | **xqyun-32c32g** | `bash scripts/harness/run_skill_html_verify_remote.sh` |
+| GitCode PR / commit 草稿 | **本地 WSL** | `bash scripts/run_skill_local_verification.sh` |
+| 日间代码 sync | xqyun-32c32g | `bash scripts/development/sync/sync_to_xqyun.sh` |
 
-5. **示例命令**：
-   ```bash
-   # 完整流程：rsync 同步 + 构建 + 测试
-   bash scripts/build/remote_build_run_datasystem.sh \
-     --remote xqyun-32c32g \
-     --local-ds ~/workspace/git-repos/yuanrong-datasystem \
-     --local-vibe ~/workspace/git-repos/yuanrong-datasystem-agent-workbench
+**验证同步到 tiantiyun**：
 
-   # 仅执行远程构建步骤（跳过 rsync）
-   bash scripts/build/remote_build_run_datasystem.sh --skip-sync
-   ```
+```bash
+bash scripts/harness/sync_workspace_to_tiantiyun.sh
+```
 
-6. **冒烟测试**：
-   ```bash
-   ssh xqyun-32c32g 'cd ~/workspace/git-repos/yuanrong-datasystem-agent-workbench && python3 scripts/testing/verify/smoke/run_smoke.py'
-   ```
+**约束**：代码在本地改，通过 rsync 同步；验证节点上不依赖 git pull。
 
-详见：[`scripts/build/remote_build_run_datasystem.sh`](scripts/build/remote_build_run_datasystem.sh) 和 [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md)。
+详见：[`scripts/harness/README.md`](scripts/harness/README.md)、[`INDEX.md`](INDEX.md)。
 
 ---
 

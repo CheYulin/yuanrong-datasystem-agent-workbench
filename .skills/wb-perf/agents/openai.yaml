@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench Perf"
+  short_description: "Hotspot and regression diagnosis from perf, bpftrace, strace, metrics, and nightlies"
+  default_prompt: "Use $wb-perf to identify performance hotspots with evidence and recheck commands."

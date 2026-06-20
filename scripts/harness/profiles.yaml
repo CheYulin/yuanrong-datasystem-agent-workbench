@@ -1,0 +1,376 @@
+version: 1
+
+defaults:
+  node: tiantiyun-80c128g
+  backend: cmake
+  evidence_root: results/harness
+  long_tail_top_n: 10
+
+script_owners:
+  scripts/build/build_cmake.sh: wb-build
+  scripts/build/build_bazel.sh: wb-build
+  scripts/build/rsync_datasystem_remote_bazel.sh: wb-build
+  scripts/lint/check_cpp_line_width.sh: wb-dev
+  scripts/testing/verify/smoke/run_smoke_remote.sh: wb-dev
+  scripts/testing/verify/ut/run_ut_remote.sh: wb-dev
+  scripts/testing/verify/st/run_st_remote.sh: wb-dev
+  scripts/testing/verify/validate_kv_executor.sh: wb-dev
+  scripts/testing/verify/validate_urma_tcp_observability_logs.sh: wb-dev
+  scripts/testing/verify/smoke/harness_zmq_metrics_e2e.sh: wb-dev
+  scripts/testing/verify/smoke/nightly_zmq_regression.sh: wb-daily
+  scripts/analysis/perf/perf_record_kv_lock_io.sh: wb-perf
+  scripts/analysis/perf/trace_kv_lock_io.sh: wb-perf
+  scripts/analysis/perf/run_kv_lock_ebpf_workflow.sh: wb-perf
+  scripts/analysis/perf/kv_executor_perf_analysis.py: wb-perf
+  scripts/analysis/perf/zmq_rpc_perf_nightly.sh: wb-perf
+  scripts/metrics/gen_kv_perf_report.py: wb-perf
+  scripts/testing/bench/bootstrap_bench_cluster.sh: wb-perf
+  scripts/testing/bench/run_dsbench_smoke_remote.sh: wb-perf
+  scripts/testing/bench/run_kvtest_smoke_remote.sh: wb-perf
+  scripts/development/sync/publish_htmls_git.sh: wb-html-publish
+  scripts/analysis/generate_bugfix_fema_report.py: wb-docs
+  scripts/development/sync/publish_htmls_git.sh: wb-html-publish
+  scripts/analysis/generate_bugfix_fema_report.py: wb-docs
+
+evidence_schema:
+  required_files:
+    - summary.json
+    - steps.jsonl
+  optional_files:
+    - build_timing.csv
+    - test_results.json
+    - coverage.json
+    - perf_hotspots.md
+    - bench_results.json
+
+acceptance_metrics:
+  build:
+    required_dry_run_status: DRY_RUN
+    required_real_status: PASS
+    required_evidence:
+      - summary.json
+      - steps.jsonl
+      - build_timing.csv
+    max_long_tail_entries: 10
+    must_report:
+      - total_elapsed_sec
+      - top_slow_steps
+      - optimization_hint
+  dev:
+    required_dry_run_status: DRY_RUN
+    required_real_status: PASS
+    required_steps:
+      - lint-line-width
+      - smoke
+      - ut
+      - st
+    required_evidence:
+      - summary.json
+      - steps.jsonl
+      - test_results.json
+    max_minutes:
+      smoke: 5
+      ut: 30
+      st: 60
+    failure_summary_fields:
+      - failed_layer
+      - command
+      - log
+  dev_full:
+    required_dry_run_status: DRY_RUN
+    required_real_status: PASS
+    required_steps:
+      - lint-line-width
+      - build
+      - smoke
+      - ut
+      - st
+    required_evidence:
+      - summary.json
+      - steps.jsonl
+      - test_results.json
+    max_minutes:
+      build: 30
+      smoke: 5
+      ut: 30
+      st: 60
+    failure_summary_fields:
+      - failed_layer
+      - command
+      - log
+  daily:
+    required_dry_run_status: DRY_RUN
+    required_real_status: PASS
+    required_steps:
+      - build
+      - smoke
+      - ut
+      - st
+      - coverage
+      - perf-regression
+    required_evidence:
+      - summary.json
+      - steps.jsonl
+      - test_results.json
+      - coverage.json
+      - perf_hotspots.md
+    coverage:
+      line_percent_min: 0
+      function_percent_min: 0
+      branch_percent_min: 0
+    perf:
+      p95_regression_percent_max: 10
+  perf:
+    required_dry_run_status: DRY_RUN
+    required_real_status: PASS
+    min_supported_sources: 1
+    required_evidence:
+      - summary.json
+      - steps.jsonl
+      - perf_hotspots.md
+    required_report_sections:
+      - Evidence
+      - Judgment
+      - Suggestion
+      - Recheck
+
+profiles:
+  build.quick:
+    skill: wb-build
+    command_group: build
+    description: Fast backend build with timing evidence.
+    evidence:
+      - build_timing.csv
+    steps:
+      - id: build
+        label: Build selected backend
+        uses:
+          cmake: scripts/build/build_cmake.sh
+          bazel: scripts/build/build_bazel.sh
+        command:
+          cmake: bash scripts/build/build_cmake.sh
+          bazel: bash scripts/build/build_bazel.sh
+
+  build.full:
+    skill: wb-build
+    command_group: build
+    description: Remote Bazel-capable full build and long-tail timing profile.
+    evidence:
+      - build_timing.csv
+    steps:
+      - id: sync-remote-bazel
+        label: Sync datasystem and run remote Bazel path
+        uses:
+          bazel: scripts/build/rsync_datasystem_remote_bazel.sh
+        command:
+          bazel: bash scripts/build/rsync_datasystem_remote_bazel.sh --node {node}
+      - id: build-cmake
+        label: Run CMake build path when backend is cmake
+        uses:
+          cmake: scripts/build/build_cmake.sh
+        command:
+          cmake: bash scripts/build/build_cmake.sh
+
+  dev.quick:
+    skill: wb-dev
+    command_group: dev
+    description: "Fast PR loop: lint + smoke/UT/ST with --skip-build (run wb-build first)."
+    stop_on_failure: true
+    acceptance_group: dev
+    evidence:
+      - test_results.json
+    steps:
+      - id: lint-line-width
+        label: C++ line-width check
+        uses: scripts/lint/check_cpp_line_width.sh
+        command: bash scripts/lint/check_cpp_line_width.sh --staged
+      - id: smoke
+        label: Remote smoke tests
+        uses: scripts/testing/verify/smoke/run_smoke_remote.sh
+        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
+      - id: ut
+        label: Remote unit tests
+        uses: scripts/testing/verify/ut/run_ut_remote.sh
+        command: bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
+      - id: st
+        label: Remote system tests
+        uses: scripts/testing/verify/st/run_st_remote.sh
+        command: bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
+
+  dev.default:
+    skill: wb-dev
+    command_group: dev
+    description: "Full dev loop with build step — manual/nightly only."
+    stop_on_failure: true
+    acceptance_group: dev_full
+    evidence:
+      - test_results.json
+    steps:
+      - id: lint-line-width
+        label: C++ line-width check
+        uses: scripts/lint/check_cpp_line_width.sh
+        command: bash scripts/lint/check_cpp_line_width.sh --staged
+      - id: build
+        label: Build selected backend once before test gates
+        uses: yuanrong-datasystem/build.sh
+        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)" 2>&1 | tail -120
+      - id: smoke
+        label: Remote smoke tests
+        uses: scripts/testing/verify/smoke/run_smoke_remote.sh
+        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
+      - id: ut
+        label: Remote unit tests
+        uses: scripts/testing/verify/ut/run_ut_remote.sh
+        command: bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
+      - id: st
+        label: Remote system tests
+        uses: scripts/testing/verify/st/run_st_remote.sh
+        command: bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
+
+  daily.full:
+    skill: wb-daily
+    command_group: daily
+    description: "Full daily build: all tests, coverage, perf regression, long-tail and flake evidence."
+    stop_on_failure: true
+    thresholds:
+      coverage:
+        line_percent_min: 0
+        function_percent_min: 0
+        branch_percent_min: 0
+      perf:
+        p95_regression_percent_max: 10
+    evidence:
+      - test_results.json
+      - coverage.json
+      - perf_hotspots.md
+    steps:
+      - id: build
+        label: Build selected backend once before full gates
+        uses: yuanrong-datasystem/build.sh
+        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)" 2>&1 | tail -120
+      - id: smoke
+        label: Full smoke tests
+        uses: scripts/testing/verify/smoke/run_smoke_remote.sh
+        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
+      - id: ut
+        label: Full unit tests
+        uses: scripts/testing/verify/ut/run_ut_remote.sh
+        command: bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
+      - id: st
+        label: Full system tests
+        uses: scripts/testing/verify/st/run_st_remote.sh
+        command: bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
+      - id: coverage
+        label: Coverage collection through datasystem build.sh
+        uses: yuanrong-datasystem/build.sh
+        command: cd {datasystem_root} && bash build.sh -b {backend} -c html -t run
+      - id: perf-regression
+        label: ZMQ RPC perf regression
+        uses: scripts/analysis/perf/zmq_rpc_perf_nightly.sh
+        command: bash scripts/analysis/perf/zmq_rpc_perf_nightly.sh --node {node}
+
+  perf.hotspot:
+    skill: wb-perf
+    command_group: perf
+    description: Collect and rank lock/RPC/runtime hotspots.
+    evidence:
+      - perf_hotspots.md
+    steps:
+      - id: kv-lock-perf
+        label: perf record for KV lock IO
+        uses: scripts/analysis/perf/perf_record_kv_lock_io.sh
+        command: bash scripts/analysis/perf/perf_record_kv_lock_io.sh
+      - id: metrics-summary
+        label: Convert metrics_summary logs when provided
+        uses: scripts/metrics/gen_kv_perf_report.py
+        command: python3 scripts/metrics/gen_kv_perf_report.py --help
+
+  perf.regression:
+    skill: wb-perf
+    command_group: perf
+    description: Compare current performance against stored baselines.
+    thresholds:
+      perf:
+        p95_regression_percent_max: 10
+    evidence:
+      - perf_hotspots.md
+    steps:
+      - id: zmq-rpc-nightly
+        label: ZMQ RPC nightly regression comparison
+        uses: scripts/analysis/perf/zmq_rpc_perf_nightly.sh
+        command: bash scripts/analysis/perf/zmq_rpc_perf_nightly.sh --node {node}
+
+  bench.dsbench.smoke:
+    skill: wb-perf
+    command_group: perf
+    description: Bootstrap etcd/worker and run dsbench SINGLE KV smoke on tiantiyun.
+    evidence:
+      - bench_results.json
+    steps:
+      - id: bootstrap
+        label: Bootstrap etcd and worker for bench
+        uses: scripts/testing/bench/bootstrap_bench_cluster.sh
+        command: bash scripts/testing/bench/bootstrap_bench_cluster.sh --node {node}
+      - id: dsbench-single
+        label: dsbench SINGLE smoke
+        uses: scripts/testing/bench/run_dsbench_smoke_remote.sh
+        command: bash scripts/testing/bench/run_dsbench_smoke_remote.sh --node {node} --skip-bootstrap --evidence-dir {workbench_root}/results/harness/{profile}-evidence
+
+  bench.kvtest.smoke:
+    skill: wb-perf
+    command_group: perf
+    description: Build kvtest and run Benchmark set_local smoke on tiantiyun.
+    evidence:
+      - bench_results.json
+    steps:
+      - id: bootstrap
+        label: Bootstrap etcd and worker for bench
+        uses: scripts/testing/bench/bootstrap_bench_cluster.sh
+        command: bash scripts/testing/bench/bootstrap_bench_cluster.sh --node {node}
+      - id: kvtest-set-local
+        label: kvtest set_local smoke
+        uses: scripts/testing/bench/run_kvtest_smoke_remote.sh
+        command: bash scripts/testing/bench/run_kvtest_smoke_remote.sh --node {node} --skip-bootstrap --evidence-dir {workbench_root}/results/harness/{profile}-evidence
+
+skill_verify:
+  wb-build:
+    node: tiantiyun-80c128g
+    steps:
+      - harness: build
+        profile: build.quick
+        dry_run: false
+  wb-dev:
+    node: tiantiyun-80c128g
+    steps:
+      - harness: dev
+        profile: dev.quick
+        dry_run: false
+  wb-daily:
+    node: tiantiyun-80c128g
+    steps:
+      - harness: daily
+        profile: daily.full
+        dry_run: true
+  wb-perf:
+    node: tiantiyun-80c128g
+    steps:
+      - harness: perf
+        profile: perf.hotspot
+        dry_run: true
+  wb-docs:
+    node: tiantiyun-80c128g
+    steps:
+      - check: file
+        path: docs/observable/workbook/sheet1-call-chain.md
+      - check: help
+        command: python3 scripts/analysis/generate_bugfix_fema_report.py --help
+  wb-html-publish:
+    node: xqyun-32c32g
+    steps:
+      - check: script
+        path: scripts/development/sync/publish_htmls_git.sh
+        args: ["--help"]
+      - check: script
+        path: scripts/development/sync/publish_htmls_git.sh
+        args: ["status"]
+        allow_fail: true

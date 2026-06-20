@@ -8,7 +8,7 @@ WORKBENCH_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RSYNC_IGNORE_FILE="${SCRIPT_DIR}/remote_build_run_datasystem.rsyncignore"
 DS_DIR_NAME="yuanrong-datasystem"
 
-REMOTE="${REMOTE:-xqyun-32c32g}"
+REMOTE="${REMOTE:-tiantiyun-80c128g}"
 REMOTE_BASE="${REMOTE_BASE:-"\${HOME}/workspace/git-repos"}"
 BAZEL_CMD="${BAZEL_CMD:-bazel}"
 # 限制 Bazel 并发 action 数，避免占满 CPU/IO；未设置时默认 16。

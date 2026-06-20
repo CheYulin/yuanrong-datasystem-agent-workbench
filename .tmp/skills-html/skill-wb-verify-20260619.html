@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wb-verify · 远端验证与测试门禁</title>
+    <link rel="stylesheet" href="/assets/css/site.css">
+    <style>
+      .skill-badge { display:inline-block; padding:0.15rem 0.55rem; border-radius:4px; font-size:0.75rem; font-weight:600; margin-right:0.4rem; }
+      .wb { background:#dbeafe; color:#1e40af; }
+      .ds { background:#d1fae5; color:#065f46; }
+      .meta { color:#656d76; font-size:0.9rem; margin-bottom:1.2rem; }
+      pre { background:#f6f8fa; padding:0.75rem 1rem; border-radius:6px; overflow-x:auto; font-size:0.85rem; }
+      table { width:100%; border-collapse:collapse; margin:0.8rem 0; font-size:0.9rem; }
+      th, td { border:1px solid #d0d7de; padding:0.45rem 0.65rem; text-align:left; }
+      th { background:#f6f8fa; }
+      .nav-back { margin-bottom:1rem; font-size:0.9rem; }
+    </style>
+</head>
+<body>
+<div class="content-area">
+
+<p class="nav-back"><a href="/research/skills-catalog-overview-20260619.html">← Skills 全览</a></p>
+<h1>wb-verify · 远端验证与测试门禁</h1>
+<p class="meta"><span class="skill-badge wb">Workbench</span> <strong>Skill ID</strong> <code>wb-verify</code> · <strong>源文件</strong> <code>yuanrong-datasystem-agent-workbench/.cursor/skills/wb-verify/</code> · <strong>TDD</strong> 5/5 contract tests · 2026-06-19</p>
+<p>在 tiantiyun 跑 smoke/UT/ST 及 KV executor、URMA 日志等专项门禁。</p>
+
+<h2>何时使用</h2>
+<p>改代码后声称「已验证」、合入前跑 harness、匹配 verify_matrix 最低级别。</p>
+<p><strong>典型触发语：</strong>跑 smoke、远端验证、validate_kv_executor、URMA 日志校验</p>
+<p><strong>默认节点/环境：</strong>tiantiyun-80c128g</p>
+
+<h2>命令与脚本</h2>
+<table><thead><tr><th>用途</th><th>命令</th></tr></thead><tbody><tr><td>Smoke</td><td><code>bash scripts/testing/verify/smoke/run_smoke_remote.sh</code></td></tr><tr><td>UT</td><td><code>bash scripts/testing/verify/ut/run_ut_remote.sh</code></td></tr><tr><td>ST</td><td><code>bash scripts/testing/verify/st/run_st_remote.sh</code></td></tr><tr><td>KV executor</td><td><code>bash scripts/testing/verify/validate_kv_executor.sh --skip-build <build></code></td></tr><tr><td>URMA/TCP 日志</td><td><code>bash scripts/testing/verify/validate_urma_tcp_observability_logs.sh <log_dir></code></td></tr></tbody></table>
+
+<h2>工作流</h2>
+<ol><li>rsync/build datasystem 到 tiantiyun（如需）</li><li>按 verify_matrix.yaml 选 minimum 级别</li><li>记录命令、节点、退出码与产物路径</li><li>xqyun 仅用于 sync/HTML，非默认 verify 节点</li></ol>
+
+<h2>相关 Skill</h2>
+<ul><li><a href="/research/skill-wb-perf-research-20260619.html">wb-perf-research</a> — 探索 perf，非 gate</li><li><a href="/research/skill-ds-dev-loop-20260619.html">ds-dev-loop</a> — 产品仓合并目标（后续）</li></ul>
+
+</div>
+<script src="/assets/js/site.js"></script>
+</body>
+</html>

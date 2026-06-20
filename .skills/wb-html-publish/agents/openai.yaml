@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench HTML Publish"
+  short_description: "Publish yche.me HTML via xqyun git"
+  default_prompt: "Use $wb-html-publish to publish conclusion HTML to yche.me."

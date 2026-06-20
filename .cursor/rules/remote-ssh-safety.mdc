@@ -13,7 +13,7 @@ alwaysApply: true
 ## What Runs Remotely
 
 - Compilation (`bash build.sh`, cmake, make)
-- Test execution (`ctest`, `./ops test.*`)
+- Test execution (`ctest`, `bash scripts/testing/verify/...`)
 - Performance collection (`perf record`, `bpftrace`, `strace`)
 - Runtime verification (worker startup, cluster checks)
 
@@ -32,7 +32,7 @@ Hard rules:
 - **Never** rely on the build.sh default (uses a `/tmp/<hash>/...` that vanishes).
 - **Never** point `DS_OPENSOURCE_DIR` inside the per-build `build/` directory — clean rebuilds must preserve the cache.
 - If `build/CMakeCache.txt` records a different `DS_OPENSOURCE_DIR`, delete it before the next configure (the reference scripts do this automatically).
-- Reference implementation: `vibe-coding-files/scripts/build/remote_build_run_datasystem.sh`.
+- Reference implementation: `scripts/harness/sync_workspace_to_tiantiyun.sh` (verify sync).
 
 ## What Stays Local
 
@@ -56,5 +56,5 @@ If the remote clone path differs from the local one, ask the user once and remem
 ## Safety
 
 - Never pipe untrusted or user-generated content directly into remote `bash -c`.
-- Prefer single-quoted remote commands: `ssh xqyun-32c32g 'cd /path && ./ops test.kv_executor'`.
+- Prefer single-quoted remote commands: `ssh xqyun-32c32g 'cd /path && bash scripts/testing/verify/validate_kv_executor.sh'`.
 - Do not use `--skip-build` unless the user explicitly confirms the remote build is up to date.

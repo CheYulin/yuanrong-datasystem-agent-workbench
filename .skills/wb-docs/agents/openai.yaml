@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench Docs"
+  short_description: "Reports, workbook sources, commit message drafts"
+  default_prompt: "Use $wb-docs to generate perf Markdown or commit drafts."

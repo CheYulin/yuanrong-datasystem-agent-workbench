@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 def _vibe_coding_root() -> Path:
     p = Path(__file__).resolve().parent
     while p != p.parent:
-        if (p / "lib" / "datasystem_root.py").is_file():
+        if (p / "development" / "lib" / "datasystem_root.py").is_file():
             return p.parent
         p = p.parent
-    raise RuntimeError("Could not find yuanrong-datasystem-agent-workbench root (scripts/lib marker missing)")
+    raise RuntimeError("Could not find yuanrong-datasystem-agent-workbench root")
 
 
 _VIBE_ROOT = _vibe_coding_root()

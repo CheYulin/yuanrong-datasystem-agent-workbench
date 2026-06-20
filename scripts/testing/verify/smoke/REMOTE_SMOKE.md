@@ -1,6 +1,8 @@
 # 远端跑 smoke / metrics 采集：前置与顺序
 
-默认远端：`xqyun-32c32g`，路径：`~/workspace/git-repos/`（与现有 harness / nightly 一致）。
+  指定远端：`tiantiyun-80c128g`（smoke/ST/UT 验证，见 `scripts/config/nodes.yaml` roles）。
+  代码 sync 仍可用 `xqyun-32c32g`（`sync_to_xqyun.sh`）。
+  路径：`/root/workspace/git-repos/`（tiantiyun）或 `~/workspace/git-repos/`（xqyun）。
 
 ## 0. 同步代码到远端
 

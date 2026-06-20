@@ -1107,8 +1107,10 @@ def create_app(log_dir: str = None) -> Flask:
             return jsonify({"error": f"Local path not found: {lp}"}), 404
         resolved    = resolve_ssh_host(conn["host"])
         remote_dest = f"{resolved.get('user', conn.get('username', ''))}@{resolved['host']}:{mapping['remote_path']}"
+        key_path    = os.path.expanduser(conn.get("key_path", "~/.ssh/id_ed25519"))
+        ssh_opts    = f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i {key_path}"
         ignore_file = make_excludes_file(mapping.get("exclude_patterns", []))
-        cmd = f"rsync -azn --exclude-from={ignore_file} {lp}/ {remote_dest}/"
+        cmd = f"rsync -azn -e 'ssh {ssh_opts}' --exclude-from={ignore_file} {lp}/ {remote_dest}/"
         result = run_cmd(cmd, timeout=120)
         app.logger.info(
             "[RSYNC] preview  mapping=%s  local=%s  remote=%s  rc=%d  excludes=%d patterns",
@@ -1147,10 +1149,12 @@ def create_app(log_dir: str = None) -> Flask:
             return jsonify({"error": f"Local path not found: {lp}"}), 404
         resolved    = resolve_ssh_host(conn["host"])
         remote_dest = f"{resolved.get('user', conn.get('username', ''))}@{resolved['host']}:{mapping['remote_path']}"
+        key_path    = os.path.expanduser(conn.get("key_path", "~/.ssh/id_ed25519"))
+        ssh_opts    = f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i {key_path}"
         job_id = uuid.uuid4().hex[:8]
         jobs[job_id] = {"rc": None, "out": "", "done": False}
         ignore_file = make_excludes_file(mapping.get("exclude_patterns", []))
-        flags = f"-az --exclude-from={ignore_file}"
+        flags = f"-az -e 'ssh {ssh_opts}' --exclude-from={ignore_file}"
         cmd = f"rsync {flags} {lp}/ {remote_dest}/"
         if delete:
             cmd += " --delete"
@@ -1260,12 +1264,14 @@ def create_app(log_dir: str = None) -> Flask:
             f.save(os.path.join(lb, os.path.basename(f.filename)))
         resolved    = resolve_ssh_host(conn["host"])
         remote_dest = f"{resolved.get('user', conn.get('username', ''))}@{resolved['host']}:{mapping['remote_path']}"
+        key_path    = os.path.expanduser(conn.get("key_path", "~/.ssh/id_ed25519"))
+        ssh_opts    = f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i {key_path}"
         job_id = uuid.uuid4().hex[:8]
         jobs[job_id] = {"rc": None, "out": "", "done": False, "started": True,
                         "started_at": datetime.datetime.now().isoformat(),
                         "started_info": {"host": resolved["host"], "remote": remote_dest, "local": lb, "delete": do_delete}}
         ignore_file = make_excludes_file(mapping.get("exclude_patterns", []))
-        cmd = f"rsync -az --exclude-from={ignore_file} {lb}/ {remote_dest}/"
+        cmd = f"rsync -az -e 'ssh {ssh_opts}' --exclude-from={ignore_file} {lb}/ {remote_dest}/"
         if do_delete:
             cmd += " --delete"
 

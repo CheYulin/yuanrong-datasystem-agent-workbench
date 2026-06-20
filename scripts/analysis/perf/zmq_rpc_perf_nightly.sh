@@ -223,27 +223,21 @@ echo "REPORT_TEMPLATE=${REPORT_TEMPLATE}"
 echo
 
 if [[ "${SKIP_BUILD}" -eq 0 ]]; then
-  BUILD_CMD=(
-    bash "${VIBE_CODING_ROOT}/scripts/build/remote_build_run_datasystem.sh"
-    --remote "${REMOTE}"
-    --remote-base "${REMOTE_BASE}"
-    --remote-ds "${REMOTE_DS}"
-    --remote-vibe "${REMOTE_VIBE}"
-    --build-dir-rel "${BUILD_DIR_REL}"
-    --jobs "${BUILD_JOBS}"
-    --ctest-jobs "${CTEST_JOBS}"
-    --hetero off
-    --perf on
-    --skip-ctest
-    --skip-validate
-    --skip-run-example
-    --skip-wheel-install
-  )
-  if [[ "${SKIP_SYNC}" -eq 1 ]]; then
-    BUILD_CMD+=(--skip-sync)
+  if [[ "${SKIP_SYNC}" -eq 0 ]]; then
+    echo "[step] Sync datasystem to ${REMOTE} (rsync)"
+    RSYNC_IGNORE="${VIBE_CODING_ROOT}/scripts/build/remote_build_run_datasystem.rsyncignore"
+    rsync -az --delete --exclude-from="${RSYNC_IGNORE}" \
+      "${LOCAL_DS}/" "${REMOTE}:${REMOTE_DS}/"
   fi
-  echo "[step] Rebuild remote with ENABLE_PERF=on"
-  "${BUILD_CMD[@]}"
+  echo "[step] Remote cmake build with ENABLE_PERF=on"
+  REMOTE_HOME_EARLY="$(ssh "${REMOTE}" 'printf %s "$HOME"')"
+  REMOTE_DS_EARLY="${REMOTE_DS/#\~\//${REMOTE_HOME_EARLY}/}"
+  REMOTE_DS_EARLY="${REMOTE_DS_EARLY/#\~/${REMOTE_HOME_EARLY}}"
+  ssh "${REMOTE}" bash -s -- "${REMOTE_DS_EARLY}" "${BUILD_DIR_REL}" "${BUILD_JOBS}" <<'BUILD_EOF'
+    set -euo pipefail
+    cd "$1"
+    ENABLE_PERF=on bash build.sh -t build -B "$2" -b cmake -j "$3" --hetero off 2>&1 | tail -20
+BUILD_EOF
 else
   echo "[step] Skip build stage (--skip-build)"
 fi

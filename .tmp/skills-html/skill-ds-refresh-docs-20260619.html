@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ds-refresh-docs · 在线中文文档刷新</title>
+    <link rel="stylesheet" href="/assets/css/site.css">
+    <style>
+      .skill-badge { display:inline-block; padding:0.15rem 0.55rem; border-radius:4px; font-size:0.75rem; font-weight:600; margin-right:0.4rem; }
+      .wb { background:#dbeafe; color:#1e40af; }
+      .ds { background:#d1fae5; color:#065f46; }
+      .meta { color:#656d76; font-size:0.9rem; margin-bottom:1.2rem; }
+      pre { background:#f6f8fa; padding:0.75rem 1rem; border-radius:6px; overflow-x:auto; font-size:0.85rem; }
+      table { width:100%; border-collapse:collapse; margin:0.8rem 0; font-size:0.9rem; }
+      th, td { border:1px solid #d0d7de; padding:0.45rem 0.65rem; text-align:left; }
+      th { background:#f6f8fa; }
+      .nav-back { margin-bottom:1rem; font-size:0.9rem; }
+    </style>
+</head>
+<body>
+<div class="content-area">
+
+<p class="nav-back"><a href="/research/skills-catalog-overview-20260619.html">← Skills 全览</a></p>
+<h1>ds-refresh-docs · 在线中文文档刷新</h1>
+<p class="meta"><span class="skill-badge ds">Datasystem</span> <strong>Skill ID</strong> <code>ds-refresh-docs</code> · <strong>源文件</strong> <code>yuanrong-datasystem/.skills/ds-refresh-docs/</code> · <strong>TDD</strong> datasystem .skills/ds-refresh-docs/tests</p>
+<p>从 upstream master 构建 zh-cn 文档，同步 doc_pages 并自动开 GitCode PR。</p>
+
+<h2>何时使用</h2>
+<p>更新/刷新/发布 openYuanrong 在线中文文档。</p>
+<p><strong>典型触发语：</strong>更新在线文档、refresh online docs、doc_pages</p>
+<p><strong>默认节点/环境：</strong>本地 + GitCode</p>
+
+<h2>命令与脚本</h2>
+<table><thead><tr><th>用途</th><th>命令</th></tr></thead><tbody><tr><td>一键刷新</td><td><code>python3 .skills/ds-refresh-docs/scripts/refresh_online_docs.py</code></td></tr></tbody></table>
+
+<h2>工作流</h2>
+<ol><li>fetch upstream master → 构建 build_zh_cn</li><li>rsync 到 doc_pages worktree</li><li>push 分支 + ds-create-pr 开 PR</li></ol>
+
+<h2>相关 Skill</h2>
+<ul><li><a href="/research/skill-ds-pr-flow-20260619.html">ds-pr-flow</a> — PR 创建</li><li><a href="/research/skill-wb-html-publish-20260619.html">wb-html-publish</a> — yche.me 与官方 doc 分工</li></ul>
+
+</div>
+<script src="/assets/js/site.js"></script>
+</body>
+</html>

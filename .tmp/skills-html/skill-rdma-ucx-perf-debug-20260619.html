@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rdma-ucx-perf-debug · RDMA/UCX 性能诊断</title>
+    <link rel="stylesheet" href="/assets/css/site.css">
+    <style>
+      .skill-badge { display:inline-block; padding:0.15rem 0.55rem; border-radius:4px; font-size:0.75rem; font-weight:600; margin-right:0.4rem; }
+      .wb { background:#dbeafe; color:#1e40af; }
+      .ds { background:#d1fae5; color:#065f46; }
+      .meta { color:#656d76; font-size:0.9rem; margin-bottom:1.2rem; }
+      pre { background:#f6f8fa; padding:0.75rem 1rem; border-radius:6px; overflow-x:auto; font-size:0.85rem; }
+      table { width:100%; border-collapse:collapse; margin:0.8rem 0; font-size:0.9rem; }
+      th, td { border:1px solid #d0d7de; padding:0.45rem 0.65rem; text-align:left; }
+      th { background:#f6f8fa; }
+      .nav-back { margin-bottom:1rem; font-size:0.9rem; }
+    </style>
+</head>
+<body>
+<div class="content-area">
+
+<p class="nav-back"><a href="/research/skills-catalog-overview-20260619.html">← Skills 全览</a></p>
+<h1>rdma-ucx-perf-debug · RDMA/UCX 性能诊断</h1>
+<p class="meta"><span class="skill-badge ds">Datasystem</span> <strong>Skill ID</strong> <code>rdma-ucx-perf-debug</code> · <strong>源文件</strong> <code>yuanrong-datasystem/.skills/rdma-ucx-perf-debug/</code> · <strong>TDD</strong> datasystem .skills/rdma-ucx-perf-debug/tests</p>
+<p>分层 perf 指标、BatchGet 路径、flush/submit、UCX 生命周期 teardown SOP。</p>
+
+<h2>何时使用</h2>
+<p>RDMA 带宽/延迟异常、UCP flush、BatchGet 慢、UCX crash。</p>
+<p><strong>典型触发语：</strong>RDMA 性能、UCX 延迟、UCP flush、BatchGet 远端拉取</p>
+<p><strong>默认节点/环境：</strong>测试机 + worker 日志</p>
+
+<h2>命令与脚本</h2>
+<table><thead><tr><th>用途</th><th>命令</th></tr></thead><tbody><tr><td>Perf keys</td><td><code>src/datasystem/common/perf/perf_point.def</code></td></tr><tr><td>搜索</td><td><code>rg "perfkey::rdma|ucp_put_nbx" src tests</code></td></tr></tbody></table>
+
+<h2>工作流</h2>
+<ol><li>确认 workload shape 与 benchmark 有效性</li><li>读 rdma/上层 perf 指标块</li><li>分层判断瓶颈；必要时 worker scaling 对比</li><li>清理临时指标，保留 UT</li></ol>
+
+<h2>相关 Skill</h2>
+<ul><li><a href="/research/skill-wb-perf-research-20260619.html">wb-perf-research</a> — 通用 perf 脚本</li><li><a href="/research/skill-ds-infra-engineering-20260619.html">ds-infra-engineering</a> — 代码改动门禁</li></ul>
+
+</div>
+<script src="/assets/js/site.js"></script>
+</body>
+</html>

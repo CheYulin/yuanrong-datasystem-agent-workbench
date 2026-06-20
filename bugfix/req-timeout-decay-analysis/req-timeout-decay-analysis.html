@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>reqTimeoutDuration 衰减链路分析 — DataSystem</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f0f2f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #333; }
+  .topnav { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
+  .topnav h1 { font-size: 18px; font-weight: 600; }
+  .topnav .badge { background: #e74c3c; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .topnav .badge.warn { background: #f39c12; }
+  .topnav .meta { font-size: 12px; color: #aaa; margin-left: auto; }
+
+  .summary-bar { display: flex; gap: 16px; padding: 20px 32px; background: #fff; border-bottom: 1px solid #e8e8e8; }
+  .summary-card { flex: 1; background: #f8f9fa; border-radius: 8px; padding: 16px; text-align: center; }
+  .summary-card .num { font-size: 28px; font-weight: 700; }
+  .summary-card .num.red { color: #e74c3c; }
+  .summary-card .num.orange { color: #f39c12; }
+  .summary-card .num.blue { color: #3498db; }
+  .summary-card .num.green { color: #27ae60; }
+  .summary-card .label { font-size: 12px; color: #888; margin-top: 4px; }
+
+  .page { padding: 24px 32px; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card h2 { font-size: 15px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; border-left: 3px solid #3498db; padding-left: 10px; }
+  .card h2.red { border-left-color: #e74c3c; }
+  .card h2.orange { border-left-color: #f39c12; }
+  .card h2.green { border-left-color: #27ae60; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .chart { height: 300px; }
+
+  .root-cause { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  .root-cause h3 { font-size: 14px; color: #856404; margin-bottom: 8px; }
+  .root-cause p { font-size: 13px; color: #856404; line-height: 1.6; }
+  .root-cause code { background: #fff; padding: 1px 5px; border-radius: 3px; font-family: monospace; }
+
+  .architecture { background: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+  .arch-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .arch-node { background: #3498db; color: #fff; padding: 6px 14px; border-radius: 6px; font-weight: 600; }
+  .arch-node.master { background: #9b59b6; }
+  .arch-node.worker { background: #27ae60; }
+  .arch-node.error { background: #e74c3c; }
+  .arch-node.client { background: #e67e22; }
+  .arch-node.metric { background: #1abc9c; }
+  .arch-node.zmq { background: #8e44ad; }
+  .arch-arrow { color: #aaa; font-size: 16px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f8f9fa; padding: 8px 12px; text-align: left; border-bottom: 2px solid #e8e8e8; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+  tr:hover { background: #f8f9fa; }
+  code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 12px; }
+  pre { background: #1a1a2e; color: #f8f9fa; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 12px; line-height: 1.6; margin: 12px 0; }
+  pre .comment { color: #6a9955; }
+  pre .keyword { color: #569cd6; }
+  pre .string { color: #ce9178; }
+  pre .number { color: #b5cea8; }
+  pre .function { color: #dcdcaa; }
+
+  .timeline-event { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .timeline-event:last-child { border-bottom: none; }
+  .te-time { color: #888; width: 80px; flex-shrink: 0; font-family: monospace; font-size: 12px; }
+  .te-layer { color: #666; width: 140px; flex-shrink: 0; font-family: monospace; font-size: 12px; }
+  .te-calc { color: #444; width: 140px; flex-shrink: 0; font-family: monospace; font-size: 12px; }
+  .te-result { color: #2c3e50; font-weight: 600; flex: 1; font-family: monospace; font-size: 13px; }
+
+  .key-finding { background: #fde8e8; border-left: 3px solid #e74c3c; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 12px 0; font-size: 13px; }
+  .key-finding strong { color: #c0392b; }
+  .key-finding.orange { background: #fef3e2; border-left-color: #f39c12; }
+  .key-finding.orange strong { color: #d68910; }
+  .key-finding.green { background: #eafaf1; border-left-color: #27ae60; }
+  .key-finding.green strong { color: #1e8449; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .tag.e { background: #fde8e8; color: #c0392b; }
+  .tag.bug { background: #fde8e8; color: #c0392b; }
+  .tag.root { background: #fde8e8; color: #c0392b; }
+  .tag.cascade { background: #fef3e2; color: #d68910; }
+  .tag.metric { background: #eaf4fb; color: #2471a3; }
+  .tag.info { background: #f0f0f0; color: #666; }
+  .tag.ok { background: #eafaf1; color: #1e8449; }
+
+  .breadcrumb { padding: 12px 32px; background: #fff; border-bottom: 1px solid #e8e8e8; font-size: 13px; color: #888; }
+  .breadcrumb a { color: #3498db; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+
+  .section-title { font-size: 14px; font-weight: 600; color: #1a1a2e; margin: 20px 0 10px; padding-left: 10px; border-left: 3px solid #3498db; }
+  .formula { background: #f8f9fa; border: 1px solid #e8e8e8; border-radius: 6px; padding: 12px 16px; margin: 10px 0; font-family: monospace; font-size: 13px; }
+  .formula .op { color: #569cd6; font-weight: 600; }
+  .formula .val { color: #b5cea8; }
+  .formula .comment { color: #6a9955; font-style: italic; }
+
+  .comparison-table td:nth-child(3) { font-family: monospace; color: #888; font-size: 12px; }
+  .comparison-table .highlight-row { background: #fef3e2; }
+  .comparison-table .highlight-row td { font-weight: 600; color: #d68910; }
+</style>
+</head>
+<body>
+
+<div class="topnav">
+  <h1>DataSystem 根因分析</h1>
+  <span class="badge warn">BUG</span>
+  <span class="meta">reqTimeoutDuration 衰减链路 · 2026-06-06</span>
+</div>
+
+<div class="breadcrumb">
+  <a href="/">首页</a> &gt; <a href="/?cat=reliability">reliability</a> &gt; reqTimeoutDuration 衰减链路分析
+</div>
+
+<div class="summary-bar">
+  <div class="summary-card">
+    <div class="num red">~12ms</div>
+    <div class="label">消失的时间差</div>
+  </div>
+  <div class="summary-card">
+    <div class="num orange">0.72</div>
+    <div class="label">两跳综合衰减因子 (0.8×0.9)</div>
+  </div>
+  <div class="summary-card">
+    <div class="num blue">5~10ms</div>
+    <div class="label">高负载下 SendMsg 阻塞时间</div>
+  </div>
+  <div class="summary-card">
+    <div class="num green">499μs</div>
+    <div class="label">round-up 最大误差 (+0.5ms)</div>
+  </div>
+</div>
+
+<div class="page">
+
+<!-- 问题概述 -->
+<div class="card">
+  <h2 class="red">问题概述</h2>
+
+  <div class="root-cause">
+    <h3>现象</h3>
+    <p>stub 端还剩 <strong>14ms</strong>，但 RPC 在 <strong>2.5ms</strong> 就返回超时错误；目的端（server）显示 remaining time 只有 <strong>1ms</strong>。</p>
+  </div>
+
+  <div class="key-finding orange">
+    <strong>关键数据点：</strong>
+    stub 端剩余 14ms，RPC 实际失败耗时 2.5ms，目的端 remaining time 1ms → 消失的时间差约 ~12ms
+  </div>
+
+  <h3 class="section-title">分析对象</h3>
+  <table>
+    <tr><th>文件</th><th>说明</th></tr>
+    <tr><td><code>timeout_duration.h</code></td><td>核心超时计算逻辑，含 <code>CalcRealRemainingTime</code> / <code>CalcRemainingTime</code> / <code>ScaleTimeoutMs</code> / <code>ConvertRemainingTimeUsToMs</code></td></tr>
+    <tr><td><code>zmq_service.cpp</code></td><td>Server 侧 <code>RouteToRegBackend</code> 的 timer capture 与 <code>reqTimeoutDuration</code> 初始化</td></tr>
+    <tr><td><code>worker_master_oc_api.cpp</code></td><td>Worker 端的 <code>CHECK_AND_SET_TIMEOUT</code> 宏与 <code>WorkerGetRequestTimeout</code> 衰减</td></tr>
+    <tr><td><code>client_worker_common_api.h</code></td><td>Client 端的 <code>ClientGetRequestTimeout</code> 衰减</td></tr>
+    <tr><td><code>zmq_common.h</code></td><td>Reply 路径上 <code>UpdateMetaByThreadLocalValue</code> 对 <code>meta.timeout</code> 的设置</td></tr>
+  </table>
+</div>
+
+<!-- Timeout 衰减链路 -->
+<div class="card">
+  <h2>Timeout 衰减链路</h2>
+
+  <div class="architecture">
+    <div class="arch-flow">
+      <div class="arch-node client">Client<br><small>原始 timeout</small></div>
+      <div class="arch-arrow">× 1.0</div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node metric">ClientGetRequestTimeout<br><small>0.9× 或 -1000ms</small></div>
+      <div class="arch-arrow">× ~0.9</div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node zmq">meta.timeout<br><small>发送到 server</small></div>
+      <div class="arch-arrow">× 1.0</div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node zmq">RouteToRegBackend<br><small>- elapsed ms (线性扣减)</small></div>
+      <div class="arch-arrow">× 0.8</div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node metric">CHECK_AND_SET_TIMEOUT<br><small>CalcRemainingTime()</small></div>
+      <div class="arch-arrow">× ~0.9</div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node worker">WorkerGetRequestTimeout<br><small>0.9× 或 -5000ms</small></div>
+    </div>
+  </div>
+
+  <h3 class="section-title">数值推演（原始 20ms）</h3>
+  <table>
+    <tr><th>层级</th><th>计算</th><th>结果</th><th>备注</th></tr>
+    <tr><td>Client 原始</td><td>—</td><td><strong>20ms</strong></td><td>初始 timeout</td></tr>
+    <tr><td>ClientGetRequestTimeout</td><td>max(20×0.9, 20-1000) = max(18, -980)</td><td><strong>18ms</strong></td><td>20 &gt; 10，不走 micro 精度路径</td></tr>
+    <tr><td>RouteToRegBackend</td><td>18 - elapsed(假设4ms)</td><td><strong>14ms</strong></td><td>符合 stub 端剩余 14ms</td></tr>
+    <tr><td>CHECK_AND_SET_TIMEOUT</td><td>14 × 0.8 = 11.2 → 11ms</td><td><strong>11ms</strong></td><td>CalcRemainingTime()</td></tr>
+    <tr><td>WorkerGetRequestTimeout</td><td>max(11×0.9, 11-5000) = max(9.9, -4989)</td><td><strong>9ms</strong></td><td>下一跳 worker-worker RPC</td></tr>
+    <tr class="highlight-row"><td>若再来一跳</td><td>9 × 0.8 × 0.9</td><td><strong>6.5ms</strong></td><td>多跳场景快速衰减</td></tr>
+  </table>
+</div>
+
+<!-- 关键代码路径 -->
+<div class="card">
+  <h2>关键代码路径</h2>
+
+  <h3 class="section-title">1. Client 侧衰减 — ClientGetRequestTimeout</h3>
+  <pre><span class="comment">// client_worker_common_api.h:279</span>
+<span class="keyword">static</span> <span class="function">ClientGetRequestTimeout</span>(<span class="keyword">int32_t</span> timeout)
+{
+    <span class="keyword">const</span> <span class="keyword">int64_t</span> CLIENT_TIMEOUT_MINUS_MILLISECOND = <span class="number">1000</span>;
+    <span class="keyword">const</span> <span class="keyword">double</span> CLIENT_TIMEOUT_DESCEND_FACTOR = <span class="number">0.9</span>;
+    <span class="keyword">return</span> std::<span class="function">max</span>(
+        TimeoutDuration::<span class="function">ScaleTimeoutMs</span>(timeout, CLIENT_TIMEOUT_DESCEND_FACTOR),
+        timeout - CLIENT_TIMEOUT_MINUS_MILLISECOND);
+}
+</pre>
+  <div class="key-finding">
+    阈值 <code>SMALL_TIMEOUT_ROUND_THRESHOLD_MS = 10</code>：当 <code>timeout ≤ 10ms</code> 时，用 microsecond 精度计算（+500μs round-up）。当 <code>timeout &gt; 10ms</code> 时，直接 <code>timeout × 0.9</code>。
+  </div>
+
+  <h3 class="section-title">2. Server 侧初始化 — RouteToRegBackend</h3>
+  <pre><span class="comment">// zmq_service.cpp:1043-1070</span>
+Timer timer;       <span class="comment">// 在 RouteToRegBackend 栈上</span>
+<span class="keyword">auto</span> func = [<span class="op">=</span>]() <span class="keyword">mutable</span> {
+    <span class="keyword">int64_t</span> elapsedUs = timer.<span class="function">ElapsedMicroSecond</span>();  <span class="comment">// 在线程池线程中执行！</span>
+    <span class="keyword">if</span> (timeout > <span class="number">0</span>) {
+        <span class="keyword">int64_t</span> elapsed = elapsedUs / <span class="number">1000</span>;   <span class="comment">// 向下取整 ms</span>
+        reqTimeoutDuration.<span class="function">Init</span>(timeout - elapsed);       <span class="comment">// 线性扣减</span>
+    } <span class="keyword">else</span> {
+        reqTimeoutDuration.<span class="function">Init</span>();  <span class="comment">// fallback 60s</span>
+    }
+    ...
+};
+thrdPool_-><span class="function">Execute</span>(func);       <span class="comment">// 异步分发</span>
+backendMgr_-><span class="function">SendMsg</span>(workerId, p, QUE_NO_TIMEOUT);  <span class="comment">// 同步阻塞发送（-1）</span>
+<span class="keyword">return</span> Status::OK();   <span class="comment">// RouteToRegBackend 立即返回</span>
+</pre>
+  <div class="key-finding orange">
+    <strong>⚠️ 关键点：</strong><code>backendMgr_-&gt;SendMsg</code> 使用 <code>QUE_NO_TIMEOUT = -1</code>（同步阻塞）。从 <code>timer</code> 创建到 lambda 被线程池执行之间，<code>elapsedUs</code> 可能非常大（线程调度延迟 + SendMsg 阻塞时间）。
+  </div>
+
+  <h3 class="section-title">3. Worker 端衰减 — CHECK_AND_SET_TIMEOUT</h3>
+  <pre><span class="comment">// worker_master_oc_api.cpp:53</span>
+<span class="macro">#define CHECK_AND_SET_TIMEOUT</span>(timeoutDuration_, request_, opts_)          \
+    <span class="keyword">do</span> {                                                                      \
+        <span class="keyword">int64_t</span> remainingTime_ = timeoutDuration_.<span class="function">CalcRemainingTime</span>();     \  <span class="comment">// × 0.8！</span>
+        CHECK_FAIL_RETURN_STATUS(remainingTime_ &gt; <span class="number">0</span>, K_RPC_DEADLINE_EXCEEDED, ...); \
+        request_.<span class="function">set_timeout</span>(WorkerGetRequestTimeout(remainingTime_)); \  <span class="comment">// × 0.9 或 -5000</span>
+        opts_.<span class="function">SetTimeout</span>(remainingTime_);                                       \
+    } <span class="keyword">while</span> (<span class="keyword">false</span>)
+
+<span class="keyword">inline</span> <span class="keyword">int64_t</span> <span class="function">WorkerGetRequestTimeout</span>(<span class="keyword">int32_t</span> timeout)
+{
+    <span class="keyword">return</span> std::<span class="function">max</span>(ScaleTimeoutMs(timeout, WORKER_TIMEOUT_DESCEND_FACTOR),
+                    timeout - WORKER_TIMEOUT_MINUS_MILLISECOND);  <span class="comment">// 0.9× 或 -5000ms</span>
+}
+</pre>
+
+  <h3 class="section-title">4. 两类 Calc 函数 — CalcRealRemainingTime vs CalcRemainingTime</h3>
+  <pre><span class="comment">// timeout_duration.h</span>
+<span class="comment">// 原始剩余时间（精确）</span>
+<span class="keyword">int64_t</span> <span class="function">CalcRealRemainingTime</span>()
+{
+    <span class="keyword">if</span> (!initialized_) <span class="keyword">return</span> defaultDuration_;  <span class="comment">// 未初始化：返回 60s</span>
+    <span class="keyword">auto</span> currTime = std::chrono::steady_clock::now();
+    <span class="keyword">int64_t</span> remainingTimeUs = ...;  <span class="comment">// 微秒级精度</span>
+    <span class="keyword">return</span> <span class="function">ConvertRemainingTimeUsToMs</span>(remainingTimeUs);  <span class="comment">// 含 round-up</span>
+}
+
+<span class="comment">// 打了折扣的剩余时间（用于传往下游）</span>
+<span class="keyword">int64_t</span> <span class="function">CalcRemainingTime</span>()
+{
+    <span class="keyword">return</span> <span class="function">ScaleTimeoutMs</span>(<span class="function">CalcRealRemainingTime</span>(), <span class="number">0.8</span>);  <span class="comment">// OP_USE_TIME_FACTOR = 0.8</span>
+}
+</pre>
+
+  <h3 class="section-title">5. Reply 路径的 timeout 重写 — UpdateMetaByThreadLocalValue</h3>
+  <pre><span class="comment">// zmq_common.h:409</span>
+<span class="comment">// 发送 reply 时，用 thread-local 的 reqTimeoutDuration 重写 meta.timeout</span>
+<span class="keyword">inline void</span> <span class="function">UpdateMetaByThreadLocalValue</span>(MetaPb &meta)
+{
+    meta.<span class="function">set_trace_id</span>(Trace::Instance().<span class="function">GetTraceID</span>());
+    meta.<span class="function">set_timeout</span>(reqTimeoutDuration.<span class="function">CalcRealRemainingTime</span>());  <span class="comment">// 原始剩余时间</span>
+    meta.<span class="function">set_db_name</span>(g_MetaRocksDbName);
+}
+</pre>
+  <div class="key-finding green">
+    Reply 路径使用 <code>CalcRealRemainingTime</code>（不含 0.8 折扣），但经过 <code>ConvertRemainingTimeUsToMs</code> 的 round-up 处理。
+  </div>
+</div>
+
+<!-- ConvertRemainingTimeUsToMs 的 round-up 效应 -->
+<div class="card">
+  <h2>ConvertRemainingTimeUsToMs 的 round-up 效应</h2>
+
+  <h3 class="section-title">核心逻辑</h3>
+  <pre><span class="comment">// timeout_duration.h:118</span>
+<span class="keyword">static</span> <span class="keyword">int64_t</span> <span class="function">ConvertRemainingTimeUsToMs</span>(<span class="keyword">int64_t</span> remainingTimeUs)
+{
+    <span class="keyword">if</span> (remainingTimeUs &lt;= <span class="number">0</span>) {
+        <span class="keyword">return</span> remainingTimeUs / <span class="number">1000</span>;  <span class="comment">// ≤0：直接除以 1000（负数截断向零）</span>
+    }
+    <span class="keyword">if</span> (remainingTimeUs &gt; <span class="number">10</span> * <span class="number">1000</span>) {   <span class="comment">// &gt; 10ms：直接除以 1000</span>
+        <span class="keyword">return</span> remainingTimeUs / <span class="number">1000</span>;
+    }
+    <span class="comment">// ≤ 10ms：round-up 到最近的 ms（+500μs 然后除以 1000）</span>
+    <span class="keyword">int64_t</span> roundedTimeMs = (remainingTimeUs + <span class="number">500</span>) / <span class="number">1000</span>;  <span class="comment">// ceil(x/1000)</span>
+    <span class="keyword">return</span> roundedTimeMs &gt; <span class="number">0</span> ? roundedTimeMs : <span class="number">1</span>;  <span class="comment">// 最小返回 1</span>
+}
+</pre>
+
+  <h3 class="section-title">边界值分析</h3>
+  <table class="comparison-table">
+    <tr><th>remainingTimeUs (μs)</th><th>时间 (ms)</th><th>计算</th><th>返回 (ms)</th><th>误差</th></tr>
+    <tr><td>1</td><td>0.001</td><td>(1+500)/1000=0</td><td>1</td><td class="red">+0.999ms</td></tr>
+    <tr><td>499</td><td>0.499</td><td>(499+500)/1000=0</td><td>1</td><td class="red">+0.501ms</td></tr>
+    <tr><td>500</td><td>0.5</td><td>(500+500)/1000=1</td><td>1</td><td class="red">+0.5ms</td></tr>
+    <tr><td>999</td><td>0.999</td><td>(999+500)/1000=1</td><td>1</td><td>+0.001ms</td></tr>
+    <tr><td>1000</td><td>1.0</td><td>(1000+500)/1000=1</td><td>1</td><td class="green">0</td></tr>
+    <tr><td>1500</td><td>1.5</td><td>(1500+500)/1000=2</td><td>2</td><td class="red">+0.5ms</td></tr>
+    <tr><td>-1</td><td>-0.001</td><td>-1/1000=0</td><td>0</td><td>负数直接截断</td></tr>
+    <tr><td>-1000</td><td>-1</td><td>-1000/1000=-1</td><td>-1</td><td>返回负数</td></tr>
+  </table>
+
+  <div class="key-finding orange">
+    <strong>round-up 的双刃剑：</strong>在 deadline 临近时（remainingTimeUs ∈ (0, 10000]），round-up 会多算剩余时间（499μs → 1ms，多算 0.5ms）。但一旦 deadline - currTime 变成负数，remainingTimeUs ≤ 0，则直接返回 ≤0，触发 <code>K_RPC_DEADLINE_EXCEEDED</code>。所以 1ms 的 remaining time 说明 server 端确实收到了请求，但 <code>reqTimeoutDuration</code> 的 deadline 已经非常临近了。
+  </div>
+
+  <h3 class="section-title">ScaleTimeoutMs 的 micro 精度路径（timeout ≤ 10ms）</h3>
+  <pre><span class="comment">// timeout_duration.h:130</span>
+<span class="keyword">static</span> <span class="keyword">int64_t</span> <span class="function">ScaleTimeoutMs</span>(<span class="keyword">int64_t</span> timeoutMs, <span class="keyword">double</span> scaleFactor)
+{
+    <span class="keyword">if</span> (timeoutMs &lt;= <span class="number">0</span>) <span class="keyword">return</span> timeoutMs;
+    <span class="keyword">if</span> (timeoutMs &gt; <span class="number">10</span>) <span class="keyword">return</span> timeoutMs * scaleFactor;  <span class="comment">// &gt;10ms: 线性缩放</span>
+    <span class="comment">// ≤10ms: micro 精度</span>
+    <span class="keyword">int64_t</span> timeoutUs = timeoutMs * <span class="number">1000</span> * scaleFactor;
+    <span class="keyword">int64_t</span> scaledTimeoutMs = timeoutUs / <span class="number">1000</span>;
+    <span class="keyword">if</span> (timeoutUs % <span class="number">1000</span> &gt;= <span class="number">500</span>) ++scaledTimeoutMs;  <span class="comment">// round-up if ≥500μs</span>
+    <span class="keyword">return</span> scaledTimeoutMs &gt; <span class="number">0</span> ? scaledTimeoutMs : <span class="number">1</span>;  <span class="comment">// 最小 1ms</span>
+}
+</pre>
+
+  <div class="key-finding">
+    <strong>示例：14ms × 0.8 的 micro 路径</strong><br>
+    输入：timeoutMs = 14，scaleFactor = 0.8<br>
+    因为 14 &gt; 10，走线性路径：timeoutUs = 14 × 1000 × 0.8 = 11200 μs<br>
+    scaledTimeoutMs = 11200 / 1000 = 11 ms<br>
+    11200 % 1000 = 200 &lt; 500，不进位 → 结果 = 11 ms<br>
+    （若 timeoutMs ≤ 10，则走 micro 精度路径，可能有 +1ms 的 round-up）
+  </div>
+</div>
+
+<!-- RouteToRegBackend Timer Capture 问题 -->
+<div class="card">
+  <h2 class="red">RouteToRegBackend Timer Capture 问题</h2>
+
+  <h3 class="section-title">异步分发 + 同步阻塞 = timer 语义失效</h3>
+
+  <h4 style="font-size:13px; margin: 12px 0 8px; color: #555;">时序分析</h4>
+  <div class="timeline-event">
+    <div class="te-time">T0</div>
+    <div class="te-layer">RouteToRegBackend 调用</div>
+    <div class="te-calc">Timer timer 创建</div>
+    <div class="te-result">timer 开始计时，p（包含 meta）准备就绪</div>
+  </div>
+  <div class="timeline-event">
+    <div class="te-time">T0+~50μs</div>
+    <div class="te-layer">thrdPool_-&gt;Execute(func)</div>
+    <div class="te-calc">lambda 入队</div>
+    <div class="te-result">RouteToRegBackend <strong>立即返回</strong></div>
+  </div>
+  <div class="timeline-event">
+    <div class="te-time">T0+~5ms</div>
+    <div class="te-layer">backendMgr_-&gt;SendMsg</div>
+    <div class="te-calc">同步阻塞 (QUE_NO_TIMEOUT=-1)</div>
+    <div class="te-result">如果 worker 队列满，在此阻塞等待</div>
+  </div>
+  <div class="timeline-event">
+    <div class="te-time">T0+~10ms+</div>
+    <div class="te-layer">线程池执行 lambda</div>
+    <div class="te-calc">timer.ElapsedMicroSecond()</div>
+    <div class="te-result">elapsedUs ≈ 10000μs（SendMsg 阻塞时间也计入了）</div>
+  </div>
+  <div class="timeline-event">
+    <div class="te-time">T0+~10ms</div>
+    <div class="te-layer">reqTimeoutDuration.Init()</div>
+    <div class="te-calc">timeout - elapsed</div>
+    <div class="te-result">14 - 10 = 4ms → deadline 被设为"当前 + 4ms"</div>
+  </div>
+
+  <h3 class="section-title">最坏情况推演</h3>
+  <table>
+    <tr><th>阶段</th><th>消耗时间</th><th>累计 elapsed</th><th>剩余 timeout</th></tr>
+    <tr><td>线程池调度延迟</td><td>~5ms</td><td>5ms</td><td>9ms</td></tr>
+    <tr><td>SendMsg 阻塞（队列满）</td><td>~7ms</td><td>12ms</td><td>2ms</td></tr>
+    <tr><td>ConvertRemainingTimeUsToMs(2ms)</td><td>—</td><td>12ms</td><td>2ms</td></tr>
+    <tr><td>WorkerEntryImpl 检查时 deadline 耗尽</td><td>~1ms</td><td>13ms</td><td class="red">≤0 → 超时！</td></tr>
+  </table>
+
+  <div class="key-finding">
+    <strong>关键 Bug：</strong><code>timer</code> 在 lambda 中按值捕获（拷贝了内部状态），但真正的问题在于：<br><br>
+    1. <code>thrdPool_-&gt;Execute</code> 是<strong>异步</strong>的，任务进入队列后 RouteToRegBackend 立即返回。<br>
+    2. <code>backendMgr_-&gt;SendMsg</code> 是<strong>同步阻塞</strong>的（QUE_NO_TIMEOUT = -1），它发生在 RouteToRegBackend 返回<strong>之后</strong>。<br>
+    3. 当 SendMsg 阻塞时，lambda 已经在另一个线程中执行了，此时 timer 已经走了 SendMsg 的等待时间。<br>
+    4. 如果 SendMsg 阻塞了 12ms，那么 <code>elapsed = 12ms</code>，<code>timeout - elapsed = 14 - 12 = 2ms</code>。
+  </div>
+</div>
+
+<!-- 可能根因汇总 -->
+<div class="card">
+  <h2>可能根因汇总</h2>
+
+  <table>
+    <tr><th>优先级</th><th>根因</th><th>说明</th></tr>
+    <tr>
+      <td><span class="tag bug">最大嫌疑</span></td>
+      <td>SendMsg 阻塞</td>
+      <td><code>backendMgr_-&gt;SendMsg(workerId, p, QUE_NO_TIMEOUT)</code> 是同步阻塞调用（-1）。当 worker 侧接收队列（ZMQ HWM）满了，SendMsg 会一直阻塞。这个阻塞发生在 <code>timer</code> 创建之后、<code>thrdPool_-&gt;Execute</code> 之后。结果：lambda 执行时 <code>elapsed</code> 非常大，<code>timeout - elapsed</code> 变成一个很小的值（甚至负数）。</td>
+    </tr>
+    <tr>
+      <td><span class="tag bug">其次</span></td>
+      <td>线程调度延迟</td>
+      <td>即使没有 SendMsg 阻塞，线程池从 <code>Execute()</code> 到真正调度执行 lambda 之间也有延迟。在高负载下这个延迟可能达到 5~10ms。结合 SendMsg 阻塞，两者叠加会导致 <code>elapsed</code> 非常大。</td>
+    </tr>
+    <tr>
+      <td><span class="tag cascade">次要</span></td>
+      <td>多层 CHECK_AND_SET_TIMEOUT 衰减</td>
+      <td>如果请求从 stub 到 server 后，server 端再调用 worker-worker RPC 或 worker-master RPC，每一跳都会经过 <code>CHECK_AND_SET_TIMEOUT</code> → <code>CalcRemainingTime()</code> × 0.8 → <code>WorkerGetRequestTimeout()</code> × 0.9。两跳后：14ms × 0.8 × 0.9 ≈ 10ms，三跳后 ≈ 7ms。链路越长衰减越厉害。</td>
+    </tr>
+    <tr>
+      <td><span class="tag cascade">精度损失</span></td>
+      <td>elapsed 向下取整</td>
+      <td><code>int64_t elapsed = elapsedUs / MS_TO_US</code> 是整数除法，向下取整。如果实际 elapsed = 12.3ms，代码中用 12ms 扣减。但 <code>ConvertRemainingTimeUsToMs</code> 对微小剩余时间的 round-up（499μs → 1ms）并不能弥补这个取整损失。</td>
+    </tr>
+    <tr>
+      <td><span class="tag cascade">round-up 掩盖真相</span></td>
+      <td>round-up 虚高</td>
+      <td>当 <code>deadline_ - currTime = 1500μs</code>（1.5ms），<code>ConvertRemainingTimeUsToMs</code> 返回 2ms。但这个 2ms 是"理论值"，实际的 deadline 已经非常近了。加上 <code>CalcRemainingTime()</code> 再做 0.8 缩放，传入下游的 timeout 可能只剩 1~2ms，极易触发超时。</td>
+    </tr>
+    <tr>
+      <td><span class="tag ok">不太可能</span></td>
+      <td>clock 不一致</td>
+      <td><code>TimeoutDuration</code> 全程使用 <code>std::chrono::steady_clock::now()</code>，是单调时钟，不会因系统时间跳变而受影响。但理论上如果 client 侧和 server 侧使用不同的时钟基准，可能存在不一致。</td>
+    </tr>
+  </table>
+</div>
+
+<!-- 排查步骤 -->
+<div class="card">
+  <h2 class="green">排查步骤</h2>
+
+  <h3 class="section-title">Step 1：确认 elapsed 大小（Inject Point）</h3>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;"><code>zmq_service.cpp:1055</code> 有一个 inject point，可以注入自定义的 elapsed 值来复现问题：</p>
+  <pre>INJECT_POINT_NO_RETURN(<span class="string">"ZmqService::RouteToRegBackend"</span>,
+                       [&elapsed](<span class="keyword">int64_t</span> inElapsed) { elapsed = inElapsed; });
+</pre>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">在测试中注入 <code>inElapsed = 13000</code>（13ms），观察目的端 remaining time 是否变成 ~1ms。</p>
+  <pre>Bazel 注入方式：
+--//src/datasystem/common/rpc/zmq:zmq_service:<span class="function">inject_points</span>=ZmqService::RouteToRegBackend=<span class="number">13000</span></pre>
+
+  <h3 class="section-title">Step 2：加日志打印 elapsedUs 和 timeout</h3>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">在 <code>RouteToRegBackend</code> lambda 内部加一行：</p>
+  <pre>LOG(INFO) &lt;&lt; <span class="function">FormatString</span>(<span class="string">"RouteToRegBackend: timeout=%lld, elapsedUs=%lld, elapsedMs=%lld, remaining=%lld"</span>,
+                      timeout, elapsedUs, elapsedMs, timeout - elapsedMs);
+</pre>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">重点关注：当 <code>timeout - elapsedMs</code> 的值很小（&lt; 5ms）时，后续 RPC 几乎必定超时。</p>
+
+  <h3 class="section-title">Step 3：确认目的端的 meta.timeout() 原始值</h3>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">在 <code>WorkerEntryImpl</code>（<code>zmq_service.cpp:675</code>）加日志：</p>
+  <pre>LOG(INFO) &lt;&lt; <span class="function">FormatString</span>(<span class="string">"WorkerEntryImpl: remainingTime=%lld, meta.timeout=%lld"</span>,
+                  reqTimeoutDuration.<span class="function">CalcRealRemainingTime</span>(), meta.<span class="function">timeout</span>());
+</pre>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">如果 <code>meta.timeout()</code> 本身就已经很小（&lt; 5ms），说明问题在 stub→server 链路；如果 <code>meta.timeout()</code> 还较大但 <code>CalcRealRemainingTime()</code> 很小，说明问题在 server 内部处理耗时。</p>
+
+  <h3 class="section-title">Step 4：确认是否有多跳 worker RPC</h3>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">检查请求链路中是否有 <code>worker_master_oc_api.cpp</code> 或 <code>worker_worker_oc_api.cpp</code> 的 <code>CHECK_AND_SET_TIMEOUT</code> 调用。每多一跳都额外乘以 ~0.72（0.8×0.9）。</p>
+
+  <h3 class="section-title">Step 5：检查 ZMQ HWM 设置</h3>
+  <p style="font-size:13px; color:#555; margin-bottom:10px;">如果 <code>backendMgr_-&gt;SendMsg</code> 频繁阻塞，说明 worker 侧接收队列已满。可以查看 <code>ZMQ_SERVER_SNDHWM</code> / <code>ZMQ_SERVER_RCVHWM</code> 等 gflag 配置，以及监控 <code>ZmqServerMsgMgr</code> 的队列长度指标。</p>
+
+  <h3 class="section-title">Step 6：压测复现</h3>
+  <p style="font-size:13px; color:#555;">在压测环境中人为制造高负载（多个并发请求占满 worker 队列），观察 elapsedUs 分布。如果 P99 elapsed 超过 5ms，就需要关注 SendMsg 阻塞问题了。</p>
+</div>
+
+<!-- 结论 -->
+<div class="card">
+  <h2 class="red">结论</h2>
+
+  <div class="root-cause">
+    <h3>最可能的根因：RouteToRegBackend 的异步分发 + SendMsg 同步阻塞</h3>
+    <p>stub 端剩 14ms，RPC 在 2.5ms 失败，目的端 remaining time 只有 1ms，说明有 ~11.5ms 的时间在 <code>RouteToRegBackend</code> 到 <code>WorkerEntryImpl</code> 之间消失了。</p>
+    <br>
+    <p>最可能的原因：<code>backendMgr_-&gt;SendMsg</code> 的同步阻塞（QUE_NO_TIMEOUT = -1）消耗了大量时间，此时 lambda 已经在另一个线程中执行，导致 <code>timer.ElapsedMicroSecond()</code> 返回了一个很大的值。<code>timeout - elapsed</code> 变成了一个接近 0 的数，server 端的 <code>reqTimeoutDuration</code> 在真正处理请求时就已经快耗尽了。</p>
+  </div>
+
+  <div class="key-finding green">
+    <strong>建议优先排查：</strong>ZMQ 队列是否积压、线程池是否饱和、以及 elapsedUs 的实际分布。
+  </div>
+</div>
+
+</div>
+
+<div style="padding: 20px 32px; text-align: center; color: #888; font-size: 12px; border-top: 1px solid #e8e8e8;">
+  DataSystem 根因分析 · reqTimeoutDuration 衰减链路 · yche.me · 2026-06-06
+</div>
+
+</body>
+</html>

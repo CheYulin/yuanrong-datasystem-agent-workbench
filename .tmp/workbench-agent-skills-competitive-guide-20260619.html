@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Workbench Skills 竞品与选型指导 · 2026-06-19</title>
+    <link rel="stylesheet" href="/assets/css/site.css">
+</head>
+<body>
+    <div class="content-area">
+
+        <h1>Agent Workbench Skills 竞品与选型指导</h1>
+        <p class="meta"><strong>日期</strong> 2026-06-19 · <strong>范围</strong> yuanrong-datasystem-agent-workbench · <strong>状态</strong> 已逐一验证（TDD + 运行时抽检） · <strong>标签</strong> CG-NARRATIVE（流程/工具链结论，非产品代码语义）</p>
+
+        <h2>1. 结论摘要</h2>
+        <ul>
+            <li><strong>Workbench 固定 4 个 Skill</strong>（<code>wb-verify</code> / <code>wb-perf-research</code> / <code>wb-html-publish</code> / <code>wb-docs</code>），已删除 <code>./ops</code> 统一入口，能力下沉到 Skill + 直接脚本路径。</li>
+            <li><strong>与 Datasystem 分工</strong>：产品级流程（<code>ds-dev-loop</code>、<code>ds-pr-flow</code> 等）留在 sibling 仓；Workbench 阶段<strong>先验证本仓 Skill</strong>，再考虑合并进 datasystem。</li>
+            <li><strong>与通用 Cursor Superpowers 互补</strong>：Superpowers 管「怎么想」（brainstorm / plan / TDD 纪律）；wb-* 管「跑什么命令、在哪台机器、产物放哪」。</li>
+            <li><strong>竞品对标对象</strong>不是 LMCache/Mooncake 存储后端，而是 <em>Agent 编排层</em>：裸 Rules、通用 Skill 市场、单文件 AGENTS.md、已废弃的 ops 路由。</li>
+        </ul>
+
+        <h2>2. 竞品 / 方案对比</h2>
+        <table>
+            <thead>
+                <tr><th>方案</th><th>代表</th><th>优势</th><th>劣势</th><th>本仓策略</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>裸 AGENTS.md + Rules</td>
+                    <td><code>AGENTS.md</code>、<code>.cursor/rules/*.mdc</code></td>
+                    <td>零依赖、易写</td>
+                    <td>命令路径散落、难 TDD、易与 datasystem 重复</td>
+                    <td>保留 INDEX + rules 作索引，<strong>可执行路径进 Skill</strong></td>
+                </tr>
+                <tr>
+                    <td>统一 CLI 入口</td>
+                    <td>已删除的 <code>./ops</code></td>
+                    <td>好记</td>
+                    <td>与 Skill 双重维护；部分路由指向未入库脚本</td>
+                    <td><strong>已移除</strong>，改 Skill 表 + 脚本</td>
+                </tr>
+                <tr>
+                    <td>通用 Agent Skills 市场</td>
+                    <td>Cursor 内置 create-skill / superpowers</td>
+                    <td>流程纪律、可复用</td>
+                    <td>不知 tiantiyun/xqyun、不知 verify_matrix</td>
+                    <td>Superpowers 做 gate；wb-* 做<strong>机器与脚本绑定</strong></td>
+                </tr>
+                <tr>
+                    <td>Repo Skills（产品仓）</td>
+                    <td>datasystem <code>.skills/ds-*</code></td>
+                    <td>与 .repo_context 一体、可 PR review</td>
+                    <td>改动需上游评审；workbench 迭代慢</td>
+                    <td>Workbench 验证通过后再<strong>向上合并</strong></td>
+                </tr>
+                <tr>
+                    <td>文档站点</td>
+                    <td>yche.me（xqyun git）</td>
+                    <td>组员可读、可检索</td>
+                    <td>非执行层</td>
+                    <td><strong>wb-html-publish</strong> 发结论页；RFC 留 workbench</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>3. Workbench 四 Skill 逐一验证</h2>
+        <p>验证命令：<code>bash scripts/run_skill_tests.sh</code>（19 项 contract 测试，2026-06-19 全绿）。</p>
+        <table>
+            <thead>
+                <tr><th>Skill</th><th>TDD</th><th>运行时抽检</th><th>默认节点</th><th>备注</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>wb-verify</code></td>
+                    <td>5/5 OK</td>
+                    <td>本地 WSL → SSH tiantiyun 跑 <code>run_smoke_remote.sh --skip-build</code>：SSH 与 ctest 正常；当前 build 无 <code>-R smoke</code> 用例（0 tests）</td>
+                    <td>tiantiyun-80c128g</td>
+                    <td>修复 <code>SCRIPT_DIR</code> + <code>timing.sh</code>  sourcing</td>
+                </tr>
+                <tr>
+                    <td><code>wb-perf-research</code></td>
+                    <td>5/5 OK</td>
+                    <td><code>kv_executor_perf_analysis.py --help</code> 正常（修复 workbench root 探测路径）</td>
+                    <td>tiantiyun-80c128g</td>
+                    <td>探索 perf，<strong>非</strong> merge gate</td>
+                </tr>
+                <tr>
+                    <td><code>wb-docs</code></td>
+                    <td>3/3 OK</td>
+                    <td><code>gen_kv_perf_report.py --help</code>、<code>generate_commit_message.sh --help</code> 正常</td>
+                    <td>本地 / CI</td>
+                    <td>xlsx 生成器尚未入库，workbook 以 Markdown 源为准</td>
+                </tr>
+                <tr>
+                    <td><code>wb-html-publish</code></td>
+                    <td>3/3 OK</td>
+                    <td><code>publish_htmls_git.sh status</code> 连通 xqyun <code>/var/www/html</code></td>
+                    <td>xqyun-32c32g</td>
+                    <td>禁止维护本地 <code>git-repos/htmls/</code></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>4. 选型决策树</h2>
+        <pre>
+要声称「改完能合」？ ──► wb-verify（smoke/UT/ST + validate_kv_executor）
+要挖 perf / 锁 / executor？ ──► wb-perf-research（勿当默认 gate）
+要发 yche.me 结论页？ ──► wb-html-publish
+要 Markdown 报告 / commit 草稿？ ──► wb-docs
+要 PR / 在线文档 / RDMA 专精？ ──► datasystem .skills（后续合并，当前不强制改 DS 仓）
+        </pre>
+
+        <h2>5. 与 LMCache / Mooncake 类「竞品页」的差异</h2>
+        <p>存储后端竞品页（如 <a href="/research/lmcache-competitive-analysis.html">LMCache 竞品分析</a>）回答「用什么缓存架构」。本页回答「Agent 用什么<strong>可验证工作流</strong>」：</p>
+        <ul>
+            <li>结论必须可复现：Skill 表中的脚本路径 + TDD contract。</li>
+            <li>事实性 datasystem 代码主张需 codegraph 标注 CG-OK；本页流程结论为 CG-NARRATIVE。</li>
+            <li>Draft RFC / 单次 perf 落盘 → workbench <code>rfc/</code> / <code>results/</code>，不直接进 yche.me。</li>
+        </ul>
+
+        <h2>6. 后续（Workbench 验证 OK 后再做）</h2>
+        <ol>
+            <li>向 datasystem 合并 <code>ds-dev-loop</code> 与 wb-verify 矩阵（需上游 PR）。</li>
+            <li>补 smoke 用例或调整 ctest 过滤，使 smoke gate 非空。</li>
+            <li>workbook xlsx 生成器入库 <code>scripts/documentation/</code> 并扩展 wb-docs TDD。</li>
+        </ol>
+
+        <h2>7. 参考路径</h2>
+        <ul>
+            <li>Workbench：<code>INDEX.md</code>、<code>.cursor/skills/*/SKILL.md</code></li>
+            <li>Harness：<code>scripts/harness/verify_matrix.yaml</code></li>
+            <li>相关设计页：<a href="/design/ds-ai-codex-landscape.html">DataSystem AI 能力图谱</a></li>
+        </ul>
+
+    </div>
+    <script src="/assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>etcd 租约 TTL · Worker 隔离与元数据清理</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1a1a2e;
+    --accent: #b45309;
+    --secondary: #1d4ed8;
+    --muted: #656d76;
+    --border: #e0e4e8;
+    --code-bg: #f6f8fa;
+    --warn-bg: #fffbeb;
+    --warn-border: #fde68a;
+    --ok-bg: #f0fdf4;
+    --ok-border: #bbf7d0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+    padding: 0 16px 80px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 26px;
+    color: #fff;
+    background: linear-gradient(135deg, #b45309, #92400e);
+    padding: 22px 28px;
+    margin: 0 -16px 28px;
+    letter-spacing: .3px;
+  }
+  h2 {
+    font-size: 20px;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: 14px;
+    margin: 36px 0 16px;
+  }
+  h3 { font-size: 16px; color: var(--secondary); margin: 22px 0 10px; }
+  p { margin: 10px 0; }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .note, .warn, .ok {
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .note { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .warn { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+  .ok { background: var(--ok-bg); border: 1px solid var(--ok-border); }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 12px 0;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #c7254e;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  th {
+    background: #92400e;
+    color: #fff;
+    padding: 10px 14px;
+    text-align: left;
+  }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  tr:nth-child(even) td { background: #fafafa; }
+  .diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+    overflow-x: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  ul, ol { margin: 10px 0 10px 22px; }
+  li { margin: 6px 0; }
+  a { color: var(--secondary); }
+  .toc { background: #fafbfc; border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 28px; }
+  .toc ul { list-style: none; margin: 0; padding: 0; }
+  .toc li { margin: 6px 0; }
+  .toc a { text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+  .back { display: inline-block; margin-top: 24px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>etcd 租约 TTL · Worker 隔离与元数据清理</h1>
+<p class="meta">yuanrong-datasystem 源码分析 · 2026-06-06 · 基于 <code>EtcdKeepAlive</code> / <code>EtcdClusterManager</code> / <code>OCMetadataManager</code></p>
+
+<div class="toc">
+  <strong>目录</strong>
+  <ul>
+    <li><a href="#design">1. 设计立场：为何无法区分网络抖动与真宕机</a></li>
+    <li><a href="#params">2. 关键参数与两阶段状态机</a></li>
+    <li><a href="#keepalive">3. KeepAlive 机制（含 node_timeout_s=1 时 250ms）</a></li>
+    <li><a href="#recovery">4. 网络恢复与 Fake 事件防护</a></li>
+    <li><a href="#meta-cleanup">5. 元数据清理与重试策略</a></li>
+    <li><a href="#risk">6. 短 TTL 风险与生产建议</a></li>
+  </ul>
+</div>
+
+<h2 id="design">1. 设计立场：为何无法区分网络抖动与真宕机</h2>
+
+<p>核心不是「精确判断某台 worker 是否还活着」，而是：</p>
+<div class="note"><strong>在 etcd 里看不到该 worker 的租约 key → 集群不再把它当作可靠成员。</strong></div>
+
+<p>其他 worker 只能看到 <strong>etcd 上 key 被删</strong>（租约到期），无法区分是 worker↔etcd 抖动还是进程真挂。若仍按旧元数据路由，容易出现拉不到对象、primary 指向僵尸节点等问题。</p>
+
+<p>因此采用 <strong>fail-fast + 事后恢复</strong>：</p>
+<ul>
+  <li>先隔离 / 切主（TIMEOUT 阶段）</li>
+  <li>再慢清理元数据 / 踢 hash ring（FAILED 阶段）</li>
+  <li>节点恢复后走 <code>recover</code> / 对账路径</li>
+</ul>
+
+<p>这是典型的 <strong>以 CP 的成员视图换可用性</strong>：牺牲短暂误判，避免长时间错误路由。</p>
+
+<h2 id="params">2. 关键参数与两阶段状态机</h2>
+
+<table>
+  <tr><th>参数</th><th>默认值</th><th>含义</th></tr>
+  <tr><td><code>node_timeout_s</code></td><td>60s</td><td>etcd 租约 TTL；多久没续上算「失联」</td></tr>
+  <tr><td><code>node_dead_timeout_s</code></td><td>300s</td><td>从失联起再过多久判「死亡」；须 &gt; node_timeout_s</td></tr>
+  <tr><td><code>heartbeat_interval_ms</code></td><td>1000ms</td><td><strong>Client↔Worker</strong> 心跳，<em>不是</em> etcd keepalive 间隔</td></tr>
+</table>
+
+<h3>阶段 A：etcd key DELETE → TIMEOUT（快速止损）</h3>
+<p>所有 worker watch 到 DELETE 后，<code>HandleNodeRemoveEvent</code> 调用：</p>
+<pre>NodeTimeoutEvent::NotifyAll(workerAddr, changePrimary=true, removeMeta=false)</pre>
+<ul>
+  <li>Master：<code>SetFaultWorker</code> + 切 primary</li>
+  <li>Worker：<code>CheckConnection</code> 对 TIMEOUT 节点返回 <code>K_MASTER_TIMEOUT</code></li>
+  <li><strong>暂不</strong> <code>RemoveMetaByWorker</code></li>
+</ul>
+
+<h3>阶段 B：TIMEOUT → FAILED（慢清理）</h3>
+<p>后台 <code>DemoteTimedOutNodes</code> 周期性执行，当</p>
+<pre>timeoutStamp &gt; (node_dead_timeout_s - node_timeout_s)</pre>
+<p>晋升 FAILED 后：</p>
+<pre>NodeTimeoutEvent::NotifyAll(addr, changePrimary=false, removeMeta=true)
+hashRing_->RemoveWorkers(GetFailedWorkers())  // auto_del_dead_node 开启时</pre>
+
+<div class="diagram">时间轴（默认 60s / 300s）：
+
+T0          etcd 租约失效，key DELETE
+T0+~0s      全集群 TIMEOUT：切主、fault 标记、拒绝 RPC
+T0+~240s    FAILED：RemoveMetaByWorker、踢 hash ring</div>
+
+<h2 id="keepalive">3. KeepAlive 机制（node_timeout_s=1 时 250ms）</h2>
+
+<h3>3.1 三个时间量</h3>
+<table>
+  <tr><th>函数</th><th>node_timeout_s=1</th><th>含义</th></tr>
+  <tr><td>etcd Grant TTL</td><td><strong>1s</strong></td><td>服务端 1s 内没续租就删 key</td></tr>
+  <tr><td><code>GetLeaseRenewIntervalMs()</code></td><td><strong>250ms</strong></td><td>= min(60s, TTL/4)；正常发送节奏</td></tr>
+  <tr><td><code>GetLeaseExpiredMs()</code></td><td><strong>900ms</strong></td><td>= max(0.9×TTL, TTL−5s)；单次发送失败的总预算</td></tr>
+</table>
+
+<h3>3.2 正常情况：不是「250ms×4 再等满 1s」</h3>
+<p><code>EtcdKeepAlive::Run()</code> 循环：</p>
+<ol>
+  <li>发一次 <code>LeaseKeepAlive</code>（gRPC Write + Read）</li>
+  <li><strong>成功</strong> → <code>keepAliveTimeoutTimer.Reset()</code></li>
+  <li>若本次耗时 &lt; 250ms，sleep(250 − 耗时)</li>
+  <li>重复</li>
+</ol>
+<div class="diagram">理想节奏（node_timeout_s=1）：
+
+0ms     KeepAlive 成功，timer 清零
+~250ms  KeepAlive 成功
+~500ms  KeepAlive 成功
+~750ms  KeepAlive 成功
+        （1s TTL 窗口内多次刷新，key 仍在）</div>
+
+<h3>3.3 单次发送失败：250ms 是 wait 步长，不是「只试 4 次」</h3>
+<p><code>SendKeepAliveMessage</code> 在 <strong>900ms 总预算</strong> 内反复 <code>wait_for(250ms)</code>，直到 RPC 就绪或超时。</p>
+
+<h3>3.4 外层 <code>LaunchKeepAliveThreads</code></h3>
+<table>
+  <tr><th>条件</th><th>行为</th></tr>
+  <tr><td>距上次成功 &lt; 900ms 且 keepalive 失败</td><td><strong>立即</strong>重建 stream/租约（无 5s sleep）</td></tr>
+  <tr><td>距上次成功 ≥ 900ms</td><td>进入正式故障：可选 fake DELETE、deathTimer、默认 sleep 5s 后重建</td></tr>
+  <tr><td>etcd 服务端</td><td>整 1s 没收到续租仍删 key → 其他节点 TIMEOUT</td></tr>
+</table>
+
+<div class="warn">
+  <strong>结论（回答「250ms 短 + 失败机制」）：</strong><br>
+  · 250ms = 正常心跳间隔 + 单次 RPC 等待步长<br>
+  · 900ms = 本地「这一轮续租已没救」预算<br>
+  · 1s = etcd 生死线（集群视角）<br>
+  · <strong>不是</strong>「发 4 次 pack 再等满 1s」
+</div>
+
+<h2 id="recovery">4. 网络恢复与 Fake 事件防护</h2>
+
+<h3>4.1 本机 worker 的额外判断</h3>
+<p>KeepAlive 失败后，向其他 worker 发 <code>CheckEtcdState</code>，连续 3 次确认 etcd 仍可用 → <code>HandleKeepAliveFailed()</code> 注入 fake DELETE（本机缩容逻辑）。</p>
+<p class="warn"><strong>注意：</strong>这不能阻止其他节点在租约到期时收到真实 DELETE 并隔离你。</p>
+
+<h3>4.2 恢复路径</h3>
+<ul>
+  <li>重新 Put key，state 从 <code>start/restart</code> 变为 <code>recover</code></li>
+  <li><code>ProcessNetworkRecovery</code> → <code>NodeNetworkRecoveryEvent</code> → <code>RemoveFaultWorker</code></li>
+  <li>Fake remove 若真实节点已存在则忽略（<code>FAKE_NODE_EVENT_VALUE</code> 防护）</li>
+</ul>
+
+<h2 id="meta-cleanup">5. 元数据清理与重试策略</h2>
+
+<p>「清理元数据」分多条路径，重试策略<strong>不统一</strong>：</p>
+
+<table>
+  <tr><th>路径</th><th>触发</th><th>网络</th><th>失败重试</th></tr>
+  <tr><td><code>RemoveMetaByWorker</code></td><td>FAILED / restart</td><td>否（Master 内存）</td><td>无专门重试</td></tr>
+  <tr><td>Master→Worker 异步通知<br>(DELETE / CACHE_INVALID)</td><td>删副本等</td><td>是</td><td><strong>有</strong>：100ms 轮询 + async 表保留 op</td></tr>
+  <tr><td>Worker <code>ClearData</code></td><td>缩容/故障清理</td><td>部分</td><td><strong>有</strong>：200ms 定时重试失败 object</td></tr>
+  <tr><td><code>OrphanNodeMonitor</code></td><td>hash ring 不一致</td><td>读 etcd</td><td>etcd 不可用则跳过，下轮再试</td></tr>
+  <tr><td>SC <code>ClearWorkerMetadata</code></td><td>Stream 故障</td><td>本地</td><td>基本无重试</td></tr>
+</table>
+
+<h3>5.1 Master 异步通知（会重试）</h3>
+<ul>
+  <li><code>ProcessAsyncNotifyOp</code> 每 <strong>100ms</strong> 扫描 <code>notifyWorkerOpTable_</code></li>
+  <li>目标 worker fault → 跳过，日志 "retry next time"</li>
+  <li>RPC 失败 → op 保留，下轮再发</li>
+  <li>网络恢复 → <code>AsyncNotifyOpToWorker</code> / <code>ProcessAsyncDeleteNotifyOpImpl</code> 补发</li>
+  <li><code>PushMetaToWorker</code> 等有 <code>RetryOnError</code>（最长约 60s）</li>
+</ul>
+
+<h3>5.2 Worker ClearData（会重试）</h3>
+<p><code>WorkerOcServiceClearDataFlow</code>：失败 object 进入 <code>ClearDataRetryIds</code>，<strong>200ms</strong> 后 <code>RetryClearDataAsync</code>，直到失败集为空。</p>
+
+<h2 id="risk">6. 短 TTL 风险与生产建议</h2>
+
+<div class="warn">
+  <strong>node_timeout_s=1 仅适合 ST 压测，不适合生产。</strong>
+  <ul>
+    <li>gRPC/调度抖动 &gt;250ms 即触发 SendKeepAlive 内层重试</li>
+    <li>连续失败 ~900ms～1s → 本地故障路径 + etcd 删 key → 集群 TIMEOUT 风暴</li>
+    <li>每次 TIMEOUT 都切主 + SetFaultWorker</li>
+    <li>续租频率 = TTL/4 → 1s 时每 250ms 一次，CPU/连接压力大</li>
+  </ul>
+</div>
+
+<div class="ok">
+  <strong>生产建议：</strong>
+  <ul>
+    <li><code>node_timeout_s</code> ≥ 30–60s，明显大于 P99(keepalive RTT + etcd 切换)</li>
+    <li><code>node_dead_timeout_s</code> 远大于 <code>node_timeout_s</code>（默认 300 vs 60）</li>
+    <li>缩短感知延迟优先调应用层健康检查，而非把 etcd TTL 压到秒级</li>
+  </ul>
+</div>
+
+<h3>关键源码位置</h3>
+<table>
+  <tr><th>文件</th><th>职责</th></tr>
+  <tr><td><code>etcd_keep_alive.cpp</code></td><td>250ms 间隔、900ms 预算、Run 主循环</td></tr>
+  <tr><td><code>etcd_store.cpp</code></td><td>LaunchKeepAliveThreads、fake DELETE、5s 重建</td></tr>
+  <tr><td><code>etcd_cluster_manager.cpp</code></td><td>TIMEOUT/FAILED、Orphan 清理、CheckEtcdState</td></tr>
+  <tr><td><code>oc_metadata_manager.cpp</code></td><td>ProcessWorkerTimeout、RemoveMetaByWorker</td></tr>
+  <tr><td><code>oc_notify_worker_manager.cpp</code></td><td>100ms 异步通知轮询</td></tr>
+  <tr><td><code>worker_oc_service_clear_data_flow.cpp</code></td><td>ClearData 200ms 重试</td></tr>
+</table>
+
+<hr>
+<a class="back" href="index.html">← 返回文档门户</a>
+
+</body>
+</html>

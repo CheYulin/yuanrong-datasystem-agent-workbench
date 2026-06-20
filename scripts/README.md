@@ -21,7 +21,14 @@ scripts/
   build/
   │   ├── build_bazel.sh        # 本地 Bazel 构建入口
   │   ├── build_cmake.sh        # 本地 CMake 构建入口
-  │   └── remote_build_run_datasystem.sh  # 远端构建 + 测试 + 验证完整流程
+  │   └── rsync_datasystem_remote_bazel.sh  # rsync DS → 远端（默认 tiantiyun）+ bazel
+
+  harness/
+  │   ├── ds_harness.py                     # build/dev/daily/perf 统一入口
+  │   ├── profiles.yaml                     # profile → skill/script/evidence 路由
+  │   ├── sync_workspace_to_tiantiyun.sh      # 验证前全仓 sync → tiantiyun
+  │   ├── run_skill_verification_remote.sh    # TDD + harness profile 验证（tiantiyun）
+  │   └── run_skill_html_verify_remote.sh     # wb-html-publish（xqyun）
 
   deployment/
   │   ├── health_check.sh       # etcd + data worker 健康检查
@@ -49,16 +56,10 @@ scripts/
   │   ├── smoke/                      # 冒烟测试（< 5 分钟）
   │   │   ├── run_smoke.py           # Python 冒烟入口
   │   │   ├── harness_zmq_metrics_e2e.sh  # Bazel+whl+run_smoke（ZMQ 分段 metrics E2E）
-  │   │   ├── run_smoke_bazel.sh
-  │   │   ├── run_smoke_cmake.sh
   │   │   └── run_smoke_remote.sh
   │   ├── ut/                        # 单元测试（< 30 分钟）
-  │   │   ├── run_ut_bazel.sh
-  │   │   ├── run_ut_cmake.sh
   │   │   └── run_ut_remote.sh
   │   ├── st/                        # 集成测试（< 60 分钟）
-  │   │   ├── run_st_bazel.sh
-  │   │   ├── run_st_cmake.sh
   │   │   ├── run_st_remote.sh
   │   │   └── run_st_zmq_metrics.sh
   │   ├── validate_kv_executor.sh           # KV executor 验证
@@ -108,36 +109,33 @@ bash scripts/development/node/switch_node.sh centos9-new
 bash scripts/development/node/bootstrap_new_node.sh --node centos9-new
 ```
 
-### 4. 本地构建（Cursor 日间）
+### 4. 构建画像
 
 ```bash
-# Bazel
-bash scripts/build/build_bazel.sh
-
-# CMake
-bash scripts/build/build_cmake.sh
+python3 scripts/harness/ds_harness.py build --backend cmake --dry-run --json
+python3 scripts/harness/ds_harness.py build --backend bazel --dry-run --json
+python3 scripts/harness/ds_harness.py build --profile build.quick
 ```
 
-### 5. 远端构建 + 测试
+### 5. Skill 验证（按节点）
 
 ```bash
-bash scripts/build/remote_build_run_datasystem.sh \
-  --remote xqyun-32c32g \
-  --hetero on \
-  --perf on
+# tiantiyun — TDD + harness profile checks
+bash scripts/harness/run_skill_verification_remote.sh
+
+# xqyun — HTML 发布
+bash scripts/harness/run_skill_html_verify_remote.sh
+
+# 本地 WSL — GitCode / commit 草稿
+bash scripts/run_skill_local_verification.sh
 ```
 
-### 6. 分层测试
+### 6. 开发 / 每日 / 性能 profiles
 
 ```bash
-# 冒烟（< 5 分钟）
-bash scripts/testing/verify/smoke/run_smoke_bazel.sh
-
-# UT（< 30 分钟）
-bash scripts/testing/verify/ut/run_ut_bazel.sh
-
-# ST（< 60 分钟）
-bash scripts/testing/verify/st/run_st_bazel.sh
+python3 scripts/harness/ds_harness.py dev --profile dev.default --dry-run --json
+python3 scripts/harness/ds_harness.py daily --profile daily.full --dry-run --json
+python3 scripts/harness/ds_harness.py perf --profile perf.hotspot --dry-run --json
 ```
 
 ### 7. hermes 同步（夜间）

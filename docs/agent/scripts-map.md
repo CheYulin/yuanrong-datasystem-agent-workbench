@@ -1,68 +1,76 @@
 # `scripts/` 地图（指导 Agent）
 
-优先从仓库根使用统一入口：`./ops <能力命令>`。  
-仅在调试/开发脚本自身时，才直接访问 `scripts/...` 内部路径。
+优先查阅 **`.skills/`**（`wb-build` / `wb-dev` / `wb-daily` / `wb-perf` / `wb-docs` / `wb-html-publish`），按 skill 表和 `scripts/harness/profiles.yaml` 运行 profile。
 
 ## 1. 总览
 
-| 子目录 | 一句话 | 典型何时调用 |
-|--------|--------|----------------|
-| **`scripts/build/`** | 编译链辅助，不是替代 `build.sh` | 需要 brpc ST 兼容树、或收敛 client 第三方 `NEEDED` |
-| **`scripts/development/`** | 开发阶段脚本（index/git/lib/ide） | 刷新索引、生成提交说明草稿、共享库 |
-| **`scripts/testing/`** | 测试阶段脚本（verify） | 合入前跑 KV executor / brpc 参考用例 |
-| **`scripts/analysis/`** | 分析阶段脚本（perf） | 对比 executor 开销、锁竞争、栈/系统调用证据 |
-| **`scripts/documentation/`** | 文档阶段脚本（excel/observable） | 生成工作簿与预览页面 |
-| **`scripts/pr/`** | GitCode MR 辅助（CI 轮询等） | 监听 `ci_processing`→`ci_failed` 并自动评论 `/retest`：`scripts/pr/gitcode_ci_watch_retest.sh` |
+| 子目录 | 一句话 | Skill |
+|--------|--------|-------|
+| **`scripts/harness/`** | `ds_harness.py` + `profiles.yaml` 统一入口 | **wb-build / wb-dev / wb-daily / wb-perf** |
+| **`scripts/build/`** | 编译链辅助，不是替代 `build.sh` | **wb-build** |
+| **`scripts/testing/verify/`** | smoke / UT / ST / 专项门禁 | **wb-dev** / **wb-daily** |
+| **`scripts/metrics/`** + DS log scripts | metrics_summary、KV perf Markdown | **wb-perf** / **wb-docs** |
+| **`scripts/analysis/perf/`** | perf、锁竞争、executor 曲线 | **wb-perf** |
+| **`docs/observable/workbook/`** | Workbook Markdown sources | **wb-docs** |
+| **`scripts/development/sync/`** | rsync、HTML git | **wb-html-publish** |
 
 ## 2. 按任务选脚本
 
-### 2.1 「先确认能编、能跑 ST」
+### 2.1 构建画像 — **wb-build**
 
-- 在 **`$DS`**：`bash build.sh`（见 [`cmake-non-bazel.md`](../verification/cmake-non-bazel.md)）。  
-- 不要直接执行 `build/tests/st/ds_st_kv_cache`；用 `ctest` 或 `./ops test.kv_executor`。
-
-### 2.2 特性验证 / 门禁（无 sudo）
-
-| 目标 | 入口 |
+| 目标 | 命令 |
 |------|------|
-| KV executor 注入 + 源码关键字审计 | `./ops test.kv_executor`（日常加 `--skip-build`） |
-| brpc/bthread 参考用例 + 可选覆盖率 HTML | `./ops test.brpc_kv_executor` |
-| 锁竞争 batch 单测（看 `PERF_CONCURRENT_BATCH`） | `./ops runtime.lock_perf` |
+| CMake dry-run | `python3 scripts/harness/ds_harness.py build --backend cmake --dry-run --json` |
+| Bazel dry-run | `python3 scripts/harness/ds_harness.py build --backend bazel --dry-run --json` |
+| 构建 evidence | `python3 scripts/harness/ds_harness.py build --profile build.quick` |
 
-### 2.3 性能分析（多数无 sudo；bpftrace 要 root）
+### 2.2 特性验证 / 门禁（无 sudo）— **wb-dev**
 
-| 目标 | 入口 |
+| 目标 | 脚本 |
 |------|------|
-| Executor inline vs injected 曲线 / csv | `./ops analysis.kv_executor_perf` |
-| 门禁 + 可选 perf 落盘（基线目录） | `./ops analysis.collect_lock_baseline` |
-| 两次 run 目录对比 | `./ops analysis.compare_lock_baseline` |
-| bpftrace 工作流（打印 sudo 采集命令） | `./ops analysis.lock_ebpf_workflow` |
-| strace / bpftrace / perf record 原始采集 | 调试脚本时再直接进入 `scripts/analysis/perf/` |
-| 栈文本后处理 | 调试脚本时再直接进入 `scripts/analysis/perf/` |
+| 开发闭环 | `python3 scripts/harness/ds_harness.py dev --profile dev.default` |
+| Smoke（tiantiyun） | `bash scripts/testing/verify/smoke/run_smoke_remote.sh` |
+| UT | `bash scripts/testing/verify/ut/run_ut_remote.sh` |
+| ST | `bash scripts/testing/verify/st/run_st_remote.sh` |
+| KV executor 注入 + 源码关键字审计 | `bash scripts/testing/verify/validate_kv_executor.sh`（日常加 `--skip-build`） |
+| URMA/TCP 观测日志 | `bash scripts/testing/verify/validate_urma_tcp_observability_logs.sh <log_dir>` |
+| ZMQ metrics E2E | `bash scripts/testing/verify/smoke/harness_zmq_metrics_e2e.sh` |
 
-### 2.4 代码索引（IDE）
+### 2.3 每日构建 — **wb-daily**
 
-| 目标 | 入口 |
+| 目标 | 命令 |
 |------|------|
-| 从 `build/compile_commands.json` 生成带 URMA 宏的索引库 | `./ops analysis.refresh_urma_index` |
+| 全量 dry-run | `python3 scripts/harness/ds_harness.py daily --profile daily.full --dry-run --json` |
+| 全量质量构建 | `python3 scripts/harness/ds_harness.py daily --profile daily.full` |
 
-### 2.5 编译构建类辅助
+### 2.4 性能分析 — **wb-perf**
 
-| 目标 | 入口 |
+| 目标 | 脚本 |
 |------|------|
-| 列出 client 测试/库真实链接的第三方 | `scripts/build/list_client_third_party_deps.sh` |
-| 拉取并构建 brpc ST 兼容依赖（供 validate_brpc 使用） | `scripts/build/bootstrap_brpc_st_compat.sh` |
+| 热点 dry-run | `python3 scripts/harness/ds_harness.py perf --profile perf.hotspot --dry-run --json` |
+| 回归 profile | `python3 scripts/harness/ds_harness.py perf --profile perf.regression` |
+| Executor inline vs injected | `python3 scripts/analysis/perf/kv_executor_perf_analysis.py` |
+| 锁 baseline 采集 / 对比 | `collect_client_lock_baseline.sh` / `compare_client_lock_baseline.sh` |
+| bpftrace 工作流 | `bash scripts/analysis/perf/run_kv_lock_ebpf_workflow.sh` |
+| URMA 宏索引 | `python3 scripts/development/code-index/refresh_urma_index_db.py` |
 
-## 3. 环境变量（最常见）
+### 2.5 文档交付 — **wb-docs**
 
-- **`DATASYSTEM_ROOT`** / **`YUANRONG_DATASYSTEM_ROOT`**：`yuanrong-datasystem` 绝对路径（两仓不同级时必设）。  
+| 目标 | 脚本 / 路径 |
+|------|-------------|
+| KV perf Markdown 报告 | `python3 scripts/metrics/gen_kv_perf_report.py` |
+| Bugfix ↔ FEMA HTML | `python3 scripts/analysis/generate_bugfix_fema_report.py` |
+| 可观测工作簿（已提交 xlsx） | `docs/observable/workbook/` |
+
+## 3. 环境变量
+
+- **`DATASYSTEM_ROOT`** / **`YUANRONG_DATASYSTEM_ROOT`**：datasystem 绝对路径（两仓不同级时必设）。  
 - **`CTEST_OUTPUT_ON_FAILURE=1`**：失败时打印用例输出。  
 
 ## 4. 相关文档
 
 | 文档 | 用途 |
 |------|------|
-| [`README.md`](../../scripts/README.md) | 脚本目录说明与 `lib` 约定 |
-| [`cmake-non-bazel.md`](../verification/cmake-non-bazel.md) | `build.sh`、CTest、perf、coverage 组合 |
-| [`手动验证确认指南.md`](../verification/手动验证确认指南.md) | 逐步验收与记录模板 |
-| [`agent开发载体_vibe与yuanrong分工.plan.md`](../../plans/agent开发载体_vibe与yuanrong分工.plan.md) | 双仓分工总表 |
+| [`INDEX.md`](../../INDEX.md) | Skill 路由总表 |
+| [`scripts/harness/verify_matrix.yaml`](../../scripts/harness/verify_matrix.yaml) | 改动类型 → 最低验证级别 |
+| [`cmake-non-bazel.md`](../verification/cmake-non-bazel.md) | `build.sh`、CTest 组合 |
