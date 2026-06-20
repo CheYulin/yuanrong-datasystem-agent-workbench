@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DS_ROOT="${DS_ROOT:-$(cd "${SCRIPT_DIR}/../../yuanrong-datasystem" 2>/dev/null && pwd)}"
+DS_ROOT="${DS_ROOT:-$(cd "${SCRIPT_DIR}/../../../yuanrong-datasystem" 2>/dev/null && pwd)}"
 
 if [[ ! -d "${DS_ROOT}" ]]; then
   echo "DS_ROOT not found. Set DS_ROOT or run from yuanrong-datasystem-agent-workbench/" >&2

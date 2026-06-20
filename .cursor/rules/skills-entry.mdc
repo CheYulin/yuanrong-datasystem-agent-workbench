@@ -1,5 +1,5 @@
 ---
-description: Route runnable workbench capabilities through .skills/ (canonical) — not ./ops (removed).
+description: Route runnable workbench capabilities through .skills/ (canonical) — ops wrapper removed.
 globs:
   - "**/*"
 alwaysApply: true
@@ -7,23 +7,25 @@ alwaysApply: true
 
 # Skills Entry (workbench)
 
-There is **no** `./ops` wrapper. Canonical skills live in **`.skills/`**; Cursor stubs in **`.cursor/skills/`** redirect there.
+There is **no** `ops/` wrapper. Canonical skills live in **`.skills/`**; Cursor stubs in **`.cursor/skills/`** redirect there.
 
 | Skill | Scope |
 |-------|--------|
-| **wb-verify** | L1–L6: build, run cluster, UT/ST, smoke, lint, format |
-| **wb-log-analysis** | L7: access/resource HTML, URMA gate, metrics Markdown |
-| **wb-perf-research** | L8: `scripts/analysis/perf/*`, URMA index refresh |
-| **wb-html-publish** | xqyun `/var/www/html` git, `publish_htmls_git.sh` — verify via `run_skill_html_verify_remote.sh` |
-| **wb-docs** | `scripts/documentation/*` workbooks; commit draft is **local** |
-| **ds-pr-flow** (datasystem) | GitCode PR review/create — **local WSL** only |
+| **wb-build** | CMake/Bazel build, timing, module long-tail (`ds_harness.py build`) |
+| **wb-dev** | Dev loop: lint, smoke, UT, ST, matrix gates (`ds_harness.py dev`) |
+| **wb-daily** | Full daily quality: coverage, perf regression (`ds_harness.py daily`) |
+| **wb-perf** | Hotspot/regression: bpftrace, strace, bench (`ds_harness.py perf`) |
+| **wb-html-publish** | xqyun `/var/www/html` git — `publish_htmls_git.sh` |
+| **wb-docs** | Reports, workbook under `docs/observable/workbook/` |
+| **ds-pr-flow** (datasystem) | GitCode PR — **local WSL** only |
 
-Index: [`INDEX.md`](../../INDEX.md). Script map: [`docs/agent/scripts-map.md`](../../docs/agent/scripts-map.md).
+Script ownership: `scripts/harness/profiles.yaml`.  
+Index: [`INDEX.md`](../../INDEX.md). Map: [`docs/agent/scripts-map.md`](../../docs/agent/scripts-map.md).
 
 When adding a user-facing script:
 
 1. Put it under `scripts/<area>/`
-2. Add the path to the matching skill's command table in `.skills/<name>/SKILL.md`
-3. Update `docs/agent/scripts-map.md` and `INDEX.md` if routing changes
+2. Register owner in `scripts/harness/profiles.yaml`
+3. Update `.skills/<name>/SKILL.md`, `docs/agent/scripts-map.md`, `INDEX.md`
 
 Default verify node: **tiantiyun-80c128g** (not xqyun).

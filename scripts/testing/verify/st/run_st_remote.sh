@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$(cd "${SCRIPT_DIR}/../../../development/lib" && pwd)"
+LIB_DIR="$(cd "${SCRIPT_DIR}/../../../lib" && pwd)"
 SCRIPT_DIR="${LIB_DIR}"
 . "${LIB_DIR}/load_nodes.sh"
 . "${LIB_DIR}/remote_defaults.sh"
@@ -40,7 +40,7 @@ run_payload() {
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
     echo 'Building...'
-    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -5
+    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
   fi
 
   echo 'Running ST tests...'
@@ -61,7 +61,7 @@ else
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
     echo 'Building...'
-    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -5
+    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
   fi
 
   echo 'Running ST tests...'

@@ -5,8 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../../development/lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
+# shellcheck source=../../lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../lib/datasystem_root.sh"
 BUILD_DIR="${ROOT_DIR}/build"
 OUT_ROOT="${ROOT_DIR}/plans/client_lock_baseline/runs"
 RUN_PERF="on"

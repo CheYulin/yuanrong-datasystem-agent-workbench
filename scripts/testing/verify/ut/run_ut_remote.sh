@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$(cd "${SCRIPT_DIR}/../../../development/lib" && pwd)"
+LIB_DIR="$(cd "${SCRIPT_DIR}/../../../lib" && pwd)"
 SCRIPT_DIR="${LIB_DIR}"
 . "${LIB_DIR}/load_nodes.sh"
 . "${LIB_DIR}/remote_defaults.sh"
@@ -16,6 +16,9 @@ SCRIPT_DIR="${LIB_DIR}"
 
 SKIP_BUILD=0
 NODE="${NODE_NAME:-$(node_role_default verify_ut)}"
+# Narrow regex: avoid substring "ut" in Put/Timeout/structure. Override: UT_CTEST_REGEX / UT_CTEST_EXCLUDE.
+UT_CTEST_REGEX="${UT_CTEST_REGEX:-_ut$|_ut_|_llt$|UnitTest|unit_test}"
+UT_CTEST_EXCLUDE="${UT_CTEST_EXCLUDE:-st|ST|stream|object|integration|e2e|smoke}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,20 +34,22 @@ BUILD_BACKEND="${BUILD_BACKEND:-cmake}"
 banner "UT regression on ${REMOTE}"
 
 run_payload() {
-  bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" <<'REMOTE_SCRIPT'
+  bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" "${UT_CTEST_REGEX}" "${UT_CTEST_EXCLUDE}" <<'REMOTE_SCRIPT'
   set -euo pipefail
   SKIP_BUILD="$1"
   BUILD_BACKEND="$2"
   REMOTE_BASE="$3"
+  UT_CTEST_REGEX="$4"
+  UT_CTEST_EXCLUDE="$5"
   cd "${REMOTE_BASE}/yuanrong-datasystem"
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
     echo 'Building...'
-    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -5
+    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
   fi
 
-  echo 'Running UT tests...'
-  ctest --test-dir build --output-on-failure -R 'ut|UT|unit' -j "$(nproc)" 2>&1 | tail -30
+  echo "Running UT tests (regex=${UT_CTEST_REGEX}, exclude=${UT_CTEST_EXCLUDE})..."
+  ctest --test-dir build --output-on-failure -R "${UT_CTEST_REGEX}" -E "${UT_CTEST_EXCLUDE}" -j "$(nproc)" 2>&1 | tail -30
 REMOTE_SCRIPT
 }
 
@@ -52,19 +57,21 @@ if [[ -d "${REMOTE_BASE}/yuanrong-datasystem" ]]; then
   log_info "Running locally on $(hostname -s) with REMOTE_BASE=${REMOTE_BASE}"
   run_payload
 else
-  ssh_remote "${REMOTE}" bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" <<'REMOTE_SCRIPT'
+  ssh_remote "${REMOTE}" bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" "${UT_CTEST_REGEX}" "${UT_CTEST_EXCLUDE}" <<'REMOTE_SCRIPT'
   set -euo pipefail
   SKIP_BUILD="$1"
   BUILD_BACKEND="$2"
   REMOTE_BASE="$3"
+  UT_CTEST_REGEX="$4"
+  UT_CTEST_EXCLUDE="$5"
   cd "${REMOTE_BASE}/yuanrong-datasystem"
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
     echo 'Building...'
-    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -5
+    bash build.sh -t build -B build -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
   fi
 
   echo 'Running UT tests...'
-  ctest --test-dir build --output-on-failure -R 'ut|UT|unit' -j "$(nproc)" 2>&1 | tail -30
+  ctest --test-dir build --output-on-failure -R "${UT_CTEST_REGEX}" -E "${UT_CTEST_EXCLUDE}" -j "$(nproc)" 2>&1 | tail -30
 REMOTE_SCRIPT
 fi

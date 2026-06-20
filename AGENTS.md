@@ -12,13 +12,15 @@
 
 ## 脚本与 Skill
 
-- **入口索引：** [`INDEX.md`](INDEX.md)
-- **验证 / 构建：** **wb-verify** L1–L6 + `scripts/testing/verify/*`（**tiantiyun**）
-- **日志分析：** **wb-log-analysis** L7（需 L2 捕获的 `results/smoke_test_*`）
-- **探索 perf：** **wb-perf-research** L8
-- **yche.me HTML：** **wb-html-publish**（xqyun git）
-- **Excel 工作簿：** **wb-docs**
-- **新增脚本：** 放 `scripts/`，登记对应 **wb-*** skill 与 `INDEX.md`
+- **入口索引：** [`INDEX.md`](INDEX.md) · **统一 harness：** `scripts/harness/ds_harness.py` + `profiles.yaml`
+- **构建画像：** **wb-build**（**tiantiyun**）
+- **开发闭环：** **wb-dev** — lint、smoke、UT、ST、matrix 门禁（**tiantiyun**）
+- **每日全量：** **wb-daily** — coverage、perf 回归（**tiantiyun**）
+- **性能研究：** **wb-perf** — bpftrace、strace、bench（**tiantiyun**）
+- **yche.me HTML：** **wb-html-publish**（**xqyun**）
+- **报告 / 工作簿：** **wb-docs**（`docs/observable/workbook/`）
+- **GitCode PR：** **ds-pr-flow**（**本地 WSL**）
+- **新增脚本：** 放 `scripts/`，在 `profiles.yaml` 登记 owner skill
 
 ## Excel / PPT
 
@@ -56,7 +58,7 @@
 
 | 任务 | 节点 | 入口 |
 |------|------|------|
-| Skill 验证 L1–L8、TDD | **tiantiyun-80c128g** | `bash scripts/harness/run_skill_verification_remote.sh` |
+| Skill 验证（TDD + harness profiles） | **tiantiyun-80c128g** | `bash scripts/harness/run_skill_verification_remote.sh` |
 | HTML 发布验证 | **xqyun-32c32g** | `bash scripts/harness/run_skill_html_verify_remote.sh` |
 | GitCode PR / commit 草稿 | **本地 WSL** | `bash scripts/run_skill_local_verification.sh` |
 | 日间代码 sync | xqyun-32c32g | `bash scripts/development/sync/sync_to_xqyun.sh` |

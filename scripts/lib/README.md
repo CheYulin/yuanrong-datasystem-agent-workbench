@@ -1,6 +1,14 @@
 # scripts/lib
 
-Compatibility shim for shared shell/Python helpers.
+Shared shell/Python helpers for workbench scripts.
 
-Canonical implementations still live in `scripts/development/lib/` during the migration. New scripts should source
-`scripts/lib/<name>`; each shim forwards to the existing implementation so old callers continue to work.
+Source from any script under `scripts/`:
+
+```bash
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)"  # adjust ../ depth
+SCRIPT_DIR="${LIB_DIR}"
+. "${LIB_DIR}/load_nodes.sh"
+. "${LIB_DIR}/common.sh"
+```
+
+`nodes.yaml` resolves via `scripts/config/nodes.yaml`.

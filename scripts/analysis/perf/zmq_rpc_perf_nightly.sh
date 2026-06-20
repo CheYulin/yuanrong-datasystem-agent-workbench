@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../../development/lib/datasystem_root.sh
-. "${SCRIPT_DIR}/../../development/lib/datasystem_root.sh"
+# shellcheck source=../../lib/datasystem_root.sh
+. "${SCRIPT_DIR}/../../lib/datasystem_root.sh"
 VIBE_CODING_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 REMOTE="xqyun-16c16g"

@@ -10,7 +10,7 @@ set -euo pipefail
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKBENCH_ROOT="$(cd "${HARNESS_DIR}/../.." && pwd)"
 REPOS_ROOT="$(cd "${WORKBENCH_ROOT}/.." && pwd)"
-LIB_DIR="${WORKBENCH_ROOT}/scripts/development/lib"
+LIB_DIR="${WORKBENCH_ROOT}/scripts/lib"
 SCRIPT_DIR="${LIB_DIR}"
 . "${LIB_DIR}/load_nodes.sh"
 . "${LIB_DIR}/common.sh"

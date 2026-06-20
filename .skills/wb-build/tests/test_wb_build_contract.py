@@ -26,6 +26,12 @@ class WbBuildContractTest(unittest.TestCase):
         ):
             self.assertTrue((WORKBENCH / rel).is_file(), rel)
 
+    def test_build_wrappers_resolve_sibling_datasystem(self) -> None:
+        for rel in ("scripts/build/build_cmake.sh", "scripts/build/build_bazel.sh"):
+            text = (WORKBENCH / rel).read_text(encoding="utf-8")
+            self.assertIn("../../../yuanrong-datasystem", text, rel)
+            self.assertNotIn('${SCRIPT_DIR}/../../yuanrong-datasystem', text, rel)
+
 
 if __name__ == "__main__":
     unittest.main()

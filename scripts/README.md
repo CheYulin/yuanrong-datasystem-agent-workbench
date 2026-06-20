@@ -30,19 +30,9 @@ scripts/
   │   ├── run_skill_verification_remote.sh    # TDD + harness profile 验证（tiantiyun）
   │   └── run_skill_html_verify_remote.sh     # wb-html-publish（xqyun）
 
-  deployment/
-  │   ├── health_check.sh       # etcd + data worker 健康检查
-  │   └── etcd/
-  │       ├── start_etcd.sh            # 单节点 etcd
-  │       ├── start_etcd_cluster.sh    # 3 节点 etcd 集群
-  │       └── stop_etcd.sh             # 停止 etcd
-  │   └── data_worker/
-  │       ├── start_worker.sh           # 启动 data worker
-  │       ├── stop_worker.sh           # 停止 data worker
-  │       └── worker_config.yaml       # worker 配置模板
-
   development/
   │   ├── sync/
+  │   │   ├── publish_htmls_git.sh   # yche.me HTML git（xqyun）
   │   │   ├── sync_to_xqyun.sh       # 同步本地 repos 到远端（Cursor 日间用）
   │   │   └── sync_hermes_workspace.sh # 同步 datasystem 到 hermes 工作区（夜间用）
   │   ├── node/
@@ -50,7 +40,7 @@ scripts/
   │   │   └── switch_node.sh          # 切换默认远端节点
   │   ├── code-index/
   │   │   └── refresh_urma_index_db.py # URMA/UB macro 索引数据库刷新
-  │   └── lib/                        # 共享库（同上 lib/，二选一使用）
+  │   └── lib/                        # 已迁至 scripts/lib/（仅保留 redirect README）
 
   testing/verify/
   │   ├── smoke/                      # 冒烟测试（< 5 分钟）
@@ -60,8 +50,7 @@ scripts/
   │   ├── ut/                        # 单元测试（< 30 分钟）
   │   │   └── run_ut_remote.sh
   │   ├── st/                        # 集成测试（< 60 分钟）
-  │   │   ├── run_st_remote.sh
-  │   │   └── run_st_zmq_metrics.sh
+  │   │   └── run_st_remote.sh
   │   ├── validate_kv_executor.sh           # KV executor 验证
   │   ├── validate_urma_tcp_observability_logs.sh  # URMA/TCP 日志验证
   │   ├── verify_zmq_metrics_fault.sh       # ZMQ 指标 fault 验证
@@ -93,8 +82,8 @@ scripts/
 编辑 `config/nodes.yaml`，添加/修改节点信息。查看当前节点：
 
 ```bash
-SCRIPT_DIR="$(pwd)/scripts/development/lib" bash -c \
-  'source scripts/development/lib/load_nodes.sh && echo "默认节点: $(node_default)"'
+SCRIPT_DIR="$(pwd)/scripts/lib" bash -c \
+  'source scripts/lib/load_nodes.sh && echo "默认节点: $(node_default)"'
 ```
 
 ### 2. 切换默认节点

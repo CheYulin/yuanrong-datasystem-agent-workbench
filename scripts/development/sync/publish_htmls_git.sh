@@ -9,13 +9,28 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
-# shellcheck source=../lib/load_nodes.sh
+LIB_DIR="$(cd "${SCRIPT_DIR}/../../lib" && pwd)"
+SCRIPT_DIR="${LIB_DIR}"
+# shellcheck source=../../lib/load_nodes.sh
 . "${LIB_DIR}/load_nodes.sh"
-# shellcheck source=../lib/common.sh
+# shellcheck source=../../lib/common.sh
 . "${LIB_DIR}/common.sh"
 
 WEB_ROOT="${WEB_ROOT:-/var/www/html}"
+
+_on_publish_host() {
+  local host
+  host="$(node_ssh_host "${PUBLISH_NODE}")"
+  local short
+  short="$(hostname -s 2>/dev/null || hostname)"
+  [[ "${short}" == "${host}" ]] && return 0
+  [[ -f "${WEB_ROOT}/.git" ]] && return 0
+  return 1
+}
+
+_run_git() {
+  git -c "safe.directory=${WEB_ROOT}" -C "${WEB_ROOT}" "$@"
+}
 
 usage() {
   cat <<'EOF'
@@ -46,14 +61,28 @@ WR="$(node_web_root "${PUBLISH_NODE}")"
 cmd="$1"
 case "${cmd}" in
   pull)
-    log_info "git pull on ${REMOTE}:${WEB_ROOT}"
-    ssh "${REMOTE}" "git -c safe.directory=${WEB_ROOT} -C ${WEB_ROOT} pull"
+    if _on_publish_host; then
+      log_info "git pull on local ${WEB_ROOT}"
+      _run_git pull
+    else
+      log_info "git pull on ${REMOTE}:${WEB_ROOT}"
+      ssh "${REMOTE}" "git -c safe.directory=${WEB_ROOT} -C ${WEB_ROOT} pull"
+    fi
     ;;
   status)
-    ssh "${REMOTE}" "git -c safe.directory=${WEB_ROOT} -C ${WEB_ROOT} status -sb"
+    if _on_publish_host; then
+      _run_git status -sb
+    else
+      ssh "${REMOTE}" "git -c safe.directory=${WEB_ROOT} -C ${WEB_ROOT} status -sb"
+    fi
     ;;
   push)
-    ssh "${REMOTE}" "git -c safe.directory=${WEB_ROOT} -C ${WEB_ROOT} push"
+    if _on_publish_host; then
+      log_info "git push on local ${WEB_ROOT}"
+      _run_git push
+    else
+      ssh "${REMOTE}" "git -c safe.directory=${WEB_ROOT} -C ${WEB_ROOT} push"
+    fi
     ;;
   -h|--help|help)
     usage

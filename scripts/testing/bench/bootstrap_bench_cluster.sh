@@ -3,7 +3,7 @@
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$(cd "${BENCH_DIR}/../../development/lib" && pwd)"
+LIB_DIR="$(cd "${BENCH_DIR}/../../lib" && pwd)"
 SCRIPT_DIR="${LIB_DIR}"
 . "${LIB_DIR}/load_nodes.sh"
 . "${LIB_DIR}/common.sh"
