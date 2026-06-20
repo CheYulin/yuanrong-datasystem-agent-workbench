@@ -7,7 +7,7 @@
 
 ## 目标
 
-为 Agent 提供 dsbench 与 kvtest 的可复现运行 playbook、harness smoke 脚本，以及 workbench skills（`wb-dsbench`、`wb-kvtest`）。
+为 Agent 提供 dsbench 与 kvtest 的可复现运行 playbook、harness smoke 脚本；bench profiles 归 **wb-perf**（`bench.dsbench.smoke` / `bench.kvtest.smoke`）。
 
 ## 工具概览
 
@@ -65,8 +65,7 @@ flowchart TB
 
 ## Skills（workbench）
 
-- `.skills/wb-dsbench/SKILL.md` — dsbench 压测与 smoke harness
-- `.skills/wb-kvtest/SKILL.md` — kvtest 编译运行与 CSV 证据
+- `.skills/wb-perf/SKILL.md` — dsbench/kvtest bench smoke（`profiles.yaml`）
 
 稳定后迁移至 `yuanrong-datasystem/.skills/ds-bench` 与 `ds-kvtest`。
 

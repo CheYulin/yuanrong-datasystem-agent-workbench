@@ -21,13 +21,14 @@ Use this skill to answer: "Can this code change be safely proposed for review?"
 
 - Backend: default `cmake`; override with `--backend bazel` when the change is Bazel-specific.
 - Node: default `tiantiyun-80c128g`.
-- Profile: `dev.default` unless a narrower profile is justified.
+- Profile: `dev.quick` (default) or `dev.default` (manual/nightly, includes build).
 
 ## Commands
 
 ```bash
+bash scripts/harness/verify_skill.sh --skill wb-dev
+python3 scripts/harness/ds_harness.py dev --profile dev.quick
 python3 scripts/harness/ds_harness.py dev --profile dev.default
-python3 scripts/harness/ds_harness.py dev --backend bazel --profile dev.default
 python3 scripts/harness/ds_harness.py dev --dry-run --json
 ```
 
@@ -44,7 +45,7 @@ Owned gates include:
 ## Evidence
 
 Harness runs write `summary.json`, `steps.jsonl`, and `test_results.json` under
-`results/harness/<timestamp>-dev.default/`.
+`results/harness/<timestamp>-dev.quick/`.
 
 ## Pass/Fail Criteria
 

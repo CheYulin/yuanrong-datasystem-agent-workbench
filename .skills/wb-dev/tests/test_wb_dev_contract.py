@@ -14,7 +14,7 @@ class WbDevContractTest(unittest.TestCase):
     def test_skill_routes_to_dev_profile(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("name: wb-dev", text)
-        self.assertIn("dev.default", text)
+        self.assertIn("dev.quick", text)
         self.assertIn("ds_harness.py dev", text)
 
     def test_dev_gate_scripts_exist(self) -> None:

@@ -13,16 +13,18 @@ Single routing table for **yuanrong-datasystem-agent-workbench**. Product skills
 | **wb-html-publish** | yche.me HTML via xqyun `/var/www/html` git |
 | **wb-docs** | Reports, workbook sources, commit drafts |
 
-TDD / harness profile 验证（**tiantiyun**）：`bash scripts/harness/run_skill_verification_remote.sh`  
-HTML 发布验证（**xqyun**）：`bash scripts/harness/run_skill_html_verify_remote.sh`  
-GitCode / commit（**本地 WSL**）：`bash scripts/run_skill_local_verification.sh`
+TDD / harness profile 验证（**tiantiyun**）：`bash scripts/harness/verify_skill.sh --skill wb-build`（或 `run_skill_verification_remote.sh`）  
+HTML 发布验证（**xqyun**）：`bash scripts/harness/verify_skill.sh --skill wb-html-publish`  
+GitCode / commit（**本地 WSL**）：`bash scripts/run_skill_local_verification.sh`  
+仪表盘：`python3 scripts/harness/render_skill_dashboard.py`
 
 ## Harness profiles
 
 `scripts/harness/profiles.yaml` is the single routing table:
 
 - `build.quick` / `build.full` → **wb-build**
-- `dev.default` → **wb-dev**
+- `dev.quick` → **wb-dev**（默认，无 inline build）
+- `dev.default` → **wb-dev**（manual/nightly，含 build）
 - `daily.full` → **wb-daily**
 - `perf.hotspot` / `perf.regression` → **wb-perf**
 

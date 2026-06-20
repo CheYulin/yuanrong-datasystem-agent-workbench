@@ -27,23 +27,22 @@ Deliverable skills:
 | `wb-html-publish` | **xqyun** | yche.me HTML via `/var/www/html` git |
 | `wb-docs` | **tiantiyun** | Reports, workbook, commit drafts |
 
-Datasystem product skills: sibling `yuanrong-datasystem/.skills/` (`ds-dev-loop` extends L1–L8 + self-check).
+Datasystem product skills: sibling `yuanrong-datasystem/.skills/` (`ds-dev-loop` extends harness profiles + self-check).
 
 ## Verification
 
 ```bash
-# tiantiyun — TDD + harness dry-run/user-path checks (wb-build / wb-dev / wb-daily / wb-perf / docs / ds-*)
-bash scripts/harness/run_skill_verification_remote.sh
-bash scripts/harness/run_skill_verification_remote.sh --tests-only
-bash scripts/harness/run_skill_verification_remote.sh --user-only
+# tiantiyun — per-skill verify (see profiles.yaml skill_verify)
+bash scripts/harness/verify_skill.sh --skill wb-build
+bash scripts/harness/verify_skill.sh --all --dry-run
+bash scripts/harness/run_skill_verification_remote.sh   # TDD + tiantiyun skills
 
-# xqyun — wb-html-publish only
-bash scripts/harness/run_skill_html_verify_remote.sh
+# xqyun — wb-html-publish
+bash scripts/harness/verify_skill.sh --skill wb-html-publish
 
 # local (WSL) — GitCode / commit message (ds-pr-flow)
 bash scripts/run_skill_local_verification.sh
 
-# 汇总 HTML 报告（构建/测试/性能/日志分节 + 耗时与成功率）
-python3 scripts/harness/generate_skill_verification_report.py
-# → results/skill_verification_summary_YYYYMMDD.html
+# dashboard HTML
+python3 scripts/harness/render_skill_dashboard.py
 ```

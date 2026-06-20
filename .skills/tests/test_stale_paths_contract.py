@@ -25,8 +25,7 @@ FORBIDDEN_TOKENS = (
     "wb-verify",
     "wb-log-analysis",
     "wb-perf-research",
-    "run_skill_user_verification.sh",
-    "run_skill_html_verification.sh",
+    "generate_skill_verification_report.py",
     "scripts/development/lib/load_nodes",
     "L1–L8",
 )

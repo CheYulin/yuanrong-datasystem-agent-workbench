@@ -18,15 +18,16 @@ Run from **agent-workbench** repo root:
 
 ```bash
 python3 scripts/harness/ds_harness.py build --backend cmake --dry-run --json
-python3 scripts/harness/ds_harness.py dev --profile dev.default --dry-run --json
+python3 scripts/harness/ds_harness.py dev --profile dev.quick --dry-run --json
 python3 scripts/harness/ds_harness.py daily --profile daily.full --dry-run --json
 python3 scripts/harness/ds_harness.py perf --profile perf.hotspot --dry-run --json
 
-# ST on tiantiyun (< 60 min)
-bash scripts/testing/verify/st/run_st_remote.sh
+# Per-skill verify (profiles.yaml skill_verify)
+bash scripts/harness/verify_skill.sh --skill wb-build
+bash scripts/harness/verify_skill.sh --all --dry-run
 
-# UT on tiantiyun
-bash scripts/testing/verify/ut/run_ut_remote.sh
+# Dashboard
+python3 scripts/harness/render_skill_dashboard.py
 
 # Publish htmls to yche.me (git on xqyun)
 #   bash scripts/development/sync/publish_htmls_git.sh pull|status|push
