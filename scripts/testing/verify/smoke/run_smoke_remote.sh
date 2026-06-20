@@ -30,7 +30,7 @@ done
 init_remote "${NODE}"
 
 BUILD_BACKEND="${BUILD_BACKEND:-cmake}"
-BUILD_DIR="${BUILD_DIR:-build}"
+: "${BUILD_DIR:=build}"
 
 banner "Smoke test on ${REMOTE}"
 

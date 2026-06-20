@@ -22,6 +22,7 @@ nodes:
     workspace_root: /root/workspace/git-repos
     hermes_workspace_root: ~/agent/hermes-workspace
     thirdparty_cache: ~/.cache/yuanrong-datasystem-third-party
+    build_dir: /root/workspace/build-remote-datasystem
     pkg_manager: dnf
     description: "构建与验证节点（smoke / ST / UT / 远端 build）"
 

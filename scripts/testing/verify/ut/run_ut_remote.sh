@@ -16,9 +16,9 @@ SCRIPT_DIR="${LIB_DIR}"
 
 SKIP_BUILD=0
 NODE="${NODE_NAME:-$(node_role_default verify_ut)}"
-# Narrow regex: avoid substring "ut" in Put/Timeout/structure. Override: UT_CTEST_REGEX / UT_CTEST_EXCLUDE.
-UT_CTEST_REGEX="${UT_CTEST_REGEX:-_ut$|_ut_|_llt$|UnitTest|unit_test}"
-UT_CTEST_EXCLUDE="${UT_CTEST_EXCLUDE:-st|ST|stream|object|integration|e2e|smoke}"
+# GTest names use *Test.*; exclude ST/integration suffixes (not bare "st" — that matches "Test").
+UT_CTEST_REGEX="${UT_CTEST_REGEX:-Test\.|DeathTest}"
+UT_CTEST_EXCLUDE="${UT_CTEST_EXCLUDE:-_st$|_ST$|IntegrationTest|integration_test|smoke|e2e}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,7 +30,7 @@ done
 
 init_remote "${NODE}"
 BUILD_BACKEND="${BUILD_BACKEND:-cmake}"
-BUILD_DIR="${BUILD_DIR:-build}"
+: "${BUILD_DIR:=build}"
 
 banner "UT regression on ${REMOTE}"
 

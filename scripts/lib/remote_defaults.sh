@@ -63,6 +63,18 @@ init_remote() {
   log_info "Remote: ${REMOTE}"
   log_info "Remote base: ${REMOTE_BASE}"
   log_info "Third-party cache: ${DS_OPENSOURCE_DIR}"
+
+  if [[ -z "${BUILD_DIR:-}" ]]; then
+    local build_dir
+    build_dir="$(node_build_dir "$node" 2>/dev/null || true)"
+    if [[ -n "${build_dir}" ]]; then
+      BUILD_DIR="$(resolve_remote_path "$build_dir")"
+    else
+      BUILD_DIR="build"
+    fi
+    export BUILD_DIR
+    log_info "Build dir: ${BUILD_DIR}"
+  fi
 }
 
 # SSH with batch mode and keepalive options.

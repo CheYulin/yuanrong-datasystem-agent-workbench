@@ -16,6 +16,7 @@ SCRIPT_DIR="${LIB_DIR}"
 
 SKIP_BUILD=0
 NODE="${NODE_NAME:-$(node_role_default verify_st)}"
+ST_CTEST_REGEX="${ST_CTEST_REGEX:-_st$|_ST$|IntegrationTest|integration_test}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,17 +28,18 @@ done
 
 init_remote "${NODE}"
 BUILD_BACKEND="${BUILD_BACKEND:-cmake}"
-BUILD_DIR="${BUILD_DIR:-build}"
+: "${BUILD_DIR:=build}"
 
 banner "ST on ${REMOTE}"
 
 run_payload() {
-  bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" "${BUILD_DIR}" <<'REMOTE_SCRIPT'
+  bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" "${BUILD_DIR}" "${ST_CTEST_REGEX}" <<'REMOTE_SCRIPT'
   set -euo pipefail
   SKIP_BUILD="$1"
   BUILD_BACKEND="$2"
   REMOTE_BASE="$3"
   BUILD_DIR="$4"
+  ST_CTEST_REGEX="$5"
   cd "${REMOTE_BASE}/yuanrong-datasystem"
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
@@ -45,9 +47,9 @@ run_payload() {
     bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
   fi
 
-  echo 'Running ST tests...'
+  echo "Running ST tests (regex=${ST_CTEST_REGEX})..."
   set +e
-  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R 'st|ST|integration' -j "$(nproc)" 2>&1)"
+  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${ST_CTEST_REGEX}" -j "$(nproc)" 2>&1)"
   CTEST_STATUS="$?"
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30
@@ -62,12 +64,13 @@ if [[ -d "${REMOTE_BASE}/yuanrong-datasystem" ]]; then
   log_info "Running locally on $(hostname -s) with REMOTE_BASE=${REMOTE_BASE}"
   run_payload
 else
-  ssh_remote "${REMOTE}" bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" "${BUILD_DIR}" <<'REMOTE_SCRIPT'
+  ssh_remote "${REMOTE}" bash -s -- "${SKIP_BUILD}" "${BUILD_BACKEND}" "${REMOTE_BASE}" "${BUILD_DIR}" "${ST_CTEST_REGEX}" <<'REMOTE_SCRIPT'
   set -euo pipefail
   SKIP_BUILD="$1"
   BUILD_BACKEND="$2"
   REMOTE_BASE="$3"
   BUILD_DIR="$4"
+  ST_CTEST_REGEX="$5"
   cd "${REMOTE_BASE}/yuanrong-datasystem"
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
@@ -75,9 +78,9 @@ else
     bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
   fi
 
-  echo 'Running ST tests...'
+  echo "Running ST tests (regex=${ST_CTEST_REGEX})..."
   set +e
-  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R 'st|ST|integration' -j "$(nproc)" 2>&1)"
+  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${ST_CTEST_REGEX}" -j "$(nproc)" 2>&1)"
   CTEST_STATUS="$?"
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30

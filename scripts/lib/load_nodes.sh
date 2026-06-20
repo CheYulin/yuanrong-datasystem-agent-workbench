@@ -16,6 +16,7 @@
 #   node_hermes_workspace_root <name> - print hermes workspace root for node
 #   node_thirdparty_cache <name> - print third-party cache path for node
 #   node_pkg_manager <name>    - print package manager (dnf/apt) for node
+#   node_build_dir <name>      - print remote build output dir (optional)
 #
 # Environment override:
 #   NODE_NAME=<name>           - override default node (useful for hermes agent)
@@ -73,6 +74,7 @@ for node_name, cfg in data.get('nodes', {}).items():
     print('thirdparty_cache|' + str(cfg.get('thirdparty_cache', '')))
     print('pkg_manager|' + str(cfg.get('pkg_manager', '')))
     print('web_root|' + str(cfg.get('web_root', '')))
+    print('build_dir|' + str(cfg.get('build_dir', '')))
 " 2>&1)"
 }
 
@@ -147,4 +149,9 @@ node_thirdparty_cache() {
 node_pkg_manager() {
   local node="${1:?node_pkg_manager: node name required}"
   _nodes_find_node "$node" | grep '^pkg_manager|' | cut -d'|' -f2
+}
+
+node_build_dir() {
+  local node="${1:?node_build_dir: node name required}"
+  _nodes_find_node "$node" | grep '^build_dir|' | cut -d'|' -f2
 }
