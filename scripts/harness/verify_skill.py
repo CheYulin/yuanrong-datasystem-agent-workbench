@@ -245,7 +245,6 @@ def main(argv: list[str] | None = None) -> int:
     if manifest_path.is_file() and not args.all:
         prior = json.loads(manifest_path.read_text(encoding="utf-8"))
     prior_skills = {e["skill"]: e for e in prior.get("skills", []) if e.get("skill")}
-    manifest_entries = []
 
     failed = 0
     for skill in skills:

@@ -33,6 +33,8 @@ done
 
 RSYNC_OPTS=(-avz --delete
   --exclude='yuanrong-datasystem/build'
+  --exclude='yuanrong-datasystem/example/cpp/build'
+  --exclude='yuanrong-datasystem/config.cmake'
   --exclude='.git'
   --exclude='**/results/'
   --exclude='*.whl'

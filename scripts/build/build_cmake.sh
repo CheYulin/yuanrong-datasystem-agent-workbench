@@ -22,6 +22,9 @@ fi
 
 cd "${DS_ROOT}"
 
+# Generated / machine-local; never reuse a synced CMake cache on another host.
+rm -rf "${DS_ROOT}/example/cpp/build"
+
 JOBS="${JOBS:-$(nproc)}"
 BUILD_DIR="${BUILD_DIR:-build}"
 TASK="${1:-build}"
