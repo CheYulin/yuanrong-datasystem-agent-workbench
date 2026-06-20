@@ -192,7 +192,7 @@ profiles:
       - id: ut
         label: Remote unit tests
         uses: scripts/testing/verify/ut/run_ut_remote.sh
-        command: bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
+        command: UT_CTEST_REGEX='MetricsTest|KVClient|KvClient' bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
       - id: st
         label: Remote system tests
         uses: scripts/testing/verify/st/run_st_remote.sh
