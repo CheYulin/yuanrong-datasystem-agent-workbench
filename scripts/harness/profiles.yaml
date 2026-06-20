@@ -4,6 +4,7 @@ defaults:
   node: tiantiyun-80c128g
   backend: cmake
   evidence_root: results/harness
+  remote_build_dir: /root/workspace/build-remote-datasystem
   long_tail_top_n: 10
 
 script_owners:
@@ -213,19 +214,19 @@ profiles:
       - id: build
         label: Build selected backend once before test gates
         uses: yuanrong-datasystem/build.sh
-        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)"
+        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B /root/workspace/build-remote-datasystem -j "$(nproc)"
       - id: smoke
         label: Remote smoke tests
         uses: scripts/testing/verify/smoke/run_smoke_remote.sh
-        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
+        command: BUILD_DIR=/root/workspace/build-remote-datasystem bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
       - id: ut
         label: Remote unit tests
         uses: scripts/testing/verify/ut/run_ut_remote.sh
-        command: bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
+        command: BUILD_DIR=/root/workspace/build-remote-datasystem bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
       - id: st
         label: Remote system tests
         uses: scripts/testing/verify/st/run_st_remote.sh
-        command: bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
+        command: BUILD_DIR=/root/workspace/build-remote-datasystem bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
 
   daily.full:
     skill: wb-daily
@@ -247,19 +248,19 @@ profiles:
       - id: build
         label: Build selected backend once before full gates
         uses: yuanrong-datasystem/build.sh
-        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B build -j "$(nproc)"
+        command: cd {datasystem_root} && bash build.sh -b {backend} -t build -B /root/workspace/build-remote-datasystem -j "$(nproc)"
       - id: smoke
         label: Full smoke tests
         uses: scripts/testing/verify/smoke/run_smoke_remote.sh
-        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
+        command: BUILD_DIR=/root/workspace/build-remote-datasystem bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
       - id: ut
         label: Full unit tests
         uses: scripts/testing/verify/ut/run_ut_remote.sh
-        command: bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
+        command: BUILD_DIR=/root/workspace/build-remote-datasystem bash scripts/testing/verify/ut/run_ut_remote.sh --node {node} --skip-build
       - id: st
         label: Full system tests
         uses: scripts/testing/verify/st/run_st_remote.sh
-        command: bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
+        command: BUILD_DIR=/root/workspace/build-remote-datasystem bash scripts/testing/verify/st/run_st_remote.sh --node {node} --skip-build
       - id: coverage
         label: Coverage collection through datasystem build.sh
         uses: yuanrong-datasystem/build.sh

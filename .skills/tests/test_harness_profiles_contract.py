@@ -126,8 +126,10 @@ class HarnessProfilesContractTest(unittest.TestCase):
             for step in profile["steps"]:
                 if step["id"] == "build":
                     self.assertNotIn("| tail", step["command"], f"{profile_name}:build")
+                    self.assertIn("/root/workspace/build-remote-datasystem", step["command"], f"{profile_name}:build")
                 if step["id"] in {"smoke", "ut", "st"}:
                     self.assertIn("--skip-build", step["command"], f"{profile_name}:{step['id']}")
+                    self.assertIn("BUILD_DIR=/root/workspace/build-remote-datasystem", step["command"], f"{profile_name}:{step['id']}")
 
     def test_scripts_lib_shims_exist(self) -> None:
         for name in (
