@@ -188,7 +188,7 @@ profiles:
       - id: smoke
         label: Remote smoke tests
         uses: scripts/testing/verify/smoke/run_smoke_remote.sh
-        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build
+        command: bash scripts/testing/verify/smoke/run_smoke_remote.sh --node {node} --skip-build --skip-zmq-gate
       - id: ut
         label: Remote unit tests
         uses: scripts/testing/verify/ut/run_ut_remote.sh

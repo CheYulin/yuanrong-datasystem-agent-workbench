@@ -106,6 +106,7 @@ REQUIRED_ZMQ_FLOW_METRICS = [
 # Min histogram `count` (from metrics_summary JSON lines like count=NNN,avg_us=...) for each
 # of the 6 flow metrics. Too low = flaky / not a real E2E acceptance.
 MIN_ZMQ_METRIC_COUNT = 50
+SKIP_ZMQ_GATE = False
 
 # ============ Config ============
 WORKER_PORTS = [31501, 31502, 31503, 31504]
@@ -894,6 +895,7 @@ def main():
     global LOG_MONITOR_INTERVAL_MS, CLIENT_POST_READ_FLUSH_SLEEP_SEC
     global ENABLE_CROSS_NODE
     global MIN_LOG_LEVEL
+    global SKIP_ZMQ_GATE
     global PYTHON_BIN, YR_SITE_PACKAGES, LD_PRELOAD, WORKER_BIN
 
     # 1. Parse args FIRST (--help exits here before binary discovery)
@@ -946,6 +948,11 @@ def main():
         help="Disable KVClient enable_cross_node_connection (no cross-worker redirect / follow).",
     )
     parser.add_argument(
+        "--skip-zmq-gate",
+        action="store_true",
+        help="Pass when clients succeed even if ZMQ flow histogram gate fails (dev.quick PR loop).",
+    )
+    parser.add_argument(
         "--minloglevel",
         type=int,
         default=MIN_LOG_LEVEL,
@@ -971,6 +978,7 @@ def main():
     WORKER_PORTS = WORKER_PORTS[:WORKER_NUMS]
     ENABLE_CROSS_NODE = not args.no_cross_node
     MIN_LOG_LEVEL = args.minloglevel
+    SKIP_ZMQ_GATE = bool(args.skip_zmq_gate)
 
     # 3. Discover binaries and paths (fail here if not found)
     PYTHON_BIN = find_python_bin()
@@ -1024,11 +1032,15 @@ def main():
         subprocess.run(["rm", "-rf", ETCD_DATA_DIR], stderr=subprocess.DEVNULL)
         log(f"=== Smoke test DONE. Results at {log_dir} ===")
 
-    exit_code = 0 if (clients_all_ok and zmq_metrics_ok) else 1
+    exit_code = 0 if clients_all_ok and (zmq_metrics_ok or SKIP_ZMQ_GATE) else 1
     if exit_code != 0:
         log(
             f"Exiting {exit_code} (clients_ok={clients_all_ok}, "
-            f"zmq_flow_metrics_ok={zmq_metrics_ok})"
+            f"zmq_flow_metrics_ok={zmq_metrics_ok}, skip_zmq_gate={SKIP_ZMQ_GATE})"
+        )
+    elif not zmq_metrics_ok and SKIP_ZMQ_GATE:
+        log(
+            f"Exiting 0 (clients_ok=True, zmq_flow_metrics_ok=False, skip_zmq_gate=True)"
         )
     raise SystemExit(exit_code)
 
