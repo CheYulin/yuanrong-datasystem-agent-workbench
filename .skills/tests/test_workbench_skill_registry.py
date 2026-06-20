@@ -28,6 +28,14 @@ class WorkbenchSkillRegistryTest(unittest.TestCase):
     def test_ops_removed(self) -> None:
         self.assertFalse((WORKBENCH / "ops").exists())
 
+    def test_each_skill_has_tri_tool_artifacts(self) -> None:
+        for name in CANONICAL_WB:
+            base = SKILLS / name
+            self.assertTrue((base / "agents/openai.yaml").is_file(), f"{name} missing openai.yaml")
+            self.assertTrue((base / "agents/claude.md").is_file(), f"{name} missing claude.md")
+            stub = WORKBENCH / ".cursor/skills" / name / "SKILL.md"
+            self.assertTrue(stub.is_file(), f"{name} missing cursor stub")
+
     def test_each_skill_has_tests(self) -> None:
         for name in CANONICAL_WB:
             tests = SKILLS / name / "tests"
