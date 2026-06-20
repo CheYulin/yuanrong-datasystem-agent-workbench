@@ -53,7 +53,15 @@ run_payload() {
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30
   if printf '%s\n' "${CTEST_OUTPUT}" | grep -q 'No tests were found'; then
-    exit 8
+    echo 'No ctest smoke targets; falling back to Python cluster smoke...'
+    WB="${REMOTE_BASE}/yuanrong-datasystem-agent-workbench"
+    python3 "${WB}/scripts/testing/verify/smoke/run_smoke.py" \
+      --read-loop-sec "${SMOKE_READ_LOOP_SEC:-15}" \
+      --keys "${SMOKE_KEYS:-80}" \
+      --tenants "${SMOKE_TENANTS:-2}" \
+      --clients-per-tenant "${SMOKE_CLIENTS_PER_TENANT:-2}" \
+      --min-zmq-metric-count "${SMOKE_MIN_ZMQ_METRIC_COUNT:-5}"
+    exit $?
   fi
   exit "${CTEST_STATUS}"
 REMOTE_SCRIPT
@@ -83,7 +91,15 @@ else
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30
   if printf '%s\n' "${CTEST_OUTPUT}" | grep -q 'No tests were found'; then
-    exit 8
+    echo 'No ctest smoke targets; falling back to Python cluster smoke...'
+    WB="${REMOTE_BASE}/yuanrong-datasystem-agent-workbench"
+    python3 "${WB}/scripts/testing/verify/smoke/run_smoke.py" \
+      --read-loop-sec "${SMOKE_READ_LOOP_SEC:-15}" \
+      --keys "${SMOKE_KEYS:-80}" \
+      --tenants "${SMOKE_TENANTS:-2}" \
+      --clients-per-tenant "${SMOKE_CLIENTS_PER_TENANT:-2}" \
+      --min-zmq-metric-count "${SMOKE_MIN_ZMQ_METRIC_COUNT:-5}"
+    exit $?
   fi
   exit "${CTEST_STATUS}"
 REMOTE_SCRIPT
