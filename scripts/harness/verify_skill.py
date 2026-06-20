@@ -201,7 +201,8 @@ def ssh_verify(skill: str, *, sync: bool, dry_run: bool) -> int:
     dry_flag = " --dry-run" if dry_run else ""
     cmd = (
         f"set -euo pipefail; "
-        f"WB=\"{remote_wb}\"; "
+        f"WS=$(eval echo \"{ws}\"); "
+        f"WB=\"$WS/yuanrong-datasystem-agent-workbench\"; "
         f"[[ -d \"$WB\" ]] || WB=\"$HOME/workspace/git-repos/yuanrong-datasystem-agent-workbench\"; "
         f"cd \"$WB\"; "
         f"VERIFY_ON_NODE='{node}' python3 \"$WB/scripts/harness/verify_skill.py\" "
