@@ -172,6 +172,8 @@ class HarnessProfilesContractTest(unittest.TestCase):
             self.assertEqual(summary["status"], "DRY_RUN")
             self.assertEqual(summary["profile"], "build.quick")
             self.assertEqual(summary["skill"], "wb-build")
+            self.assertIn("acceptance_verdict", summary)
+            self.assertIn("metrics", summary)
             self.assertTrue((out_dir / "summary.json").is_file())
             self.assertTrue((out_dir / "steps.jsonl").is_file())
             self.assertTrue((out_dir / "build_timing.csv").is_file())

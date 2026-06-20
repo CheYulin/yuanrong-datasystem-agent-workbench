@@ -20,9 +20,13 @@ from typing import Any
 
 import yaml
 
+from parsers.evidence import build_optimization_hint, compute_acceptance, parse_test_results
+
 
 WORKBENCH = Path(__file__).resolve().parents[2]
-PROFILES_PATH = WORKBENCH / "scripts" / "harness" / "profiles.yaml"
+HARNESS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(HARNESS_DIR))
+PROFILES_PATH = HARNESS_DIR / "profiles.yaml"
 DEFAULT_PROFILE_BY_COMMAND = {
     "build": "build.quick",
     "dev": "dev.quick",
@@ -157,21 +161,22 @@ def write_build_timing(path: Path, records: list[dict[str, Any]]) -> None:
             )
 
 
-def write_placeholder_evidence(evidence_dir: Path, profile_name: str, profile: dict[str, Any], records: list[dict[str, Any]]) -> None:
+def write_evidence_files(
+    evidence_dir: Path,
+    profile_name: str,
+    profile: dict[str, Any],
+    records: list[dict[str, Any]],
+    *,
+    acceptance_metrics: dict[str, Any],
+    status: str,
+) -> dict[str, Any]:
     requested = set(profile.get("evidence", []))
+    test_results: dict[str, Any] | None = None
     if "build_timing.csv" in requested:
         write_build_timing(evidence_dir / "build_timing.csv", records)
     if "test_results.json" in requested:
-        write_json(
-            evidence_dir / "test_results.json",
-            {
-                "profile": profile_name,
-                "status": "pending-real-parser",
-                "tests": [],
-                "failures": [r for r in records if r.get("status") == "FAIL"],
-                "long_tail": sorted(records, key=lambda r: r.get("elapsed_sec", 0), reverse=True)[:10],
-            },
-        )
+        test_results = parse_test_results(evidence_dir, records)
+        write_json(evidence_dir / "test_results.json", test_results)
     if "coverage.json" in requested:
         write_json(
             evidence_dir / "coverage.json",
@@ -196,37 +201,35 @@ def write_placeholder_evidence(evidence_dir: Path, profile_name: str, profile: d
             },
         )
     if "perf_hotspots.md" in requested:
-        (evidence_dir / "perf_hotspots.md").write_text(
-            "\n".join(
-                [
-                    "# Performance Hotspots",
-                    "",
-                    "## Evidence",
-                    "Generated from harness step logs. Replace placeholders with parsed perf/bpftrace/metrics rows when available.",
-                    "",
-                    "## Judgment",
-                    "Rank hotspots by measured elapsed time, regression size, or sampled cost.",
-                    "",
-                    "## Suggestion",
-                    "Start with the highest-cost step or metric and rerun the matching perf profile after changes.",
-                    "",
-                    "## Recheck",
-                    f"`python3 scripts/harness/ds_harness.py perf --profile {profile_name}`",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
+        lines = [
+            "# Performance Hotspots",
+            "",
+            "## Evidence",
+        ]
+        for record in sorted(records, key=lambda r: r.get("elapsed_sec", 0), reverse=True):
+            lines.append(f"- {record['id']}: {record.get('elapsed_sec', 0)}s ({record.get('status')})")
+        lines.extend(
+            [
+                "",
+                "## Judgment",
+                "Ranked by harness step elapsed time.",
+                "",
+                "## Suggestion",
+                build_optimization_hint(records) or "No step exceeded 60s.",
+                "",
+                "## Recheck",
+                f"`python3 scripts/harness/ds_harness.py perf --profile {profile_name}`",
+                "",
+            ]
         )
-    if "bench_results.json" in requested:
-        write_json(
-            evidence_dir / "bench_results.json",
-            {
-                "profile": profile_name,
-                "status": "pending-real-parser",
-                "benchmarks": [],
-                "failures": [r for r in records if r.get("status") == "FAIL"],
-            },
-        )
+        (evidence_dir / "perf_hotspots.md").write_text("\n".join(lines), encoding="utf-8")
+    return compute_acceptance(
+        status=status,
+        command_group=str(profile.get("command_group", "")),
+        records=records,
+        acceptance_metrics=acceptance_metrics,
+        test_results=test_results,
+    )
 
 
 def run_step(step: dict[str, Any], evidence_dir: Path, dry_run: bool) -> dict[str, Any]:
@@ -310,6 +313,18 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
     if any(r.get("exit_code", 0) != 0 for r in records):
         status = "FAIL"
 
+    acceptance_cfg = config.get("acceptance_metrics", {}).get(
+        profile.get("acceptance_group") or profile.get("command_group"), {}
+    )
+    acceptance = write_evidence_files(
+        evidence_dir,
+        profile_name,
+        profile,
+        records,
+        acceptance_metrics=acceptance_cfg,
+        status=status,
+    )
+
     summary = {
         "status": status,
         "profile": profile_name,
@@ -322,14 +337,15 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
         "started_at": datetime.now(timezone.utc).isoformat(),
         "steps_total": len(records),
         "steps_failed": sum(1 for r in records if r.get("status") == "FAIL"),
-        "acceptance_metrics": config.get("acceptance_metrics", {}).get(
-            profile.get("acceptance_group") or profile.get("command_group"), {}
-        ),
+        "acceptance_metrics": acceptance_cfg,
+        "acceptance_verdict": acceptance["acceptance_verdict"],
+        "metrics": acceptance["metrics"],
+        "failed_layer": acceptance.get("failed_layer"),
+        "optimization_hint": acceptance.get("optimization_hint"),
         "steps": records,
     }
 
     write_steps(evidence_dir / "steps.jsonl", records)
-    write_placeholder_evidence(evidence_dir, profile_name, profile, records)
     write_json(evidence_dir / "summary.json", summary)
     return summary
 
