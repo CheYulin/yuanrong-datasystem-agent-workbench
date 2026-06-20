@@ -26,6 +26,9 @@ cd "${DS_ROOT}"
 rm -rf "${DS_ROOT}/example/cpp/build"
 
 JOBS="${JOBS:-$(nproc)}"
+if [[ -n "${VERIFY_ON_NODE:-}" && "${JOBS}" -gt 32 ]]; then
+  JOBS=32
+fi
 BUILD_DIR="${BUILD_DIR:-build}"
 TASK="${1:-build}"
 
