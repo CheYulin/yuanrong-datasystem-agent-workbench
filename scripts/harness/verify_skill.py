@@ -240,6 +240,11 @@ def main(argv: list[str] | None = None) -> int:
 
     runs_root = WORKBENCH / "results" / "skill_runs"
     runs_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = runs_root / "manifest.json"
+    prior: dict = {}
+    if manifest_path.is_file() and not args.all:
+        prior = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prior_skills = {e["skill"]: e for e in prior.get("skills", []) if e.get("skill")}
     manifest_entries = []
 
     failed = 0
@@ -249,23 +254,21 @@ def main(argv: list[str] | None = None) -> int:
             failed += 1
             continue
         summary = verify_skill(skill, verify_table[skill], dry_run=args.dry_run, runs_root=runs_root)
-        manifest_entries.append(
-            {
-                "skill": skill,
-                "verdict": summary["verdict"],
-                "evidence_dir": summary["evidence_dir"],
-                "git_sha": summary["git_sha"],
-            }
-        )
-        print(f"{summary['verdict']} {skill} -> {summary['evidence_dir']}")
         if summary["verdict"] == "FAIL":
             failed += 1
+        prior_skills[skill] = {
+            "skill": skill,
+            "verdict": summary["verdict"],
+            "evidence_dir": summary["evidence_dir"],
+            "git_sha": summary["git_sha"],
+        }
+        print(f"{summary['verdict']} {skill} -> {summary['evidence_dir']}")
 
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": git_sha(),
         "hostname": hostname_short(),
-        "skills": manifest_entries,
+        "skills": list(prior_skills.values()),
     }
     (runs_root / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return 1 if failed else 0
