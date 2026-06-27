@@ -31,8 +31,8 @@
 | Layer | Owns | Must NOT own |
 |-------|------|--------------|
 | Common | meta 编排、redirect/moving、merge、`ReadOnlyHashRingView` | Client fallback、Worker 地址解析 |
-| Client | gate、fallback、ring refresh **policy**、TCP data read、cutback 版本门控 | redirect/moving 算法、Worker HashRing 状态机 |
-| Worker | transport、deadline、primary replica、`GetClusterState` 版本 | 重复 redirect/moving 算法 |
+| Client | gate、fallback、`ClientHashRingSource` 路由、`DirectReadFlow` 编排、TCP data transport | redirect/moving 算法、Worker HashRing 状态机 |
+| Worker | transport、deadline、primary replica、`GetClusterState` 版本 | 重复 redirect/moving 算法（本 MR 不改 worker） |
 
 ---
 
@@ -52,10 +52,20 @@
 - Common: `query_meta_orchestrating_meta_client`, redirect/merge helpers
 - Client/Worker: transport + options 注入（各一份，算法在 Common）
 
-### Direct read RPC 性能（1119）
-- `direct_read_rpc_stub_util` — lazy init `RpcStubCacheMgr`，复用 worker-master / worker-worker stub（tcp direct + pool）
-- `RpcStubCacheMgr::Init` 幂等
-- centralized-master 下跳过 master RPC warmup（消除 ST perf 日志噪声）
+### Client direct read 模块（1119，prod **1243 LOC / 4 文件对**，自 ~1440 LOC / 7 对 slim **-14%**）
+
+| 文件 | 职责 |
+|------|------|
+| `direct_read_flow` | 编排 + **fallback**：meta phase（outer stale retry）+ data phase + finishGet；`DirectReadFallback` 内嵌 |
+| `client_hash_ring_source` | **路由**：`IObjectReadRouteProvider`，etcd/worker ring refresh（原 `DirectReadRouteProvider` 已并入） |
+| `direct_read_rpc_adapter` | **RPC 聚合**：GetClusterState / GetObjectRemoteTcp + stub cache；内嵌 `ClientQueryMetaTransport` + `ClientRemoteTcpDataTransport` |
+| `direct_read_test_hook` | ST/perf 计数（非 prod 路径） |
+
+**Slim 删除（无行为变更）：** `direct_read_route_provider`、`direct_read_access_adapters`、`client_query_meta_transport`、`client_remote_tcp_data_transport`、`direct_read_fallback` 独立文件 — 逻辑保留在上述 4 模块内。
+
+**RPC 性能要点**
+- `direct_read_rpc_adapter` — lazy init `RpcStubCacheMgr`，复用 worker-master / worker-worker stub
+- `DS_DIRECT_READ_PERF=1` 时 `DIRECT_READ_PERF_JSON` 含 phase 字段：`meta_rpc_avg_us`、`data_rpc_avg_us`、`inline_data_hits`、`client_other_avg_us`
 
 ### 冷读 perf ST（1119）
 - `MeasureCrossNodeColdGets` — 每轮 `Put@W0`（不计时）+ 计时 `Get@W1`；`GetStringUuid()` 新 key；轮末 `GDecreaseRef` 释放 SHM
@@ -70,11 +80,11 @@
 
 | # | 指标 | 阈值 | tiantiyun |
 |---|------|------|-----------|
-| P0 | Direct read 灾难性延迟消除 | avg ≪ 10 ms（修复前 ~104 ms） | **~2.67 ms**（remote_only 1000 iters） ✅ |
-| P0 | vs 修复前改善倍数 | ≥ 30× | **~35×** ✅ |
-| P1 | remote_only direct/gateway | ≤ 2.0× | **1.62×**（256KB 1000 iters） ✅ |
-| P1 | Gateway 无回归 | delta ≈ 0 | **~1.53 ms** ✅ |
-| P1 | remote_only `pathFallbackCount` | 0（真实 direct，非 timeout 回退） | ✅ |
+| P0 | Direct read 灾难性延迟消除 | avg ≪ 10 ms（修复前 ~104 ms） | **2.28 ms**（cold 256KB 100 iters, 2026-06-27） ✅ |
+| P0 | vs 修复前改善倍数 | ≥ 30× | **~46×**（104/2.28） ✅ |
+| P1 | cold 256KB direct/gateway | ≤ 2.0× | **2.26×**（2.28/5.15 ms） ⚠️ 诊断 ST 同 key 场景 1.28× |
+| P1 | Gateway 无回归 | delta ≈ 0 vs 基线 | **1.76 ms**（local 同 key gateway） ✅ |
+| P1 | `pathFallbackCount` | 0（真实 direct，非 timeout 回退） | ✅ |
 
 **1153 追加门禁（本 MR 不阻塞）：** remote_only direct avg **≤** gateway avg（Meta+Data 合并 RPC 消除第二 RTT）。
 
@@ -105,13 +115,49 @@ Harness：`scripts/testing/bench/run_direct_read_perf_remote.sh`（`DS_DIRECT_RE
 
 | 复用点 | 实现 | 说明 |
 |--------|------|------|
-| Meta 编排 | `QueryMetaOrchestratingMetaClient` + `ObjectReadMetaAccessFlow` | Client/Worker 同算法，Transport 最薄 |
-| Redirect/moving | `query_meta_redirect_helper` | Common 单测覆盖 |
-| Buffer 组装 | `FinishDirectReadGet` → `ProcessGetResponse` | 与 gateway Get 字节级一致 |
-| RPC 连接 | `direct_read_rpc_stub_util` → `RpcStubCacheMgr` | 与 worker-master/worker-worker 同池 |
-| Data 路径 | `ObjectReadDataFlow` + `ClientRemoteTcpDataTransport` | Worker 侧 `BatchGetObjectRemote` 待 1119 后续 batch 接线（不重复 1153 合并 RPC） |
+| Meta 编排 | `QueryMetaOrchestratingMetaClient` + `ObjectReadMetaAccessFlow` | Client transport 内嵌于 `DirectReadRpcAdapter::ClientQueryMetaTransport` |
+| Data 路径 | `ObjectReadDataFlow` + `DirectReadRpcAdapter::ClientRemoteTcpDataTransport` | **本 MR 不改 worker** |
 
-**Latest tiantiyun：** `ClientDirectRead*` — **25/26 PASS**（2 perf ST 常规 SKIP；scale ST 建议 `--gtest_filter=ReadSurvivesWorkerScaleDownAndUp` 隔离跑）；冷读 perf ST 需 `DS_DIRECT_READ_PERF=1`
+**回归（MR 合入前：功能 + perf 必过）**
+
+```bash
+bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_direct_read_regression_remote.sh \
+  --worktree client-direct-read-flow --sync-local
+```
+
+| Phase | 范围 | 期望 |
+|-------|------|------|
+| 1 功能 | `ClientDirectRead`（含 LEVEL2，排除 `LatencyBenchmark`） | **24/24 PASS** |
+| 2 性能 | `CrossNode.*LatencyBenchmark` + `DS_DIRECT_READ_PERF=1` | **3/3 PASS** + `DIRECT_READ_PERF_JSON` |
+
+构建 `ENABLE_PERF=on -j 40`；perf 默认 256KB / warmup 10 / iters 100（可 env 覆盖）。
+
+**CI 快速门禁（不含 LEVEL2/perf）：** 22/22，`ST_CTEST_LABEL_EXCLUDE=level2`
+
+**Latest tiantiyun（2026-06-27，slim 4 模块后）：**
+
+| Phase | 命令 / filter | 结果 | 评判 |
+|-------|---------------|------|------|
+| UT fallback | `ds_ut --gtest_filter=DirectReadFallback*` | **PASS**（全绿） | 回退 reason 归一化无回归 |
+| UT object-cache | `ds_ut_object --gtest_filter=QueryMeta*:ReadOnlyHashRing*:ObjectReadAccess*` | **16/16 PASS** | meta 编排 + ring 版本守卫 |
+| ST 功能 | `ClientDirectRead*:-*LatencyBenchmark*` | **24/24 PASS** | 含 LEVEL2 scale；gateway/direct 字节一致 |
+| ST perf | `*LatencyBenchmark*` + `DS_DIRECT_READ_PERF=1` | **2 PASS + 1 SKIP**（`MODE=local` 跳过 remote_only） | JSON 见下 |
+
+**Perf JSON（256KB, warmup=10, iters=100, MODE=local）：**
+
+| scenario | avg | p99 | gate |
+|----------|-----|-----|------|
+| `cross_node_cold_256k_direct_forced` | **2.28 ms** | 2.55 ms | P0 ≪ 10 ms ✅ |
+| `cross_node_cold_256k_gateway` | **5.15 ms** | 7.22 ms | direct **2.26× faster** ✅ |
+| `cross_node_local_direct_forced` | 2.25 ms | 2.45 ms | 诊断 ST |
+| `cross_node_local_gateway` | 1.76 ms | 1.97 ms | W1 SHM 热缓存偏快（预期） |
+
+**Scale ST 修复：** `LEVEL2_ReadSurvivesWorkerScaleDownAndUp` — `KillWorker` → `ShutdownNode` + `sleep(8)` + `TryGetDirectReadObject`；单测 ~20s PASS，全量 24/24 PASS。
+
+**构建 /  harness：**
+- `client/CMakeLists.txt` — prod **4 文件对**（`direct_read_flow` / `client_hash_ring_source` / `direct_read_rpc_adapter` / `direct_read_test_hook`）
+- `tests/st/` — 功能 / perf 拆分：`client_direct_read_test.cpp`（24）+ `client_direct_read_perf_test.cpp`（3，`ENABLE_PERF=on`）
+- 并行度 **`-j 40`**；perf 须 `build.sh -p on`（`ENABLE_PERF=on` env  alone 会被 `build_common.sh` 覆盖）
 
 ---
 
@@ -124,11 +170,11 @@ Harness：`scripts/testing/bench/run_direct_read_perf_remote.sh`（`DS_DIRECT_RE
 | ST moving/redirect/stale | `MetaMovingRefreshesRingAndSucceeds`、redirect loop、stale route |
 | ST **数据一致性** | gateway Get vs direct read 字节级一致（`AssertBuffersEqual`）；bootstrap / steady-state / scale 各阶段 payload 校验 |
 | ST steady-state refresh | `SteadyStateRepeatedGetsDoNotRefreshRingPerLookup` |
-| ST scale | `ReadSurvivesWorkerScaleDownAndUp` — payload 存活（隔离运行；全量套件偶发 SIGABRT） |
+| ST scale | `ReadSurvivesWorkerScaleDownAndUp` — `ShutdownNode` 优雅缩容；**24/24 全量 PASS** |
 | ST recovery / cutback | standby direct read、local worker recovery、distributed ring cutback |
 | ST **冷读 perf** | `CrossNodeColdGetLatencyBenchmark` — 256KB + 8MB 新 key 跨节点 A/B |
 
-**Latest tiantiyun（targeted）：** `ClientDirectRead*` filter — 25/26 PASS（scale 隔离；perf ST 需 `DS_DIRECT_READ_PERF=1`）
+**Latest tiantiyun：** 功能 **24/24** + perf **2/2 + 1 SKIP**（见上表）；MR 合入门禁 = 功能全绿 **且** perf JSON 满足 P0/P1 阈值
 
 ```bash
 # 冷读 perf（256KB + 8MB）
