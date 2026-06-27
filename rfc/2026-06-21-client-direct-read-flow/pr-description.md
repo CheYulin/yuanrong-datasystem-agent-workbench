@@ -45,7 +45,7 @@
 
 ### 生命周期 / 并发
 - `ObjectClientImpl::AcquireDirectReadSession` — `directReadStateMutex_` 下创建/复用 session
-- `ClientHashRingSource` / `DirectReadRouteProvider` / `DirectReadFlow` — `shared_ptr` 延长 adapter 与 ring source 生命周期
+- `ClientHashRingSource` / `DirectReadFlow` — `shared_ptr` 延长 adapter 与 ring source 生命周期
 - 分布式 cutback：`RefreshOnClusterEvent` + ring 版本门控
 
 ### P2 控制面
@@ -80,11 +80,11 @@
 
 | # | 指标 | 阈值 | tiantiyun |
 |---|------|------|-----------|
-| P0 | Direct read 灾难性延迟消除 | avg ≪ 10 ms（修复前 ~104 ms） | **2.28 ms**（cold 256KB 100 iters, 2026-06-27） ✅ |
-| P0 | vs 修复前改善倍数 | ≥ 30× | **~46×**（104/2.28） ✅ |
+| P0 | Direct read 灾难性延迟消除 | avg ≪ 10 ms（修复前 ~104 ms） | **2.32 ms**（cold 256KB, `MODE=all`, 2026-06-27） ✅ |
+| P0 | vs 修复前改善倍数 | ≥ 30× | **~45×**（104/2.32） ✅ |
 | P1 | cold 256KB direct/gateway latency ratio | ≤ 2.0×（direct 不得慢于 gateway 2 倍以上） | **0.44×**（2.32/5.28 ms，direct 更快） ✅ |
 | P1 | remote_only direct/gateway latency ratio | ≤ 2.0× | **1.70×**（3.25/1.91 ms） ✅ |
-| P1 | Gateway 无回归 | delta ≈ 0 vs 基线 | **1.76 ms**（local 同 key gateway） ✅ |
+| P1 | Gateway 无回归 | delta ≈ 0 vs 基线 | **1.83 ms**（local 同 key gateway） ✅ |
 | P1 | `pathFallbackCount` | 0（真实 direct，非 timeout 回退） | ✅ |
 
 **1153 追加门禁（本 MR 不阻塞）：** remote_only direct avg **≤** gateway avg（Meta+Data 合并 RPC 消除第二 RTT）。
@@ -131,7 +131,7 @@ bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_direct_read_
 | 1 功能 | `ClientDirectRead`（含 LEVEL2，排除 `LatencyBenchmark`） | **24/24 PASS** |
 | 2 性能 | `CrossNode.*LatencyBenchmark` + `DS_DIRECT_READ_PERF=1` | **3/3 PASS** + `DIRECT_READ_PERF_JSON` |
 
-构建 `ENABLE_PERF=on -j 40`；perf 默认 256KB / warmup 10 / iters 100（可 env 覆盖）。
+构建 `ENABLE_PERF=on -j 40`；perf 默认 256KB / warmup 10 / iters 100 / **`MODE=all`**（可 env 覆盖）。
 
 **CI 快速门禁（不含 LEVEL2/perf）：** 22/22，`ST_CTEST_LABEL_EXCLUDE=level2`
 
@@ -180,9 +180,9 @@ bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_direct_read_
 **Latest tiantiyun：** 功能 **24/24** + perf **3/3**（`MODE=all`）；MR 合入门禁 = 功能全绿 **且** perf JSON 满足 P0/P1 阈值
 
 ```bash
-# 冷读 perf（256KB + 8MB）
-DS_DIRECT_READ_PERF=1 DS_DIRECT_READ_PERF_MODE=local \
-  ./ds_st_object_cache --gtest_filter=ClientDirectReadCrossNodeTest.CrossNodeColdGetLatencyBenchmark
+# 全量 perf（含 remote_only）
+DS_DIRECT_READ_PERF=1 DS_DIRECT_READ_PERF_MODE=all \
+  ./ds_st_object_cache --gtest_filter='*LatencyBenchmark*'
 
 bazel test --config=release --config=test \
   //tests/ut/common/object_cache:query_meta_redirect_helper_test \
