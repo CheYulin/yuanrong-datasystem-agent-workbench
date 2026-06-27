@@ -82,7 +82,8 @@
 |---|------|------|-----------|
 | P0 | Direct read 灾难性延迟消除 | avg ≪ 10 ms（修复前 ~104 ms） | **2.28 ms**（cold 256KB 100 iters, 2026-06-27） ✅ |
 | P0 | vs 修复前改善倍数 | ≥ 30× | **~46×**（104/2.28） ✅ |
-| P1 | cold 256KB direct/gateway | ≤ 2.0× | **2.26×**（2.28/5.15 ms） ⚠️ 诊断 ST 同 key 场景 1.28× |
+| P1 | cold 256KB direct/gateway latency ratio | ≤ 2.0×（direct 不得慢于 gateway 2 倍以上） | **0.44×**（2.32/5.28 ms，direct 更快） ✅ |
+| P1 | remote_only direct/gateway latency ratio | ≤ 2.0× | **1.70×**（3.25/1.91 ms） ✅ |
 | P1 | Gateway 无回归 | delta ≈ 0 vs 基线 | **1.76 ms**（local 同 key gateway） ✅ |
 | P1 | `pathFallbackCount` | 0（真实 direct，非 timeout 回退） | ✅ |
 
@@ -141,16 +142,18 @@ bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_direct_read_
 | UT fallback | `ds_ut --gtest_filter=DirectReadFallback*` | **PASS**（全绿） | 回退 reason 归一化无回归 |
 | UT object-cache | `ds_ut_object --gtest_filter=QueryMeta*:ReadOnlyHashRing*:ObjectReadAccess*` | **16/16 PASS** | meta 编排 + ring 版本守卫 |
 | ST 功能 | `ClientDirectRead*:-*LatencyBenchmark*` | **24/24 PASS** | 含 LEVEL2 scale；gateway/direct 字节一致 |
-| ST perf | `*LatencyBenchmark*` + `DS_DIRECT_READ_PERF=1` | **2 PASS + 1 SKIP**（`MODE=local` 跳过 remote_only） | JSON 见下 |
+| ST perf | `*LatencyBenchmark*` + `DS_DIRECT_READ_PERF=1` + **`MODE=all`** | **3/3 PASS** | 含 remote_only 生产语义 |
 
-**Perf JSON（256KB, warmup=10, iters=100, MODE=local）：**
+**Perf JSON（256KB, warmup=10, iters=100, `MODE=all`，2026-06-27）：**
 
 | scenario | avg | p99 | gate |
 |----------|-----|-----|------|
-| `cross_node_cold_256k_direct_forced` | **2.28 ms** | 2.55 ms | P0 ≪ 10 ms ✅ |
-| `cross_node_cold_256k_gateway` | **5.15 ms** | 7.22 ms | direct **2.26× faster** ✅ |
-| `cross_node_local_direct_forced` | 2.25 ms | 2.45 ms | 诊断 ST |
-| `cross_node_local_gateway` | 1.76 ms | 1.97 ms | W1 SHM 热缓存偏快（预期） |
+| `cross_node_cold_256k_direct_forced` | **2.32 ms** | 2.56 ms | P0 ≪ 10 ms ✅ |
+| `cross_node_cold_256k_gateway` | **5.28 ms** | 7.62 ms | direct **2.28× faster** ✅ |
+| `cross_node_local_direct_forced` | 2.01 ms | 2.33 ms | 诊断 ST（同 key） |
+| `cross_node_local_gateway` | 1.83 ms | 1.99 ms | W1 SHM 热缓存偏快（预期） |
+| `remote_only_direct` | **3.25 ms** | 3.60 ms | P0 ≪ 10 ms ✅；P1 ratio **1.70×** ✅ |
+| `remote_only_gateway` | **1.91 ms** | 2.27 ms | direct > gateway 待 **1153** Meta+Data 合并 |
 
 **Scale ST 修复：** `LEVEL2_ReadSurvivesWorkerScaleDownAndUp` — `KillWorker` → `ShutdownNode` + `sleep(8)` + `TryGetDirectReadObject`；单测 ~20s PASS，全量 24/24 PASS。
 
@@ -174,7 +177,7 @@ bash yuanrong-datasystem-agent-workbench/scripts/testing/verify/run_direct_read_
 | ST recovery / cutback | standby direct read、local worker recovery、distributed ring cutback |
 | ST **冷读 perf** | `CrossNodeColdGetLatencyBenchmark` — 256KB + 8MB 新 key 跨节点 A/B |
 
-**Latest tiantiyun：** 功能 **24/24** + perf **2/2 + 1 SKIP**（见上表）；MR 合入门禁 = 功能全绿 **且** perf JSON 满足 P0/P1 阈值
+**Latest tiantiyun：** 功能 **24/24** + perf **3/3**（`MODE=all`）；MR 合入门禁 = 功能全绿 **且** perf JSON 满足 P0/P1 阈值
 
 ```bash
 # 冷读 perf（256KB + 8MB）
