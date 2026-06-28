@@ -96,10 +96,11 @@ lane 生命周期：
 |------|------|
 | `UrmaConnection` | 新增 `AcquireSendLane` / `ReleaseSendLane` / lane 级 `ReCreateJetty` |
 | `UrmaResource` | 下沉 `ImportTargetJetty`，用于故障恢复时 reimport targetJetty |
-| `UrmaManager::DeleteEvent` | 删除 event 前释放 event 对应 lane |
+| `UrmaManager::CheckAndNotify` / `DeleteEvent` | CQE 完成时释放 event 对应 lane，DeleteEvent 保留幂等兜底 |
 | `UrmaWriteImpl` | 每个 chunk acquire lane；NUMA 分支不变 |
 | `UrmaRead` | 每个 read chunk acquire lane |
-| `UrmaGatherWrite` | 从 WR 链表一次 post 改为每个 dst chunk 单独 post |
+| `UrmaGatherWrite` | 从 WR 链表一次 post 改为每个 dst chunk 单独 post；partial post 失败时收口已提交 events |
+| pipeline H2D | 发送侧 acquire lane，并用 serverKey 建轻量 event；pipeline CQE hook 释放 lane |
 | fake URMA | completion `local_id` 贯通发送 jetty id，支持 CQE lane 定位测试 |
 
 ## 5. 故障处理
@@ -112,14 +113,15 @@ lane 生命周期：
 4. `ReCreateJetty` 在 connection 内按 failed jetty 找 lane。
 5. `MarkInvalid()` 保证同一个 failed jetty 只恢复一次。
 6. lane 创建新 send jetty，并重新 import targetJetty。
-7. 当前 request 仍按 CQE error 返回失败；event 删除时释放 lane。
+7. 如果旧 WR 仍 in-flight，旧 send jetty 和旧 targetJetty 一起进入 retiring 状态，直到旧 WR completion/timeout 后释放。
+8. 当前 request 仍按 CQE error 返回失败；completion path 释放 lane，event 删除只做幂等兜底。
 
 ### 5.2 AE `URMA_EVENT_JETTY_ERR`
 
 1. AE raw jetty id 查 registry。
 2. 找 owning connection。
 3. `ReCreateJetty` 按 lane 替换。
-4. 如果 lane 有 in-flight request，新 lane 暂不释放给其他请求，直到旧 request 的 CQE/timeout 经 `DeleteEvent` 收口。
+4. 如果 lane 有 in-flight request，旧 send jetty 和旧 targetJetty 保留在 retiring 状态，直到旧 request 的 CQE/timeout 收口。
 
 ### 5.3 AE + CQE 双触发
 
@@ -163,9 +165,11 @@ lane 只选择 `(jetty,targetJetty)`，不改写 `srcChipId/dstChipId`。因此 
 已完成：
 
 - fake completion `local_id` 从 post-send snapshot 贯通到 `urma_cr_t`。
-- `UrmaConnection` 初版 send lane、lazy pool、event release。
+- `UrmaConnection` send lane、lazy pool、completion release、幂等 cleanup。
 - `UrmaWriteImpl` / `UrmaRead` / `UrmaGatherWrite` 切为每 WR acquire lane。
-- `ReCreateJetty` 初版 lane 级替换与 targetJetty reimport。
+- `ReCreateJetty` lane 级替换与 targetJetty reimport；retiring targetJetty 跟随旧 in-flight WR 生命周期。
+- pipeline H2D 发送侧纳入 lane acquire，pipeline CQE hook 释放轻量 event。
+- `UrmaGatherWrite` post 失败后清理已提交 events，避免 fallback 前遗留后台 WR。
 
 待补强：
 
