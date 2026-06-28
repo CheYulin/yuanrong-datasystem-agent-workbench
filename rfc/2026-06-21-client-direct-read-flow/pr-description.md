@@ -1,6 +1,6 @@
 # Client Direct Read — MR 1119
 
-**Branch:** `feature/client-direct-read-flow`  
+**Branch:** `feature/client-direct-read-flow` · **HEAD:** `6752fd35`  
 **MR:** https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/1119
 
 ---
