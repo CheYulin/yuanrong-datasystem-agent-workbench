@@ -23,6 +23,14 @@
 | 2026-06-29 | tiantiyun-80c128g | `UrmaSendLaneTest.*` after retiring-list fix | PASS, 3 tests | `ut_send_lane_retiring_list_fix_2.log` |
 | 2026-06-29 | tiantiyun-80c128g | `UrmaFakeBackendTest.PostSendTransfersBytesAndCompletes:UrmaFakeInjectCqeTest.*` after retiring-list fix | PASS, 6 tests | `ut_fake_completion_cqe_retiring_list_fix_2.log` |
 | 2026-06-29 | tiantiyun-80c128g | `ds_ut --gtest_filter='UrmaFake*'` after retiring-list fix | PASS, 61 tests | `ut_urma_fake_all_retiring_list_fix_2.log` |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `cmake -DWITH_TESTS=ON -DBUILD_WITH_URMA_FAKE=ON ...` with third-party cache and HEAD `e5976074` | PASS | clean configure confirmed fake URMA and reused cached third-party libs |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `make -j40 ds_ut` | PASS | clean build initially failed when fake URMA was OFF; reconfigured with `BUILD_WITH_URMA_FAKE=ON` and rebuilt successfully |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `UrmaSendLaneTest.*:UrmaFakeInjectCqeTest.*:UrmaFakeInjectEventTest.*:UrmaFakeBackendTest.PostSendTransfersBytesAndCompletes:UrmaFakeBackendTest.DeleteJettyInflightPostSend:UrmaFakeBackendTest.CleanupWaitsForInflight:UrmaFakeR10Test.PostSendWrQueueFullReturnsEAGAIN:UrmaFakeR10Test.PostSendWrQueueFullDrainThenAccept:NumaUtilTest.*` | PASS, 27 tests | Covers lane acquire/release/recreate/retire, CQE injection, AE injection, fake post-send queue full, NUMA utility |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_ut --gtest_filter='UrmaFake*'` | PASS, 61 tests | fake URMA full UT suite |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `make -j40 ds_st ds_st_object_cache datasystem_worker_bin` | PASS | `ds_st_object_cache` needs `datasystem_worker_bin`; otherwise worker exec fails before logs are created |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_st_object_cache --gtest_filter='UrmaNumaAffinityTest.WorkerToWorker'` | PASS, 1 test | NUMA affinity write path; worker/client inject counts reach expected threshold |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_st_object_cache --gtest_filter='UrmaObjectClientTest.UrmaRemoteGetSmall:UrmaObjectClientTest.UrmaPutAndRemoteGetTest:UrmaObjectClientTest.UrmaParallelWrite:UrmaCqeErrorTest.RemoteWorkerGetCqeError:UrmaAsyncEventTest.RemoteWorkerGetJfsAsyncEvent'` | PASS, 5 tests | Ordinary worker-worker remote get/write plus CQE status 9 and AE JETTY_ERR paths |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_st_object_cache --gtest_filter='UrmaClientHeartbeatReconnectTest.ClientHeartbeatTimeoutReconnectThenUbSetGetSuccess'` | PASS, 1 test | UB set/get reconnect smoke |
 
 ## Review Iteration
 
@@ -43,9 +51,10 @@
 |------|------|
 | fake URMA 全量 UT | Done |
 | lane 分配 UT | Done |
-| lane pool backpressure/timeout | Partially done: direct `AcquireSendLane` returns `K_TRY_AGAIN`; manager timeout path pending |
-| CQE status 9 lane 恢复 | Partially done: `ReCreateJetty(failedLane)` UT; poll-thread CQE injection pending |
-| AE JETTY_ERR lane 恢复 | Pending |
-| AE + CQE 幂等 | Partially done: repeated failed-jetty recreate is idempotent; AE+CQE integration pending |
-| NUMA affinity targeted ST | Pending |
-| worker-worker remote get/write | Pending |
+| lane pool backpressure/timeout | Done for direct acquire pressure and timeout retire replacement; manager timeout path covered by lane retire UT |
+| CQE status 9 lane 恢复 | Done: lane recreate UT plus `UrmaCqeErrorTest.RemoteWorkerGetCqeError` ST |
+| AE JETTY_ERR lane 恢复 | Done: inject UT plus `UrmaAsyncEventTest.RemoteWorkerGetJfsAsyncEvent` ST |
+| AE + CQE 幂等 | Done for repeated failed-jetty recreate idempotence; combined race remains best-effort by shared `MarkInvalid` guard |
+| NUMA affinity targeted ST | Done: `UrmaNumaAffinityTest.WorkerToWorker` |
+| worker-worker remote get/write | Done: remote get, put+remote get, parallel write ST |
+| UB set/get | Done: heartbeat reconnect UB set/get ST |
