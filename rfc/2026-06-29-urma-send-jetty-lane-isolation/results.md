@@ -15,6 +15,10 @@
 | 2026-06-29 | tiantiyun-80c128g | `UrmaSendLaneTest.*` after completion-release/retiring-target fixes | PASS, 2 tests | `ut_send_lane_review_fix_1.log` |
 | 2026-06-29 | tiantiyun-80c128g | `UrmaFakeBackendTest.PostSendTransfersBytesAndCompletes:UrmaFakeInjectCqeTest.*` after review fixes | PASS, 6 tests | `ut_fake_completion_cqe_review_fix_1.log` |
 | 2026-06-29 | tiantiyun-80c128g | `ds_ut --gtest_filter='UrmaFake*'` after review fixes | PASS, 61 tests | `ut_urma_fake_all_review_fix_1.log` |
+| 2026-06-29 | tiantiyun-80c128g | `make -j40 ds_ut` after timeout-retire fix | PASS | `build_ds_ut_timeout_fix_1.log` |
+| 2026-06-29 | tiantiyun-80c128g | `UrmaSendLaneTest.*` after timeout-retire fix | PASS, 3 tests | `ut_send_lane_timeout_fix_1.log` |
+| 2026-06-29 | tiantiyun-80c128g | `UrmaFakeBackendTest.PostSendTransfersBytesAndCompletes:UrmaFakeInjectCqeTest.*` after timeout-retire fix | PASS, 6 tests | `ut_fake_completion_cqe_timeout_fix_1.log` |
+| 2026-06-29 | tiantiyun-80c128g | `ds_ut --gtest_filter='UrmaFake*'` after timeout-retire fix | PASS, 61 tests | `ut_urma_fake_all_timeout_fix_1.log` |
 
 ## Review Iteration
 
@@ -25,6 +29,8 @@
 | subagent review | pipeline H2D 绕过 lane acquire | pipeline 发送侧 acquire lane，并创建 serverKey event；pipeline CQE hook 消费 completion 时释放 event/lane |
 | subagent review | `urma_send_jetty_lane_pool_size` 语义与初始 lane 计数不完全一致 | 本轮保留为 lazy extra lane 预算，文档继续标为待评估 |
 | subagent review | `UrmaGatherWrite` partial post 失败后可能遗留已提交 events | post 失败时等待并清理已提交 gather events，避免错误返回后后台 WR 悬挂 |
+| subagent re-review | timeout `DeleteEvent` 可能过早释放 still in-flight lane | `DeleteEvent` 改为只删 map；timeout 通过 `RetireEventLane` 替换新 lane，旧 jetty/target 保留 retiring |
+| subagent re-review | lane pool flag 文案像进程总量但实现是 extra lazy lanes | flag help 改为 extra lazy lane pool；总预算语义保留后续评估 |
 
 ## Pending
 

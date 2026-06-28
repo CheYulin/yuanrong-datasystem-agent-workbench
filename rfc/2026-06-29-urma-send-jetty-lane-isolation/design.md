@@ -96,7 +96,7 @@ lane 生命周期：
 |------|------|
 | `UrmaConnection` | 新增 `AcquireSendLane` / `ReleaseSendLane` / lane 级 `ReCreateJetty` |
 | `UrmaResource` | 下沉 `ImportTargetJetty`，用于故障恢复时 reimport targetJetty |
-| `UrmaManager::CheckAndNotify` / `DeleteEvent` | CQE 完成时释放 event 对应 lane，DeleteEvent 保留幂等兜底 |
+| `UrmaManager::CheckAndNotify` / `DeleteEvent` | CQE 完成时释放 event 对应 lane，DeleteEvent 只删除 event map |
 | `UrmaWriteImpl` | 每个 chunk acquire lane；NUMA 分支不变 |
 | `UrmaRead` | 每个 read chunk acquire lane |
 | `UrmaGatherWrite` | 从 WR 链表一次 post 改为每个 dst chunk 单独 post；partial post 失败时收口已提交 events |
@@ -114,7 +114,17 @@ lane 生命周期：
 5. `MarkInvalid()` 保证同一个 failed jetty 只恢复一次。
 6. lane 创建新 send jetty，并重新 import targetJetty。
 7. 如果旧 WR 仍 in-flight，旧 send jetty 和旧 targetJetty 一起进入 retiring 状态，直到旧 WR completion/timeout 后释放。
-8. 当前 request 仍按 CQE error 返回失败；completion path 释放 lane，event 删除只做幂等兜底。
+8. 当前 request 仍按 CQE error 返回失败；completion path 释放 lane，event 删除只清理 map。
+
+### 5.1.1 Wait timeout
+
+本地 wait timeout 不代表 WR 已完成，因此不能通过 `DeleteEvent` 释放 lane。timeout 路径使用 `RetireEventLane`：
+
+1. event 标记 lane 已处理，避免后续重复 release。
+2. `UrmaConnection::RetireSendLane` 将旧 send jetty 标 invalid，并异步转 error。
+3. connection 创建新的 send jetty/targetJetty，作为可用 lane 放回池。
+4. 旧 send jetty 和旧 targetJetty 保留在 retiring 状态，避免旧 in-flight WR 继续引用时被提前释放。
+5. `DeleteEvent` 只删除 event map；后续迟到 completion 找不到 event 时会被 poller 丢弃，不会释放或复用旧 lane。
 
 ### 5.2 AE `URMA_EVENT_JETTY_ERR`
 
@@ -165,11 +175,12 @@ lane 只选择 `(jetty,targetJetty)`，不改写 `srcChipId/dstChipId`。因此 
 已完成：
 
 - fake completion `local_id` 从 post-send snapshot 贯通到 `urma_cr_t`。
-- `UrmaConnection` send lane、lazy pool、completion release、幂等 cleanup。
+- `UrmaConnection` send lane、lazy pool、completion release、timeout retire、幂等 cleanup。
 - `UrmaWriteImpl` / `UrmaRead` / `UrmaGatherWrite` 切为每 WR acquire lane。
 - `ReCreateJetty` lane 级替换与 targetJetty reimport；retiring targetJetty 跟随旧 in-flight WR 生命周期。
 - pipeline H2D 发送侧纳入 lane acquire，pipeline CQE hook 释放轻量 event。
 - `UrmaGatherWrite` post 失败后清理已提交 events，避免 fallback 前遗留后台 WR。
+- `urma_send_jetty_lane_pool_size` 文案改为 extra lazy lane pool，和当前“每连接初始 lane + lazy extra lanes”实现保持一致。
 
 待补强：
 
