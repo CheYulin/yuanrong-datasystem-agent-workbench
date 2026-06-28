@@ -19,6 +19,10 @@
 | 2026-06-29 | tiantiyun-80c128g | `UrmaSendLaneTest.*` after timeout-retire fix | PASS, 3 tests | `ut_send_lane_timeout_fix_1.log` |
 | 2026-06-29 | tiantiyun-80c128g | `UrmaFakeBackendTest.PostSendTransfersBytesAndCompletes:UrmaFakeInjectCqeTest.*` after timeout-retire fix | PASS, 6 tests | `ut_fake_completion_cqe_timeout_fix_1.log` |
 | 2026-06-29 | tiantiyun-80c128g | `ds_ut --gtest_filter='UrmaFake*'` after timeout-retire fix | PASS, 61 tests | `ut_urma_fake_all_timeout_fix_1.log` |
+| 2026-06-29 | tiantiyun-80c128g | `make -j40 ds_ut` after retiring-list fix | PASS | `build_ds_ut_retiring_list_fix_2.log` |
+| 2026-06-29 | tiantiyun-80c128g | `UrmaSendLaneTest.*` after retiring-list fix | PASS, 3 tests | `ut_send_lane_retiring_list_fix_2.log` |
+| 2026-06-29 | tiantiyun-80c128g | `UrmaFakeBackendTest.PostSendTransfersBytesAndCompletes:UrmaFakeInjectCqeTest.*` after retiring-list fix | PASS, 6 tests | `ut_fake_completion_cqe_retiring_list_fix_2.log` |
+| 2026-06-29 | tiantiyun-80c128g | `ds_ut --gtest_filter='UrmaFake*'` after retiring-list fix | PASS, 61 tests | `ut_urma_fake_all_retiring_list_fix_2.log` |
 
 ## Review Iteration
 
@@ -31,6 +35,7 @@
 | subagent review | `UrmaGatherWrite` partial post 失败后可能遗留已提交 events | post 失败时等待并清理已提交 gather events，避免错误返回后后台 WR 悬挂 |
 | subagent re-review | timeout `DeleteEvent` 可能过早释放 still in-flight lane | `DeleteEvent` 改为只删 map；timeout 通过 `RetireEventLane` 替换新 lane，旧 jetty/target 保留 retiring |
 | subagent re-review | lane pool flag 文案像进程总量但实现是 extra lazy lanes | flag help 改为 extra lazy lane pool；总预算语义保留后续评估 |
+| subagent final review | 连续 timeout 会覆盖单槽 retiring target | retiring 资源改为列表；新增连续 retire UT，避免更早 in-flight target 被提前析构 |
 
 ## Pending
 

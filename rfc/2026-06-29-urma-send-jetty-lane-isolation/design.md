@@ -124,7 +124,8 @@ lane 生命周期：
 2. `UrmaConnection::RetireSendLane` 将旧 send jetty 标 invalid，并异步转 error。
 3. connection 创建新的 send jetty/targetJetty，作为可用 lane 放回池。
 4. 旧 send jetty 和旧 targetJetty 保留在 retiring 状态，避免旧 in-flight WR 继续引用时被提前释放。
-5. `DeleteEvent` 只删除 event map；后续迟到 completion 找不到 event 时会被 poller 丢弃，不会释放或复用旧 lane。
+5. retiring 资源按列表保存；连续 timeout/recreate 不会覆盖更早仍可能 in-flight 的旧 targetJetty。
+6. `DeleteEvent` 只删除 event map；后续迟到 completion 找不到 event 时会被 poller 丢弃，不会释放或复用旧 lane。
 
 ### 5.2 AE `URMA_EVENT_JETTY_ERR`
 
@@ -177,7 +178,7 @@ lane 只选择 `(jetty,targetJetty)`，不改写 `srcChipId/dstChipId`。因此 
 - fake completion `local_id` 从 post-send snapshot 贯通到 `urma_cr_t`。
 - `UrmaConnection` send lane、lazy pool、completion release、timeout retire、幂等 cleanup。
 - `UrmaWriteImpl` / `UrmaRead` / `UrmaGatherWrite` 切为每 WR acquire lane。
-- `ReCreateJetty` lane 级替换与 targetJetty reimport；retiring targetJetty 跟随旧 in-flight WR 生命周期。
+- `ReCreateJetty` lane 级替换与 targetJetty reimport；retiring targetJetty 以列表保存，跟随旧 in-flight WR 生命周期。
 - pipeline H2D 发送侧纳入 lane acquire，pipeline CQE hook 释放轻量 event。
 - `UrmaGatherWrite` post 失败后清理已提交 events，避免 fallback 前遗留后台 WR。
 - `urma_send_jetty_lane_pool_size` 文案改为 extra lazy lane pool，和当前“每连接初始 lane + lazy extra lanes”实现保持一致。
