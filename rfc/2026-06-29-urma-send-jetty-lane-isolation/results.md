@@ -31,6 +31,17 @@
 | 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_st_object_cache --gtest_filter='UrmaNumaAffinityTest.WorkerToWorker'` | PASS, 1 test | NUMA affinity write path; worker/client inject counts reach expected threshold |
 | 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_st_object_cache --gtest_filter='UrmaObjectClientTest.UrmaRemoteGetSmall:UrmaObjectClientTest.UrmaPutAndRemoteGetTest:UrmaObjectClientTest.UrmaParallelWrite:UrmaCqeErrorTest.RemoteWorkerGetCqeError:UrmaAsyncEventTest.RemoteWorkerGetJfsAsyncEvent'` | PASS, 5 tests | Ordinary worker-worker remote get/write plus CQE status 9 and AE JETTY_ERR paths |
 | 2026-06-29 | tiantiyun-80c128g clean verify worktree | `ds_st_object_cache --gtest_filter='UrmaClientHeartbeatReconnectTest.ClientHeartbeatTimeoutReconnectThenUbSetGetSuccess'` | PASS, 1 test | UB set/get reconnect smoke |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `make -j40 ds_st_object_cache ds_ut` after object-get retry status check | PASS | Rebuilt the affected ST and UT targets on the remote node with the existing third-party cache |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/ut/ds_ut --gtest_filter='*Urma*'` after object-get retry status check | PASS, 76 tests | Full URMA UT sweep, includes fake URMA, send lane, success-rate tracker, and RPC timeout utility |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | ST binary inventory with `--gtest_list_tests \| grep -Ei 'Urma'` | PASS inventory | URMA ST tests are exposed by `ds_st_object_cache`; `ds_st` has no URMA matches among checked binaries |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_object_cache --gtest_filter='UrmaObjectClientTest.TestBatchRemoteGetErrorCode2'` | PASS, 1 test | Focused regression for injected OOM plus partial successful URMA payload |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_object_cache --gtest_filter='*Urma*'` | PASS, 65 tests, 3 disabled | Full URMA ST sweep; CQE, AE, NUMA affinity, reconnect, fallback, eviction, and batch remote-get regression all passed |
+
+## Resolved Regression
+
+| 用例 | 现象 | Root Cause | 处理 |
+|------|------|------------|--------|
+| `UrmaObjectClientTest.TestBatchRemoteGetErrorCode2` | Mixed batch `{ key0, key1 }` with injected OOM on `key0` retried until `K_RPC_DEADLINE_EXCEEDED`; single-key `{ key0 }` could also lose the business OOM behind the final retry timeout | Client-side all-failed retry check only scanned `rsp.objects()`. In URMA remote-payload paths, a successful key can be represented in `rsp.payload_info()`, so a mixed failed-object plus successful-payload response was misclassified as all failed. | Preserve the last single-key all-failed OOM retry status, and make `IsAllGetFailed` treat non-`-1` `payload_info.data_size()` as success. Focused ST and full `*Urma*` ST now pass. |
 
 ## Review Iteration
 
