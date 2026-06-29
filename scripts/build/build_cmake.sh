@@ -6,7 +6,7 @@
 #   bash scripts/build/build_cmake.sh [-j <jobs>] [-t build|run_example|...]
 #
 # Environment:
-#   JOBS         - parallel jobs (default: nproc)
+#   JOBS         - parallel jobs (default: 40)
 #   BUILD_DIR    - build directory (default: build/)
 #   DS_ROOT      - yuanrong-datasystem root (default: resolved from this script)
 
@@ -25,9 +25,9 @@ cd "${DS_ROOT}"
 # Generated / machine-local; never reuse a synced CMake cache on another host.
 rm -rf "${DS_ROOT}/example/cpp/build"
 
-JOBS="${JOBS:-$(nproc)}"
-if [[ -n "${VERIFY_ON_NODE:-}" && "${JOBS}" -gt 32 ]]; then
-  JOBS=32
+JOBS="${JOBS:-40}"
+if [[ -n "${VERIFY_ON_NODE:-}" && "${JOBS}" -gt 40 ]]; then
+  JOBS=40
 fi
 BUILD_DIR="${BUILD_DIR:-build}"
 TASK="${1:-build}"

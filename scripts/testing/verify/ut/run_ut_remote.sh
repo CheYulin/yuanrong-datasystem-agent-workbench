@@ -30,6 +30,7 @@ done
 
 init_remote "${NODE}"
 BUILD_BACKEND="${BUILD_BACKEND:-cmake}"
+BUILD_JOBS="${BUILD_JOBS:-40}"
 : "${BUILD_DIR:=build}"
 
 banner "UT regression on ${REMOTE}"
@@ -47,12 +48,12 @@ run_payload() {
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
     echo 'Building...'
-    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
+    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "${BUILD_JOBS:-40}" 2>&1 | tail -120
   fi
 
   echo "Running UT tests (regex=${UT_CTEST_REGEX}, exclude=${UT_CTEST_EXCLUDE})..."
   set +e
-  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${UT_CTEST_REGEX}" -E "${UT_CTEST_EXCLUDE}" -j "$(nproc)" 2>&1)"
+  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${UT_CTEST_REGEX}" -E "${UT_CTEST_EXCLUDE}" -j "${BUILD_JOBS:-40}" 2>&1)"
   CTEST_STATUS="$?"
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30
@@ -79,12 +80,12 @@ else
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
     echo 'Building...'
-    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
+    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "${BUILD_JOBS:-40}" 2>&1 | tail -120
   fi
 
   echo 'Running UT tests...'
   set +e
-  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${UT_CTEST_REGEX}" -E "${UT_CTEST_EXCLUDE}" -j "$(nproc)" 2>&1)"
+  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${UT_CTEST_REGEX}" -E "${UT_CTEST_EXCLUDE}" -j "${BUILD_JOBS:-40}" 2>&1)"
   CTEST_STATUS="$?"
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30

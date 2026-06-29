@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench Build"
+  short_description: "CMake/Bazel build timing, long-tail analysis, and optimization hints"
+  default_prompt: "Use $wb-build to build datasystem and collect timing evidence."

@@ -80,6 +80,8 @@ log_info "iters=${PERF_ITERS} warmup=${PERF_WARMUP} size=${PERF_SIZE} mode=${PER
 
 LOG_FILE="${EVIDENCE_DIR}/direct_read_perf.log"
 export DS_DIRECT_READ_PERF=1
+export ENABLE_PERF=on
+export BUILD_JOBS="${BUILD_JOBS:-40}"
 export DS_DIRECT_READ_PERF_ITERS="${PERF_ITERS}"
 export DS_DIRECT_READ_PERF_WARMUP="${PERF_WARMUP}"
 export DS_DIRECT_READ_PERF_SIZE="${PERF_SIZE}"
@@ -170,6 +172,11 @@ for row in rows:
     lines.append(
         f"| {row['scenario']} | {fmt_us(row['avg_us'])} | {fmt_us(row['p99_us'])} | {fmt_us(row['p9999_us'])} |"
     )
+    if "meta_rpc_avg_us" in row:
+        lines.append(
+            f"  - phase (us): meta_rpc={row['meta_rpc_avg_us']}, data_rpc={row.get('data_rpc_avg_us', 0)}, "
+            f"client_other={row.get('client_other_avg_us', 0)}, inline_hits={row.get('inline_data_hits', 0)}"
+        )
 if summary["comparison_ms"]:
     lines.extend(["", "## comparisons (direct − gateway)", ""])
     for label, comp in summary["comparison_ms"].items():

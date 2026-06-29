@@ -40,6 +40,7 @@ done
 [[ -n "${WORKTREE_SLUG}" ]] || WORKTREE_SLUG="client-direct-read-flow"
 
 export BUILD_JOBS="${BUILD_JOBS:-40}"
+export CTEST_JOBS_ST="${CTEST_JOBS_ST:-1}"
 export ENABLE_PERF=on
 export ST_CTEST_LABEL_EXCLUDE="none"
 

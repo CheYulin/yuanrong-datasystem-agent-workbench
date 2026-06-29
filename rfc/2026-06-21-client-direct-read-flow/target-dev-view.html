@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Client Direct Read Target Development View</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #637083;
+      --line: #d8e0ea;
+      --accent: #1f7a8c;
+      --accent-2: #b65c27;
+      --code: #eef3f7;
+      --ok: #1f7a4d;
+      --warn: #9b5c00;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.2;
+      margin: 0 0 14px;
+    }
+
+    h1 {
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-top: 30px;
+      font-size: 22px;
+    }
+
+    h3 {
+      margin-top: 20px;
+      font-size: 17px;
+    }
+
+    p {
+      margin: 8px 0 12px;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    .lede {
+      color: var(--muted);
+      max-width: 980px;
+      font-size: 15px;
+    }
+
+    .panel {
+      margin-top: 18px;
+      padding: 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+      overflow-x: auto;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .tile {
+      padding: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .tile strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5f9;
+      color: #253044;
+      font-weight: 650;
+    }
+
+    .num {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e7f2f4;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .tag.warn {
+      background: #fff3db;
+      color: var(--warn);
+    }
+
+    .tag.ok {
+      background: #e9f6ef;
+      color: var(--ok);
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .mermaid {
+      min-width: 980px;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        padding: 24px 14px 40px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Client Direct Read Target Development View</h1>
+    <p class="lede">
+      目标态开发视图，面向 PR #1119 整体模块设计：最大化复用 client/worker 的 meta/data read flow，
+      但把 feature gate、fallback、cutback、hash ring 生命周期等 client 策略留在 client 层。
+      代码行预估口径为“整个 PR 目标态相对 base 的总变动”。本地分支相对 origin/master 混有大量非 PR 历史文件，
+      因此这里以 GitCode PR bundle 的 64 个文件作为 PR 范围基线。
+    </p>
+
+    <div class="grid">
+      <div class="tile">
+        <strong>共用控制面</strong>
+        <span class="tag ok">ReadMetaFlow</span>
+        <p>负责 route、QueryMeta 分组、moving/redirect、payload merge。</p>
+      </div>
+      <div class="tile">
+        <strong>共用数据面骨架</strong>
+        <span class="tag ok">ReadDataFlow</span>
+        <p>负责 not found、inline/remote payload、payload_info、part_index、顺序对齐。</p>
+      </div>
+      <div class="tile">
+        <strong>角色差异</strong>
+        <span class="tag warn">DataTransport</span>
+        <p>client remote TCP 与 worker local/gateway data path 分别实现。</p>
+      </div>
+    </div>
+
+    <h2>目标态类图</h2>
+    <div class="panel">
+      <pre class="mermaid">
+flowchart LR
+  subgraph Common["Common read_access"]
+    ReadFlow["ReadFlow<br/>Execute request"]
+    ReadMetaFlow["ReadMetaFlow<br/>route + QueryMeta + moving + redirect"]
+    ReadDataFlow["ReadDataFlow<br/>not found + inline + remote payload"]
+    ReadRequest["ReadRequest<br/>keys, timeout, read params"]
+    ReadMetaResult["ReadMetaResult<br/>meta rsp + meta payloads"]
+    ReadDataResult["ReadDataResult<br/>GetRspPb + payloads"]
+    RouteProvider["IReadRouteProvider<br/>RefreshRouteIfNeeded<br/>GetMetaAddress"]
+    MetaTransport["IQueryMetaTransport<br/>QueryMetaOnce"]
+    MetaClient["QueryMetaOrchestratingClient<br/>HandleMoving<br/>FollowRedirects"]
+    DataTransport["IDataTransport<br/>ReadRemote"]
+  end
+
+  subgraph Client["Client direct_read"]
+    ObjectClientImpl["ObjectClientImpl<br/>gate + fallback + cutback"]
+    DirectReadSession["DirectReadSession<br/>shared ring source + rpc adapter"]
+    DirectReadFlow["DirectReadFlow<br/>client policy wrapper"]
+    ClientRing["ClientHashRingSource<br/>cached snapshot + event refresh"]
+    ClientRoute["DirectReadRouteProvider"]
+    ClientMetaTransport["ClientQueryMetaTransport"]
+    ClientDataTransport["ClientRemoteTcpDataTransport<br/>GetObjectRemote TCP"]
+  end
+
+  subgraph Worker["Worker gateway read"]
+    WorkerHelper["WorkerObjectReadAccessHelper"]
+    WorkerRoute["WorkerFixedMetaRouteProvider"]
+    WorkerMetaTransport["WorkerQueryMetaTransport"]
+    WorkerDataTransport["WorkerLocalDataTransport<br/>existing worker data path"]
+  end
+
+  subgraph Cluster["Worker cluster state"]
+    WorkerSvc["WorkerWorkerOCServiceImpl<br/>GetClusterState"]
+    ClusterRsp["GetClusterStateRspPb<br/>hash_ring + ring_etcd_mod_revision"]
+  end
+
+  ReadFlow --> ReadMetaFlow
+  ReadFlow --> ReadDataFlow
+  ReadRequest --> ReadFlow
+  ReadMetaFlow --> RouteProvider
+  ReadMetaFlow --> MetaClient
+  MetaClient --> MetaTransport
+  ReadMetaFlow --> ReadMetaResult
+  ReadDataFlow --> ReadMetaResult
+  ReadDataFlow --> DataTransport
+  ReadDataFlow --> ReadDataResult
+
+  ObjectClientImpl --> DirectReadSession
+  ObjectClientImpl --> DirectReadFlow
+  DirectReadSession --> ClientRing
+  DirectReadFlow --> ReadFlow
+  DirectReadFlow --> ClientRoute
+  DirectReadFlow --> ClientMetaTransport
+  DirectReadFlow --> ClientDataTransport
+  ClientRoute -.-> RouteProvider
+  ClientRoute --> ClientRing
+  ClientMetaTransport -.-> MetaTransport
+  ClientDataTransport -.-> DataTransport
+
+  WorkerHelper --> ReadFlow
+  WorkerHelper --> WorkerRoute
+  WorkerHelper --> WorkerMetaTransport
+  WorkerHelper --> WorkerDataTransport
+  WorkerRoute -.-> RouteProvider
+  WorkerMetaTransport -.-> MetaTransport
+  WorkerDataTransport -.-> DataTransport
+
+  WorkerSvc --> ClusterRsp
+  ClientRing -.-> ClusterRsp
+      </pre>
+    </div>
+
+    <h2>请求链路视图</h2>
+    <div class="panel">
+      <pre class="mermaid">
+flowchart TD
+  A["ObjectClientImpl::Get"] --> B{"Has healthy local worker?"}
+  B -- "yes" --> C["Gateway/local worker path"]
+  B -- "no or force direct" --> D["DirectReadFlow"]
+
+  D --> E["ReadMetaFlow"]
+  E --> F["RouteProvider.GetMetaAddress"]
+  F --> G["ClientHashRingSource cached snapshot"]
+  E --> H["QueryMetaOrchestratingClient"]
+  H --> I["ClientQueryMetaTransport.QueryMetaOnce"]
+  H --> J{"moving / redirect?"}
+  J -- "yes" --> K["RefreshOnClusterEvent / FollowRedirects"]
+  K --> H
+  J -- "no" --> L["ReadMetaResult"]
+
+  L --> M["ReadDataFlow"]
+  M --> N{"inline payload?"}
+  N -- "yes" --> O["Append meta payload"]
+  N -- "no" --> P["Group by data worker"]
+  P --> Q["ClientRemoteTcpDataTransport"]
+  Q --> R["Worker GetObjectRemote TCP"]
+  O --> S["Build GetRspPb + RpcMessage"]
+  R --> S
+  S --> T["FinishDirectReadGet"]
+
+  D --> U{"direct read failed?"}
+  U -- "fallback enabled" --> C
+  U -- "fallback disabled" --> V["Return diagnostic Status"]
+
+  A --> W{"local worker recovered?"}
+  W -- "yes" --> X["Cutback to gateway/local worker"]
+  W -- "no" --> D
+      </pre>
+    </div>
+
+    <h2>当前 PR 基线</h2>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>范围</th>
+            <th>当前 PR bundle 实测</th>
+            <th>架构师判断</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GitCode PR #1119</td>
+            <td><span class="num">64 files, +5,195 / -76, net +5,119</span></td>
+            <td>变动量对该能力不算离谱，但当前新增偏“client 专用 + ST 堆叠”，common data 复用还没成型。</td>
+          </tr>
+          <tr>
+            <td><code>client/object_cache/direct_read</code></td>
+            <td><span class="num">18 files, +1,647 / -0</span></td>
+            <td>文件数偏多但可接受；目标态应删除空转发 adapter，增加真实 transport/session 边界，净规模不应继续膨胀太多。</td>
+          </tr>
+          <tr>
+            <td><code>common/object_cache/read_access</code></td>
+            <td><span class="num">9 files, +722 / -0</span></td>
+            <td>Meta 复用已起步；目标态要承接 DataFlow，成为模块核心。</td>
+          </tr>
+          <tr>
+            <td>worker read 接入</td>
+            <td><span class="num">7 files, +335 / -65</span></td>
+            <td>worker 侧接入量偏低，说明 data 复用还没有真正落到 worker gateway path。</td>
+          </tr>
+          <tr>
+            <td>测试</td>
+            <td><span class="num">ST/UT 约 +1,600 行以上</span></td>
+            <td>覆盖面明显增强；目标态需要从“读成功”升级到“证明 ring/retry/data 分组语义”。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>目标态模块与代码行预估</h2>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>目标态职责</th>
+            <th class="num">目标总新增</th>
+            <th class="num">目标总删除</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>common/object_cache/read_access</code></td>
+            <td>模块核心。承载 <code>ReadMetaFlow</code>、<code>ReadDataFlow</code>、payload merge、payload_info、顺序对齐和错误聚合。</td>
+            <td class="num">+1,100 ~ +1,450</td>
+            <td class="num">-80 ~ -180</td>
+            <td>当前 +722，目标会增加 data flow，但删除 meta flow 上未使用 data client 端口。</td>
+          </tr>
+          <tr>
+            <td><code>client/object_cache/direct_read</code></td>
+            <td>Client policy 层。Feature gate、fallback、cutback、session ownership、client remote TCP transport、stats/test hooks。</td>
+            <td class="num">+1,450 ~ +1,850</td>
+            <td class="num">-150 ~ -300</td>
+            <td>当前 +1,647；目标态可保持相近规模，但需要把 flow 骨架下沉 common，留下策略与 transport。</td>
+          </tr>
+          <tr>
+            <td><code>client/object_cache/object_client_impl</code></td>
+            <td>Client gateway/direct path 选择、session 获取、cutback 接入点。</td>
+            <td class="num">+180 ~ +320</td>
+            <td class="num">-30 ~ -80</td>
+            <td>当前 PR 只应在入口处薄接入；不要把 orchestration 写在 <code>ObjectClientImpl</code>。</td>
+          </tr>
+          <tr>
+            <td><code>worker/object_cache/service</code></td>
+            <td>Worker gateway read 接入 shared meta/data flow，提供 worker meta transport 和 worker local data transport。</td>
+            <td class="num">+550 ~ +850</td>
+            <td class="num">-120 ~ -260</td>
+            <td>当前 +335/-65 偏少。若要求 data 也复用，worker 侧必须有真实调用方，不应只有 <code>WorkerNullDataClient</code>。</td>
+          </tr>
+          <tr>
+            <td><code>common/object_cache/read_only_hash_ring_view</code> + worker cluster state</td>
+            <td>Client read-only ring view、worker <code>GetClusterState</code> revision、stale snapshot 保护。</td>
+            <td class="num">+300 ~ +480</td>
+            <td class="num">-20 ~ -80</td>
+            <td>当前 ring view +286、proto/worker cluster state 少量。必须补可比较版本字段，不能 <code>version=-1</code>。</td>
+          </tr>
+          <tr>
+            <td>Proto / flags / build wiring</td>
+            <td>新增 proto 字段、feature flags、Bazel/CMake 接线。</td>
+            <td class="num">+160 ~ +260</td>
+            <td class="num">-20 ~ -70</td>
+            <td>保持薄变更；build 文件只服务 direct read 范围。</td>
+          </tr>
+          <tr>
+            <td>ST</td>
+            <td>无本地 worker、gateway/direct byte parity、cutback、distributed ring、scale、slow data worker、batch Get。</td>
+            <td class="num">+1,250 ~ +1,750</td>
+            <td class="num">-80 ~ -180</td>
+            <td>当前 <code>client_direct_read_test.cpp</code> 已 +1,125。目标态建议拆 helper/fixture，避免单文件继续膨胀。</td>
+          </tr>
+          <tr>
+            <td>UT</td>
+            <td>Meta orchestration、DataFlow、transport fake、timeout policy、ring revision monotonic、batch grouping。</td>
+            <td class="num">+900 ~ +1,350</td>
+            <td class="num">-40 ~ -120</td>
+            <td>目标是把大部分边界不变量压到 UT，ST 只覆盖跨进程真实链路。</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="2">整个 PR 目标态总量估算</th>
+            <th class="num">+5,890 ~ +8,310</th>
+            <th class="num">-540 ~ -1,270</th>
+            <th>预计净增约 <strong>+4,620 ~ +7,770</strong> 行。当前 PR 已是 +5,195/-76；目标态主要是把现有 client-only 代码重排为 common+transport，并补 worker data 复用与不变量测试。</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <h2>负责人视角的规模判断</h2>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>判断项</th>
+            <th>结论</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>合理文件数</td>
+            <td><span class="tag ok">70 ~ 85 files</span></td>
+            <td>Direct read 需要 client/common/worker/proto/build/test 同时落地。若超过 90 文件，要检查是否混入 unrelated cleanup。</td>
+          </tr>
+          <tr>
+            <td>合理净增行数</td>
+            <td><span class="tag ok">约 +5k ~ +7k</span></td>
+            <td>包含完整 ST/UT 时这个量级可接受；但 production code 应集中在 common flow、client policy、worker transport 三处。</td>
+          </tr>
+          <tr>
+            <td>当前最大结构风险</td>
+            <td><span class="tag warn">复用重心偏 Meta，Data 仍偏 client-only</span></td>
+            <td>如果要求“尽可能复用”，worker data path 必须成为 shared <code>ReadDataFlow</code> 的真实调用方。</td>
+          </tr>
+          <tr>
+            <td>不应接受的增长</td>
+            <td><span class="tag warn">client direct_read 继续单边膨胀</span></td>
+            <td>新增 data 能力应优先进入 common flow 和 transport interface，而不是继续扩大 <code>DirectReadFlow</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>开发检查点</h2>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>检查点</th>
+            <th>通过标准</th>
+            <th>风险信号</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>真实复用</td>
+            <td>Client 和 worker 都实际调用 <code>ReadMetaFlow</code> 与 <code>ReadDataFlow</code>。</td>
+            <td>出现 <code>NullDataClient</code>、空 transport、只为编译通过的 adapter。</td>
+          </tr>
+          <tr>
+            <td>生命周期</td>
+            <td><code>DirectReadSession</code> 用 mutex + <code>shared_ptr</code> 管理 ring source/RPC adapter。</td>
+            <td>请求 flow 持有可被另一个线程重置的 raw pointer。</td>
+          </tr>
+          <tr>
+            <td>Ring version</td>
+            <td>Worker snapshot 带 authoritative revision，client 不接受旧 revision 覆盖新 snapshot。</td>
+            <td><code>version = -1</code> 混用 etcd 和 worker snapshot。</td>
+          </tr>
+          <tr>
+            <td>Timeout</td>
+            <td>Data TCP 显式使用 timeout 0 或 request deadline，并有 slow/hang data worker 测试。</td>
+            <td><code>(void)subTimeoutMs</code> 且没有收敛测试。</td>
+          </tr>
+          <tr>
+            <td>Batch data</td>
+            <td>按 data worker 分组，复用 transport；最好跨 worker 并发。</td>
+            <td>MGet 中每个 object 串行创建 channel/stub。</td>
+          </tr>
+          <tr>
+            <td>Scale coverage</td>
+            <td>断言 ring refresh/revision/moving/redirect，而不只是最终读成功。</td>
+            <td>Fallback 成功掩盖 direct route 错误。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">
+      Source context: GitCode PR #1119 bundle refreshed on 2026-06-25: 64 files, +5,195/-76.
+      A local branch diff against origin/master shows many unrelated repo-context/build/doc files, so this view uses the PR bundle,
+      not the noisy local branch total.
+    </p>
+  </main>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: "loose",
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#e7f2f4",
+        primaryTextColor: "#172033",
+        primaryBorderColor: "#1f7a8c",
+        lineColor: "#6c7a89",
+        secondaryColor: "#f4eadf",
+        tertiaryColor: "#f6f8fb",
+        fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+      }
+    });
+  </script>
+</body>
+</html>

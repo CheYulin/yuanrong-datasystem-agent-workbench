@@ -28,7 +28,12 @@ done
 
 init_remote "${NODE}"
 BUILD_BACKEND="${BUILD_BACKEND:-cmake}"
+BUILD_JOBS="${BUILD_JOBS:-40}"
+ST_CTEST_LABEL_EXCLUDE="${ST_CTEST_LABEL_EXCLUDE:-level2}"
 : "${BUILD_DIR:=build}"
+
+export BUILD_JOBS="${BUILD_JOBS:-40}"
+export ST_CTEST_LABEL_EXCLUDE="${ST_CTEST_LABEL_EXCLUDE:-level2}"
 
 banner "ST on ${REMOTE}"
 
@@ -40,16 +45,18 @@ run_payload() {
   REMOTE_BASE="$3"
   BUILD_DIR="$4"
   ST_CTEST_REGEX="$5"
+  BUILD_JOBS="${BUILD_JOBS:-40}"
+  ST_CTEST_LABEL_EXCLUDE="${ST_CTEST_LABEL_EXCLUDE:-level2}"
   cd "${REMOTE_BASE}/yuanrong-datasystem"
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
-    echo 'Building...'
-    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
+    echo "Building (jobs=${BUILD_JOBS})..."
+    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "${BUILD_JOBS}" 2>&1 | tail -120
   fi
 
-  echo "Running ST tests (regex=${ST_CTEST_REGEX})..."
+  echo "Running ST tests (regex=${ST_CTEST_REGEX}, exclude_label=${ST_CTEST_LABEL_EXCLUDE})..."
   set +e
-  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${ST_CTEST_REGEX}" -j "$(nproc)" 2>&1)"
+  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${ST_CTEST_REGEX}" -LE "${ST_CTEST_LABEL_EXCLUDE}" -j 8 2>&1)"
   CTEST_STATUS="$?"
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30
@@ -71,16 +78,18 @@ else
   REMOTE_BASE="$3"
   BUILD_DIR="$4"
   ST_CTEST_REGEX="$5"
+  BUILD_JOBS="${BUILD_JOBS:-40}"
+  ST_CTEST_LABEL_EXCLUDE="${ST_CTEST_LABEL_EXCLUDE:-level2}"
   cd "${REMOTE_BASE}/yuanrong-datasystem"
 
   if [[ "${SKIP_BUILD}" -eq 0 ]]; then
-    echo 'Building...'
-    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "$(nproc)" 2>&1 | tail -120
+    echo "Building (jobs=${BUILD_JOBS})..."
+    bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "${BUILD_JOBS}" 2>&1 | tail -120
   fi
 
-  echo "Running ST tests (regex=${ST_CTEST_REGEX})..."
+  echo "Running ST tests (regex=${ST_CTEST_REGEX}, exclude_label=${ST_CTEST_LABEL_EXCLUDE})..."
   set +e
-  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${ST_CTEST_REGEX}" -j "$(nproc)" 2>&1)"
+  CTEST_OUTPUT="$(ctest --test-dir "${BUILD_DIR}" --output-on-failure -R "${ST_CTEST_REGEX}" -LE "${ST_CTEST_LABEL_EXCLUDE}" -j 8 2>&1)"
   CTEST_STATUS="$?"
   set -e
   printf '%s\n' "${CTEST_OUTPUT}" | tail -30

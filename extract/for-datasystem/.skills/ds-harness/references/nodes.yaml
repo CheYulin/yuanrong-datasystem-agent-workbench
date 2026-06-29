@@ -1,0 +1,47 @@
+# 节点配置文件：所有远端节点的统一配置来源
+# hermes agent 无法访问 gitcode，只能访问 GitHub
+# ds = yuanrong-datasystem (gitcode, hermes 不可达)
+# agent-workbench = yuanrong-datasystem-agent-workbench (GitHub, hermes 可达)
+
+# 通用默认（Cursor 日间 sync / 本地开发 — 非验证/build 默认）
+# 验证与构建默认节点见 roles.* → tiantiyun-80c128g
+default: xqyun-32c32g
+
+# 按职责路由（Harness / Sentinel 读取此表）
+roles:
+  verify_smoke: tiantiyun-80c128g
+  verify_st: tiantiyun-80c128g
+  verify_ut: tiantiyun-80c128g
+  build: tiantiyun-80c128g
+  publish_web: xqyun-32c32g
+
+nodes:
+  tiantiyun-80c128g:
+    ssh_host: tiantiyun-80c128g
+    ssh_user: root
+    workspace_root: /root/workspace/git-repos
+    hermes_workspace_root: ~/agent/hermes-workspace
+    # 构建产物、第三方缓存、ST 测试输出放 /home（391G），避免占满 / 根分区（70G）
+    thirdparty_cache: /home/cache/yuanrong-datasystem-third-party
+    build_dir: /home/cache/build-remote-datasystem
+    pkg_manager: dnf
+    description: "构建与验证节点（smoke / ST / UT / 远端 build）"
+
+  xqyun-32c32g:
+    ssh_host: xqyun-32c32g
+    ssh_user: root
+    workspace_root: ~/workspace/git-repos
+    hermes_workspace_root: ~/agent/hermes-workspace
+    thirdparty_cache: ~/.cache/yuanrong-datasystem-third-party
+    pkg_manager: dnf
+    web_root: /var/www/html
+    description: "主开发节点（Cursor 日间 sync）+ yche.me 静态页发布"
+
+  centos9-new:
+    ssh_host: <NEW_HOST_IP_OR_FQDN>
+    ssh_user: root
+    workspace_root: ~/workspace/git-repos
+    hermes_workspace_root: ~/agent/hermes-workspace
+    thirdparty_cache: ~/.cache/yuanrong-datasystem-third-party
+    pkg_manager: dnf
+    description: "新 CentOS9 节点（hermes 夜间用）"

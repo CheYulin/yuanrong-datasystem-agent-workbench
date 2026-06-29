@@ -35,6 +35,14 @@ change_types:
     minimum: [smoke]
     recommended: []
 
+  - id: client_direct_read
+    match:
+      paths: ["src/datasystem/client/object_cache/direct_read/"]
+    minimum: [smoke]
+    recommended: [ut, st]
+    st_filter_hint: "ClientDirectRead"
+    notes: "CI ST excludes level2 + perf; perf needs ENABLE_PERF=on build + DS_DIRECT_READ_PERF=1"
+
   - id: client_hot_path
     match:
       paths: ["src/datasystem/client/", "include/datasystem/"]

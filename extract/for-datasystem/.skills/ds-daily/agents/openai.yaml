@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench Daily"
+  short_description: "Full daily smoke/UT/ST, coverage, perf regression, and trend evidence"
+  default_prompt: "Use $wb-daily to run or inspect the full daily quality build."

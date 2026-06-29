@@ -21,8 +21,9 @@ nodes:
     ssh_user: root
     workspace_root: /root/workspace/git-repos
     hermes_workspace_root: ~/agent/hermes-workspace
-    thirdparty_cache: ~/.cache/yuanrong-datasystem-third-party
-    build_dir: /root/workspace/build-remote-datasystem
+    # 构建产物、第三方缓存、ST 测试输出放 /home（391G）；三方件用公共目录 ds-thirdparty-cache
+    thirdparty_cache: /home/ds-thirdparty-cache
+    build_dir: /home/cache/build-remote-datasystem
     pkg_manager: dnf
     description: "构建与验证节点（smoke / ST / UT / 远端 build）"
 
