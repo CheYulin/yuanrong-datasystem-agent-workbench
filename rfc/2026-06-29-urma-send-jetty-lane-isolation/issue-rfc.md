@@ -115,7 +115,7 @@ lane = local send jetty + imported targetJetty + state + in-flight event
 
 ## 测试验证
 
-远端环境：`tiantiyun-80c128g`，复用已有三方库缓存，构建并行度 `-j40`。
+远端环境：`<validation-host>`，复用已有三方库缓存，构建并行度 `-j40`。
 
 ### Build
 
@@ -139,10 +139,10 @@ lane = local send jetty + imported targetJetty + state + in-flight event
 
 - `tests/st/ds_st_object_cache --gtest_filter='*Urma*:*URMA*:*urma*' --gtest_also_run_disabled_tests`
   - 68/68 PASS。
-  - XML: `/tmp/urma_send_lane_object_full_clean.xml`。
+  - XML 已在验证环境生成并确认 `tests="68" failures="0"`。
 - `tests/st/ds_st_kv_cache --gtest_filter='*Urma*:*URMA*:*urma*' --gtest_also_run_disabled_tests`
   - 11/11 PASS。
-  - XML: `/tmp/urma_send_lane_kv_full_clean.xml`。
+  - XML 已在验证环境生成并确认 `tests="11" failures="0"`。
 - `UrmaNumaAffinityTest.WorkerToWorker`
   - PASS，覆盖普通路径 NUMA affinity 发送。
 - `UrmaCqeErrorTest.RemoteWorkerGetCqeError`
