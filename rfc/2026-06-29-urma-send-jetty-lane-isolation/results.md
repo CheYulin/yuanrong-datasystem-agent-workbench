@@ -36,6 +36,15 @@
 | 2026-06-29 | tiantiyun-80c128g clean verify worktree | ST binary inventory with `--gtest_list_tests \| grep -Ei 'Urma'` | PASS inventory | URMA ST tests are exposed by `ds_st_object_cache`; `ds_st` has no URMA matches among checked binaries |
 | 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_object_cache --gtest_filter='UrmaObjectClientTest.TestBatchRemoteGetErrorCode2'` | PASS, 1 test | Focused regression for injected OOM plus partial successful URMA payload |
 | 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_object_cache --gtest_filter='*Urma*'` | PASS, 65 tests, 3 disabled | Full URMA ST sweep; CQE, AE, NUMA affinity, reconnect, fallback, eviction, and batch remote-get regression all passed |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `make -j40 ds_st_kv_cache` | PASS | Built the KV ST binary on the remote node with the existing third-party cache |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_kv_cache --gtest_filter='*Urma*:*URMA*:*urma*' --gtest_also_run_disabled_tests` | PASS, 11 tests | XML: `/tmp/urma_send_lane_kv_full_clean.xml` |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_object_cache --gtest_filter='*Urma*:*URMA*:*urma*' --gtest_also_run_disabled_tests` | PASS, 68 tests | XML: `/tmp/urma_send_lane_object_full_clean.xml`; rerun after clearing residual broad scale/partial KV processes |
+| 2026-06-29 | tiantiyun-80c128g clean verify worktree | `tests/st/ds_st_object_cache --gtest_filter='UrmaObjectClientTest.UrmaPutGetDeleteShmTest:UrmaCqeErrorTest.WorkerToClientGetRejectsFallbackPayloadAtOneMb' --gtest_also_run_disabled_tests` | PASS, 2 tests | Focused rerun for the two failures observed in the earlier polluted object full run |
+
+## Notes
+
+- The broad scale-down/scale-up ST sweep was not kept as an URMA gate result: it included non-URMA cases, the first failure was `OCScaleDownTest.TestRefsScaleDownWithoutL2`, and it left worker/etcd residual processes that polluted the first full object URMA run.
+- After clearing the leftover process group, the requested full URMA ST filters passed cleanly: object cache `68/68`, KV cache `11/11`.
 
 ## Resolved Regression
 
