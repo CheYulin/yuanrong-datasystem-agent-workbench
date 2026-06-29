@@ -22,6 +22,7 @@
 | 文档 | 说明 |
 |------|------|
 | [design.md](./design.md) | 主设计：背景问题、As-Is/To-Be、生命周期、故障处理、修改点 |
+| [issue-rfc.md](./issue-rfc.md) | 可直接转 GitCode issue 的 RFC 文案 |
 | [as-is-to-be-sequences.md](./as-is-to-be-sequences.md) | Mermaid 时序：普通路径、CQE/AE 故障、NUMA、backpressure |
 | [worktree-verify.md](./worktree-verify.md) | worktree、tiantiyun 构建、验证命令 |
 | [pr-description.md](./pr-description.md) | 后续 PR/MR 描述草稿 |
@@ -32,10 +33,10 @@
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | P0 | 新 worktree + fake CQE `local_id` RED/GREEN | Done |
-| P1 | `UrmaConnection` send lane lazy pool + event release | In-Progress |
-| P2 | AE/CQE lane 级 recreate + targetJetty reimport | In-Progress |
-| P3 | fake/manager UT 覆盖 lane 分配、backpressure、故障幂等 | Pending |
-| P4 | tiantiyun targeted ST + PR | Pending |
+| P1 | `UrmaConnection` send lane lazy pool + event release | Done |
+| P2 | AE/CQE lane 级 recreate + targetJetty reimport | Done |
+| P3 | fake/manager UT 覆盖 lane 分配、backpressure、故障幂等 | Done |
+| P4 | tiantiyun targeted ST + PR | Done |
 
 ## Assumptions
 
