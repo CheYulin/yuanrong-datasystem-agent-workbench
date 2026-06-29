@@ -60,6 +60,19 @@ Fixes #
 
 ----
 
+**正确性验证点**
+
+- lane 独占不变量：每个 WR acquire 一个 lane，lane 在 in-flight 状态不会被其它 WR 复用；`UrmaSendLaneTest.*` 覆盖 acquire/reuse、lane recreate 和 timeout retire replacement。
+- completion 释放不变量：正常 CQE completion 后 event 记录的 lane 被释放，后续 WR 可以复用；fake completion CQE UT 覆盖 `local_id` 贯通和 completion path。
+- 故障隔离不变量：CQE/AE 指向 failed jetty 时只 invalidate/recreate 对应 lane，其它 lane 不被整体 connection 重建牵连；`UrmaCqeErrorTest.RemoteWorkerGetCqeError` 和 `UrmaAsyncEventTest.RemoteWorkerGetJfsAsyncEvent` 覆盖 ST 路径。
+- timeout 安全不变量：timeout 不直接释放 still in-flight lane，而是 retire 旧 lane 并补新 lane；连续 timeout 使用 retiring list 保留多个旧 send jetty/targetJetty，防止更早未收口资源被覆盖。
+- queue depth=1 不变量：fake URMA 覆盖 post-send queue full (`EAGAIN`) 和 drain 后重新接受，验证不会在同一 send jetty 上堆多个未完成 WR。
+- NUMA 正确性：lane 选择不改变 `srcChipId/dstChipId` 传递；`UrmaNumaAffinityTest.WorkerToWorker` 覆盖普通路径 affinity 发送。
+- remote get 结果正确性：`IsAllGetFailed` 同时识别 `objects` 和 `payload_info` 成功路径；`UrmaObjectClientTest.TestBatchRemoteGetErrorCode2` 覆盖 injected OOM + partial successful URMA payload，不再把 mixed response 误判为全失败。
+- full-filter 回归：object/kv URMA ST full filter clean PASS，覆盖普通路径、故障路径、reconnect/fallback/eviction 等组合场景。
+
+----
+
 **Self-checklist**:
 
 - [x] **设计**：PR对应的方案是否已经经过Maintainer评审，方案检视意见是否均已答复并完成方案修改
