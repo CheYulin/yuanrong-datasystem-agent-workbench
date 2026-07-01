@@ -13,10 +13,13 @@
 3. **跨节点直写 meta owner**：无 healthy local worker 时 `GetWriteWorkerApi()` 直连 meta owner（复用 `ReadOnlyHashRingView`），跳过 gateway + replicate
 4. **读侧对齐**：`SelectObjectLocation` 多副本优先 primary；本地 hit 仍 serve local copy
 
+客户最外层 SDK/API 签名不变；客户感知的配置变化是新增 `enable_meta_affinity_replicate` gflag，`enable_distributed_master` / `master_address` 为已有配置或定义位置调整。
+
 ## 文档
 
 | 文档 | 说明 |
 |------|------|
+| [design-and-story.md](./design-and-story.md) | **测试感知版详细设计 Story**：接口/配置变化、特性效果、场景、用例和验证 cases |
 | [design.md](./design.md) | **模块设计**：As-Is/To-Be、组件职责、与 direct-read 共享边界 |
 | [as-is-to-be-sequences.md](./as-is-to-be-sequences.md) | 时序：同节点 replicate、remote-only 直写、Get RPC 路径 |
 | [perf-verification.md](./perf-verification.md) | **性能门禁**：Put primary_ready、Get RPC reduction（4KB） |
@@ -48,3 +51,5 @@
 | 目标 | 减少 Get meta/data RPC | 减少 Write replicate + Get RPC |
 
 详见 [design.md §6](./design.md#6-与-client-direct-read-的边界).
+
+关联 Codex session `019f1cc5-c4fc-76f1-b2b3-1afd8709d6b8` 中的 client hash ring routing 逻辑作为后续统一方向；测试口径以 shared hash ring snapshot、refresh policy、version/stale guard 为准，避免写路径和读路径各自维护路由算法。
