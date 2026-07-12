@@ -1,0 +1,159 @@
+# Gate 0 / Track① 用例复现手册
+
+**节点**：`xqyun-32c32g`（隔离树，不用主工程旧二进制）  
+**原则**：只跑与本 RFC 相关的用例，**不**跑全量 `ds_device_llt` / `ctest`。
+
+---
+
+## 已达成效果（截至 2026-07-13 凌晨）
+
+| 层级 | 状态 | 效果 |
+|------|------|------|
+| **隔离编译** | 进行中/已出 llt | xqyun 独立 worktree + build 能编出 `ds_device_llt` |
+| **Task 1 代码** | 已落地 | `AlignmentGatePass()` — 4K 默认对齐门禁，不对齐返回 false |
+| **Task 2 代码** | 已落地 | `MockIpcHbmBackend` — Export→Import 同指针，模拟 CANN IPC |
+| **Task 3 代码** | 已落地 | `FakeNdsSpillReader` — pread spill 文件 → memcpy 到 imported VA |
+| **Task 4–6** | 未做 | Register RPC、Get 旁路、`NdsBinmockFlow` ST 尚未串通 |
+| **端到端 SSD→HBM** | 未达成 | 尚无 Worker Get 旁路；binmock 全链路 ST 待 Task 6 |
+
+> **注意**：此前 Gate 0 用 `HeteroD2H*` 误跑了 `HeteroD2HTestEvcit` / `HeteroD2HThroughTcpTest`（7 FAIL）。已收窄为 **5 个核心 binmock D2H 用例**。
+
+---
+
+## 路径约定
+
+| 角色 | 路径 |
+|------|------|
+| 本地 worktree | `yuanrong-datasystem/.worktrees/ssd-hbm-direct` |
+| xqyun 源码 | `/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct` |
+| xqyun build | `/root/workspace/build-ssd-hbm-direct` |
+| 日志 | `/root/workspace/nds-ssd-hbm-meta/` |
+
+---
+
+## 1. Gate 0 — binmock 基线（无 NPU）
+
+**目的**：确认隔离树 + `AclDeviceManagerMock` 下 MSetD2H/MGetH2D 仍可用（本 RFC 的地基）。
+
+**跑哪些用例**（仅此 5 个）：
+
+```
+HeteroD2HTest.Perf
+HeteroD2HTest.TestNoExist
+HeteroD2HTest.TestAllExist
+HeteroD2HTest.TestPartExist
+HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId
+```
+
+**不跑**：`HeteroD2HTestEvcit.*`（spill 专项）、`HeteroD2HThroughTcpTest.*`（双 worker TCP）。
+
+### 一键（推荐）
+
+```bash
+# 全量：sync + 编 + 聚焦 ST
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/prepare_build_and_st_xqyun.sh
+
+# 仅 ST（build 已有）
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/prepare_build_and_st_xqyun.sh --skip-sync --skip-build
+```
+
+### 手动（xqyun 上）
+
+```bash
+cd /root/workspace/build-ssd-hbm-direct/tests/st
+export LD_LIBRARY_PATH="/root/workspace/build-ssd-hbm-direct/tests/st:${LD_LIBRARY_PATH:-}"
+
+./ds_device_llt --gtest_filter='\
+HeteroD2HTest.Perf:\
+HeteroD2HTest.TestNoExist:\
+HeteroD2HTest.TestAllExist:\
+HeteroD2HTest.TestPartExist:\
+HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId'
+```
+
+**binmock 机制**：`hetero_d2h_test.cpp` 在 `ASCEND_HOME_PATH` 未设置时，`BINEXPECT_CALL(AclDeviceManager::Instance, ...)` 返回 `AclDeviceManagerMock`，H2D/D2H 走 host memcpy。
+
+**日志**：`/root/workspace/nds-ssd-hbm-meta/latest_gate0_st.log`
+
+---
+
+## 2. Track① UT — Task 1–3 单元测试
+
+**目的**：验证对齐门禁、Mock IPC、Fake NDS 三个可注入接口（不启集群）。
+
+**跑哪些用例**（`ds_ut_nds`，共 8 个）：
+
+| Suite | Case | 验证点 |
+|-------|------|--------|
+| `AlignmentGateTest` | `Default4kRejects512AlignedOnly` | 4K 通过；512 仅在 align=512 时通过 |
+| `AlignmentGateTest` | `OffByOneFails` | offset/len/addr ±1 拒绝 |
+| `AlignmentGateTest` | `ZeroLengthOrAlignRejected` | len=0 或 align=0 拒绝 |
+| `MockIpcHbmBackendTest` | `ExportImportSamePointer` | Export→AllowImport→Import 同指针 |
+| `MockIpcHbmBackendTest` | `CloseRemovesExport` | Close 后 Import 失败 |
+| `MockIpcHbmBackendTest` | `ReExportSameVaReturnsSameHandle` | 同 VA 重复 Export 同 handle |
+| `FakeNdsSpillReaderTest` | `ReadToHbmCopiesFileBytes` | 临时文件 pattern → dest buffer |
+| `FakeNdsSpillReaderTest` | `ReadWithFileOffsetAndDestOff` | file offset + destOff 正确 |
+
+### 一键
+
+```bash
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_nds_ut_remote.sh
+# 已编过、仅 sync+跑 UT：
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_nds_ut_remote.sh --skip-sync  # 若脚本支持
+```
+
+### 手动 filter
+
+```bash
+cd /root/workspace/build-ssd-hbm-direct/tests/ut
+./ds_ut_nds --gtest_filter='AlignmentGateTest.*:MockIpcHbmBackendTest.*:FakeNdsSpillReaderTest.*'
+```
+
+---
+
+## 3. 目标端到端 ST（Task 6，尚未实现）
+
+**目的**：Register → spill → Get 旁路 → FakeNds 填 HBM → Client D2H 校验 pattern。
+
+**将来跑的 filter**（仅 2 组，不扫全 suite）：
+
+```bash
+./ds_device_llt --gtest_filter='NdsBinmockFlow*:HeteroD2HTest.TestAllExist'
+```
+
+脚本：`scripts/run_binmock_flow_st.sh`（xqyun 默认隔离路径）
+
+**当前**：`NdsBinmockFlow*` 用例尚不存在；脚本会失败。Gate 0 通过后可用 `ALLOW_HETERO_ONLY=1` 仅回归 1 个 Hetero case 作 smoke。
+
+---
+
+## 4. 夜间一键（Gate0 + UT，聚焦）
+
+```bash
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/overnight_iterate.sh
+```
+
+顺序：等 llt → **5 个 HeteroD2HTest** → sync → 增量编 → **ds_ut_nds 8 cases**。
+
+---
+
+## 5. 查看进度 / 证据
+
+```bash
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/check_cmake_puncture_xqyun.sh
+tail -30 /root/workspace/nds-ssd-hbm-meta/latest_gate0_st.log   # xqyun
+cat rfc/2026-07-12-ssd-hbm-direct/results.md                     # 本地时间线
+```
+
+---
+
+## 6. 与全量 ST 的区别
+
+| 命令 | 范围 | 本 RFC 是否使用 |
+|------|------|----------------|
+| `ctest` 全扫 | 所有 ST | **否** |
+| `ds_device_llt` 无 filter | 全部 device ST | **否** |
+| `HeteroD2H*` | 含 Evict/Tcp 变体 | **否**（已修正） |
+| Gate0 5 cases | binmock D2H 基线 | **是** |
+| `ds_ut_nds` 8 cases | Track① 接口 UT | **是** |
+| `NdsBinmockFlow*` | 本特性 e2e | **待 Task 6** |

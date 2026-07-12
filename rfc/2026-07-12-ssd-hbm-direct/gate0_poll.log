@@ -1,0 +1,40 @@
+poll start 2026-07-13T00:59:00+08:00
+=== poll 1 2026-07-13T00:59:00+08:00 ===
+Warning: Permanently added '154.201.95.25' (ED25519) to the list of known hosts.
+--- pid ---
+    PID     ELAPSED CMD
+2927776       15:48 bash build.sh -t build -X off -P off -B /root/workspace/build-ssd-hbm-direct -j 16
+--- log ---
+Elapsed time (seconds): 65.1953
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/device/master_dev_oc_manager.cpp.o
+Elapsed time (seconds): 3.49826
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/device/master_dev_hccl_rootinfo.cpp.o
+Elapsed time (seconds): 67.2797
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/device/master_dev_oc_directory.cpp.o
+Elapsed time (seconds): 67.8474
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/device/master_dev_npu_events.cpp.o
+Elapsed time (seconds): 71.836
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/device/master_dev_client_meta_manager.cpp.o
+Elapsed time (seconds): 10.7094
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/device/master_dev_dead_lock_manager.cpp.o
+Elapsed time (seconds): 5.31067
+[ 67%] Building CXX object src/datasystem/master/object_cache/CMakeFiles/master_object_cache.dir/master_master_oc_api.cpp.o
+Elapsed time (seconds): 66.7834
+[ 67%] Linking CXX executable ds_st_embedded_client
+Elapsed time (seconds): 2.27663
+[ 67%] Built target ds_st_embedded_client
+Elapsed time (seconds): 29.6473
+Elapsed time (seconds): 34.4595
+Elapsed time (seconds): 35.65
+Elapsed time (seconds): 38.0735
+Elapsed time (seconds): 43.6055
+Elapsed time (seconds): 110.874
+[ 67%] Linking CXX executable ds_device_llt
+Elapsed time (seconds): 24.9825
+Elapsed time (seconds): 50.2577
+Elapsed time (seconds): 50.7756
+Elapsed time (seconds): 57.8897
+Elapsed time (seconds): 58.821
+--- llt ---
+-rw-r--r-- 1 root root 284441900 Jul 13 00:59 /root/workspace/build-ssd-hbm-direct/tests/st/ds_device_llt
+LLT_READY at poll 1

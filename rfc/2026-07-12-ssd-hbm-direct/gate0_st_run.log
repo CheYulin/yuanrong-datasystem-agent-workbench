@@ -1,0 +1,183 @@
+== Gate0 xqyun isolated verify (ds-build/ds-dev style) ==
+REMOTE=xqyun-32c32g REPO=/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct BUILD=/root/workspace/build-ssd-hbm-direct CACHE=/root/.cache/yuanrong-datasystem-third-party
+== ST (ds-dev style: ctest -R HeteroD2H) ==
+Warning: Permanently added '154.201.95.25' (ED25519) to the list of known hosts.
+Note: Google Test filter = HeteroD2H*
+[==========] Running 7 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from HeteroD2HThroughTcpTest
+[ RUN      ] HeteroD2HThroughTcpTest.SetGet
+2026-07-12T17:03:23.798584 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet
+2026-07-12T17:03:23.800251 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:33033 --advertise-client-urls http://127.0.0.1:33033 --listen-peer-urls http://127.0.0.1:50156 --initial-advertise-peer-urls http://127.0.0.1:50156 --initial-cluster etcd0=http://127.0.0.1:50156 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:24.929690 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:24.929759 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:24.929913 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:45242 -unix_domain_socket_dir=/tmp/lf4qpPYpWq4U -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -ipc_through_shared_memory=false -log_monitor=true -v=1 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=5822 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/worker0/rocksdb  -etcd_address=127.0.0.1:33033 -master_address=127.0.0.1:45242
+2026-07-12T17:03:24.987582 | I | zmq_context.cpp:81 | ser729052458380 | 2936308:2936308 |  |  | ZmqContext created with ZMQ_IO_THREADS = 1
+2026-07-12T17:03:24.987635 | I | zmq_context.cpp:92 | ser729052458380 | 2936308:2936308 |  |  | soft limit: 1024, hard limit: 524288, max sockets number: 100000
+2026-07-12T17:03:24.987655 | I | zmq_context.cpp:99 | ser729052458380 | 2936308:2936308 |  |  | ZmqContext created with ZMQ_CONTEXT_MAX_SOCKETS = 100000
+2026-07-12T17:03:24.989631 | I | zmq_epoll.cpp:52 | ser729052458380 | 2936308:2936454 |  |  | ZmqStubConnMgr poller 0 starts
+2026-07-12T17:03:24.992022 | I | zmq_epoll.cpp:52 | ser729052458380 | 2936308:2936455 |  |  | ZmqStubConnMgr poller 1 starts
+2026-07-12T17:03:24.992464 | I | zmq_epoll.cpp:52 | ser729052458380 | 2936308:2936456 |  |  | ZmqStubConnMgr poller 2 starts
+2026000-07-122026-07-12T17:03:24.994164 | I | zmq_stub_conn.cpp:T17:03:31424.994190 |  | ser729052458380 | 2936308I | zmq_epoll.cpp:52:2936460 |  |  | ser729052458380 | 2936308:2936457 |  |  |  | ZmqStubConnMgr poller 3 starts
+Async thread for ZMQ end point tcp://127.0.0.1:45242 starts up
+2026-07-12T17:03:24.994411 | I | zmq_epoll.cpp:52 | ser729052458380 | 2936308:2936458 |  |  | ZmqStubConnMgr poller 4 starts
+2026-07-12T17:03:24.997383 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936460 |  |  | New gateway created 9e3b5978-7e8d-41d0
+2026-07-12T17:03:25.022063 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+2026-07-12T17:03:25.022288 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [1] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:13162 -unix_domain_socket_dir=/tmp/lf4qpPYpWq4U -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/worker1/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/worker1/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -ipc_through_shared_memory=false -log_monitor=true -v=1 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=30679 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HThroughTcpTest.SetGet/worker1/rocksdb  -etcd_address=127.0.0.1:33033 -master_address=127.0.0.1:45242
+2026-07-12T17:03:25.024162 | I | zmq_stub_conn.cpp:314 | ser729052458380 | 2936308:2936470 |  |  | Async thread for ZMQ end point tcp://127.0.0.1:13162 starts up
+2026-07-12T17:03:25.024409 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936470 |  |  | New gateway created 2e3aeeae-9b84-4513
+2026-07-12T17:03:25.029303 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [1] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:25.131909 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:25.131978 | I | base_cluster.h:182 | ser729052458380 | 2936308:2936308 |  |  | Set inject action of worker.PreShutDown.skip in 127.0.0.1:13162.
+2026-07-12T17:03:25.656481 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936311 |  |  | loop shutdown
+2026-07-12T17:03:25.718694 | I | zmq_stub_conn.cpp:385 | ser729052458380 | 2936308:2936460 |  |  | Async thread for ZMQ end point tcp://127.0.0.1:45242 shutdown
+2026-07-12T17:03:28.144520 | I | zmq_stub_conn.cpp:219 | ser729052458380 | 2936308:2936470 |  |  | code: [Try again], msg: [Thread ID 140170191947328 Try again. ZMQ send msg unsuccessful. Non-blocking operation mode was requested and no message is available at the moment
+Line of code : 52
+File         : zmq_socket_ref.cpp
+]. Message que 7c778d90-b2a7-44c7:1:93895041778304:0 service GenericService method 1, frontend gateway 2e3aeeae-9b84-4513. Elapsed: [3.003261]s
+2026-07-12T17:03:28.145025 | I | zmq_stub_conn.cpp:381 | ser729052458380 | 2936308:2936470 |  |  | New gateway created 4d04cbbd-7318-4011
+2026-07-12T17:03:28.145080 | I | zmq_stub_conn.cpp:385 | ser729052458380 | 2936308:2936470 |  |  | Async thread for ZMQ end point tcp://127.0.0.1:13162 shutdown
+[  FAILED  ] HeteroD2HThroughTcpTest.SetGet (4842 ms)
+[----------] 1 test from HeteroD2HThroughTcpTest (4842 ms total)
+
+[----------] 5 tests from HeteroD2HTest
+[ RUN      ] HeteroD2HTest.Perf
+2026-07-12T17:03:28.426467 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.Perf
+2026-07-12T17:03:28.427432 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.Perf/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:26508 --advertise-client-urls http://127.0.0.1:26508 --listen-peer-urls http://127.0.0.1:61760 --initial-advertise-peer-urls http://127.0.0.1:61760 --initial-cluster etcd0=http://127.0.0.1:61760 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:29.664945 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:29.665019 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:29.665137 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:48322 -unix_domain_socket_dir=/tmp/tYfeVIPL9i6j -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.Perf/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.Perf/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -v=0 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=26847 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.Perf/worker0/rocksdb  -etcd_address=127.0.0.1:26508 -master_address=127.0.0.1:48322
+2026-07-12T17:03:29.666770 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936620 |  |  | New gateway created 1c5027c1-b12b-4a7f
+2026-07-12T17:03:29.672671 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:29.980555 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:30.004066 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936549 |  |  | loop shutdown
+[  FAILED  ] HeteroD2HTest.Perf (1923 ms)
+[ RUN      ] HeteroD2HTest.TestNoExist
+2026-07-12T17:03:30.321004 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestNoExist
+2026-07-12T17:03:30.321728 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestNoExist/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:58608 --advertise-client-urls http://127.0.0.1:58608 --listen-peer-urls http://127.0.0.1:1590 --initial-advertise-peer-urls http://127.0.0.1:1590 --initial-cluster etcd0=http://127.0.0.1:1590 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:31.451996 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:31.452066 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:31.452171 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:41090 -unix_domain_socket_dir=/tmp/O0mzU73VdVX8 -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestNoExist/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestNoExist/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -v=0 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=26679 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestNoExist/worker0/rocksdb  -etcd_address=127.0.0.1:58608 -master_address=127.0.0.1:41090
+2026-07-12T17:03:31.454574 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936689 |  |  | New gateway created 392e3155-3e4c-4383
+2026-07-12T17:03:31.479243 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:31.569034 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:31.621405 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936623 |  |  | loop shutdown
+[  FAILED  ] HeteroD2HTest.TestNoExist (1608 ms)
+[ RUN      ] HeteroD2HTest.TestAllExist
+2026-07-12T17:03:31.967566 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestAllExist
+2026-07-12T17:03:31.968272 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestAllExist/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:65153 --advertise-client-urls http://127.0.0.1:65153 --listen-peer-urls http://127.0.0.1:21997 --initial-advertise-peer-urls http://127.0.0.1:21997 --initial-cluster etcd0=http://127.0.0.1:21997 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:33.100383 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:33.100453 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:33.100555 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:8051 -unix_domain_socket_dir=/tmp/umIqy2PQL0Hr -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestAllExist/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestAllExist/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -v=0 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=56100 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestAllExist/worker0/rocksdb  -etcd_address=127.0.0.1:65153 -master_address=127.0.0.1:8051
+2026-07-12T17:03:33.101947 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936761 |  |  | New gateway created ddbe0d0e-f8bb-497e
+2026-07-12T17:03:33.106680 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:33.211949 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:33.248072 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936692 |  |  | loop shutdown
+[  FAILED  ] HeteroD2HTest.TestAllExist (1632 ms)
+[ RUN      ] HeteroD2HTest.TestPartExist
+2026-07-12T17:03:33.509486 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestPartExist
+2026-07-12T17:03:33.509990 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestPartExist/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:19248 --advertise-client-urls http://127.0.0.1:19248 --listen-peer-urls http://127.0.0.1:2046 --initial-advertise-peer-urls http://127.0.0.1:2046 --initial-cluster etcd0=http://127.0.0.1:2046 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:34.591570 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:34.591623 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:34.591716 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:4991 -unix_domain_socket_dir=/tmp/TtMiKSDcfk47 -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestPartExist/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestPartExist/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -v=0 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=48545 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestPartExist/worker0/rocksdb  -etcd_address=127.0.0.1:19248 -master_address=127.0.0.1:4991
+2026-07-12T17:03:34.599087 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936829 |  |  | New gateway created fab4c73c-1b58-465a
+2026-07-12T17:03:34.603915 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:34.687360 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:34.708788 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936764 |  |  | loop shutdown
+[  FAILED  ] HeteroD2HTest.TestPartExist (1490 ms)
+[ RUN      ] HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId
+2026-07-12T17:03:34.997943 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId
+2026-07-12T17:03:34.998667 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:47122 --advertise-client-urls http://127.0.0.1:47122 --listen-peer-urls http://127.0.0.1:16807 --initial-advertise-peer-urls http://127.0.0.1:16807 --initial-cluster etcd0=http://127.0.0.1:16807 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:36.054517 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:36.054591 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:36.054715 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:19141 -unix_domain_socket_dir=/tmp/dNJsFLc9A08Q -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0  -v=0 -authorization_enable=true -shared_memory_size_mb=4096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory= -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=44061 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId/worker0/rocksdb  -etcd_address=127.0.0.1:47122 -master_address=127.0.0.1:19141
+2026-07-12T17:03:36.056150 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936898 |  |  | New gateway created ee4bccd7-45c1-4b3a
+2026-07-12T17:03:36.064204 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:36.169892 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:36.212221 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936832 |  |  | loop shutdown
+[  FAILED  ] HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId (1454 ms)
+[----------] 5 tests from HeteroD2HTest (8109 ms total)
+
+[----------] 1 test from HeteroD2HTestEvcit
+[ RUN      ] HeteroD2HTestEvcit.SpillTest
+2026-07-12T17:03:36.408277 | I | common.cpp:175 | ser729052458380 | 2936308:2936308 |  |  | rootDir:/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTestEvcit.SpillTest
+2026-07-12T17:03:36.408960 | I | external_cluster.cpp:884 | ser729052458380 | 2936308:2936308 |  |  | Launch etcd [0] command: /usr/local/bin/etcd -name etcd0 --data-dir /root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTestEvcit.SpillTest/etcd_cluster/etcd0 --log-level error --listen-client-urls http://127.0.0.1:1120 --advertise-client-urls http://127.0.0.1:1120 --listen-peer-urls http://127.0.0.1:3323 --initial-advertise-peer-urls http://127.0.0.1:3323 --initial-cluster etcd0=http://127.0.0.1:3323 --initial-cluster-token etcd-cluster
+2026-07-12T17:03:37.486748 | I | external_cluster.cpp:604 | ser729052458380 | 2936308:2936308 |  |  | Etcd cluster started successfully.
+2026-07-12T17:03:37.486835 | I | external_cluster.cpp:804 | ser729052458380 | 2936308:2936308 |  |  | The value of numOBS is 0. Therefore, the OBS is not started.
+2026-07-12T17:03:37.486975 | I | external_cluster.cpp:1062 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] command: /root/workspace/build-ssd-hbm-direct/src/datasystem/worker/datasystem_worker -worker_address=127.0.0.1:33940 -unix_domain_socket_dir=/tmp/5DPxpfJfa8Lq -log_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTestEvcit.SpillTest/worker0/log -v=1 -health_check_path=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTestEvcit.SpillTest/worker0/health -l2_cache_delete_thread_num=4 -inject_actions=test.start.notWait:call(0);master.disableRocksDb:1*call()  -sc_regular_socket_num=0 -sc_stream_socket_num=0 -log_monitor_interval_ms=1000 -v=2 -authorization_enable=true -shared_memory_size_mb=2096 -enable_fallocate=false -arena_per_tenant=2   -rpc_thread_num=4 -spill_directory=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTestEvcit.SpillTest/worker0/spill -enable_distributed_master=false -add_node_wait_time_s=0 -iam_kit=yuanrong_iam -yuanrong_iam_url=https://testyuanrongiam.com -rocksdb_background_threads=4 -zmq_server_io_context=2 -oc_thread_num=4 -spill_thread_num=4 -check_async_queue_empty_time_s=1 -system_access_key=QTWAOYTTINDUT2QVKYUC -system_secret_key=MFyfvK41ba2giqM7**********KGpownRZlmVmHc -tenant_access_key= -tenant_secret_key= -oc_worker_worker_direct_port=37604 -rocksdb_store_dir=/root/workspace/build-ssd-hbm-direct/tests/st/cluster/../ds/HeteroD2HTestEvcit.SpillTest/worker0/rocksdb  -etcd_address=127.0.0.1:1120 -master_address=127.0.0.1:33940
+2026-07-12T17:03:37.488051 | I | zmq_stub_conn.cpp:326 | ser729052458380 | 2936308:2936967 |  |  | New gateway created f4f480b3-db65-41e7
+2026-07-12T17:03:37.493735 | I | external_cluster.cpp:1071 | ser729052458380 | 2936308:2936308 |  |  | Launch worker [0] success
+/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct/tests/st/cluster/common.cpp:103: Failure
+Value of: false
+  Actual: false
+Expected: true
+code: [Not ready], msg: [Subprocess is abnormal.].
+2026-07-12T17:03:37.575607 | I | common.cpp:109 | ser729052458380 | 2936308:2936308 |  |  | ClusterTest start to TearDown
+2026-07-12T17:03:37.627571 | I | ascend_device_manager_mock.cpp:327 | ser729052458380 | 2936308:2936901 |  |  | loop shutdown
+[  FAILED  ] HeteroD2HTestEvcit.SpillTest (1432 ms)
+[----------] 1 test from HeteroD2HTestEvcit (1432 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 3 test suites ran. (14384 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 7 tests, listed below:
+[  FAILED  ] HeteroD2HThroughTcpTest.SetGet
+[  FAILED  ] HeteroD2HTest.Perf
+[  FAILED  ] HeteroD2HTest.TestNoExist
+[  FAILED  ] HeteroD2HTest.TestAllExist
+[  FAILED  ] HeteroD2HTest.TestPartExist
+[  FAILED  ] HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId
+[  FAILED  ] HeteroD2HTestEvcit.SpillTest
+
+ 7 FAILED TESTS
+[==========] Running 7 tests from 3 test suites.
+[  FAILED  ] HeteroD2HThroughTcpTest.SetGet (4842 ms)
+[----------] 5 tests from HeteroD2HTest
+[  FAILED  ] HeteroD2HTest.Perf (1923 ms)
+[  FAILED  ] HeteroD2HTest.TestNoExist (1608 ms)
+[  FAILED  ] HeteroD2HTest.TestAllExist (1632 ms)
+[  FAILED  ] HeteroD2HTest.TestPartExist (1490 ms)
+[  FAILED  ] HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId (1454 ms)
+[----------] 5 tests from HeteroD2HTest (8109 ms total)
+[  FAILED  ] HeteroD2HTestEvcit.SpillTest (1432 ms)
+[==========] 7 tests from 3 test suites ran. (14384 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 7 tests, listed below:
+[  FAILED  ] HeteroD2HThroughTcpTest.SetGet
+[  FAILED  ] HeteroD2HTest.Perf
+[  FAILED  ] HeteroD2HTest.TestNoExist
+[  FAILED  ] HeteroD2HTest.TestAllExist
+[  FAILED  ] HeteroD2HTest.TestPartExist
+[  FAILED  ] HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId
+[  FAILED  ] HeteroD2HTestEvcit.SpillTest
+RC=1 LOG=/root/workspace/nds-ssd-hbm-meta/gate0_st_20260712_170323.log
