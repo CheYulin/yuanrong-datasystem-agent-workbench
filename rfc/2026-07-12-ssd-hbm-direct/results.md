@@ -11,14 +11,16 @@
 |----|---------------|------|
 | Gate0 | 5× `HeteroD2HTest` | PASS |
 | UT | `ds_ut_nds` 14 cases | PASS |
-| E2E ST | NdsBinmockFlowTest.SpillFileToImportedVaPattern | PASS |
+| E2E ST | `NdsBinmockFlowTest.SpillFileToImportedVaPattern` | PASS |
 
 证据（xqyun）：`/root/workspace/nds-ssd-hbm-meta/latest_gate0_st.log`、`latest_ut_nds.log`。
-- E2E ST: run_binmock_flow_st.sh; HEAD: 7aab2bff1
 
 ```bash
 bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_binmock_flow_st.sh
 ```
+
+**HEAD**: `7aab2bff1`（E2E ST 提交）
 
 ## 本 PR 已落地（代码意图）
 
@@ -31,7 +33,7 @@ bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
 | 项 | 说明 |
 |----|------|
 | 上游基线 | 确认 `feat/ssd-hbm-direct` 祖先包含最新 `main/master`（避免叠 fork 旧 tip） |
-| Task 4b–6 | Register RPC、Get 旁路、`NdsBinmockFlow`（WBS） |
+| Task 4b–6 | Register RPC、Get 旁路、cluster 级 `NdsBinmockFlow` |
 | L2 | Stage A/B 真机（docs/env-validation） |
 
 历史夜间时间线已压缩；细节以 Story / issue-rfc 为准。
