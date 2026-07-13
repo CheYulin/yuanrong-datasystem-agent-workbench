@@ -23,7 +23,7 @@ RFC：`yuanrong-datasystem-agent-workbench/rfc/2026-07-12-ssd-hbm-direct/`
 
 **此PR修复了哪些问题**:
 
-Fixes #ISSUE_TRACK1
+Fixes #12
 
 （Track① 父 issue；Task 4b–6 子 issue 见 issue-rfc.md）
 

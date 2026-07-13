@@ -90,11 +90,11 @@ bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
 | # | 标题 | 优先级 | 说明 |
 |---|------|--------|------|
 | _TBD_ | [Feature] SSD→HBM Task 4: HbmMappingTable + RegisterHbmBuffer RPC | P1 | MockIpc Import 填表 |
-| _TBD_ | [Feature] SSD→HBM Task 5: local spilled Get NDS bypass + fallback | P1 | `worker_oc_service_get_impl.cpp` |
-| _TBD_ | [Feature] SSD→HBM Task 6: NdsBinmockFlow e2e ST | P1 | binmock 全链路判据 |
-| _TBD_ | [Feature] SSD→HBM Task 9: CannIpcHbmBackend（L2 Stage A） | P2 | 真 CANN IPC |
-| _TBD_ | [Feature] SSD→HBM Task 10: XdsNdsSpillReader（L2 Stage B） | P2 | 依赖 Stage A |
-| _TBD_ | [Tech Debt] observability: WORKER_NDS_* PerfKey + access keys | P2 | Task 8 |
+| #13 | [Feature] SSD→HBM Task 5: local spilled Get NDS bypass + fallback | P1 | `worker_oc_service_get_impl.cpp` |
+| #14 | [Feature] SSD→HBM Task 6: NdsBinmockFlow e2e ST | P1 | binmock 全链路判据 |
+| #15 | [Feature] SSD→HBM Task 9: CannIpcHbmBackend（L2 Stage A） | P2 | 真 CANN IPC |
+| #17 | [Feature] SSD→HBM Task 10: XdsNdsSpillReader（L2 Stage B） | P2 | 依赖 Stage A |
+| #18 | [Tech Debt] observability: WORKER_NDS_* PerfKey + access keys | P2 | Task 8 |
 
 _PR 合入后由 maintainer/agent 在 GitCode 创建 issue 并回填 `#` 列。_
 
