@@ -1,9 +1,10 @@
 # [RFC] SSD→HBM Direct (NDS) — Track① 可注入接口 + binmock 验证
 
 **Status**: In-Progress  
-**Branch**: `feat/ssd-hbm-direct` ← `origin/master` @ `11805014`  
+**Branch**: `feat/ssd-hbm-direct` ← `origin/master`  
+**Story**: [design-and-story.md](./design-and-story.md)  
 **RFC**: `rfc/2026-07-12-ssd-hbm-direct/`  
-**关联 PR**: _(见 pr-description.md，合入后回填)_
+**关联 PR**: [openeuler/yuanrong-datasystem !1312](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/1312)（`feat/ssd-hbm-direct` → `master`，`Fixes #12`）
 
 ---
 
@@ -19,7 +20,7 @@
 
 ---
 
-## 本 PR / 阶段目标（Track① Step 1–3）
+## 本 PR / 阶段目标（Track① PR-1）
 
 | Task | 内容 | 状态 |
 |------|------|------|
@@ -28,9 +29,9 @@
 | Task 2 | `IpcHbmBackend` + `MockIpcHbmBackend` | ✅ 代码 + UT |
 | Task 3 | `NdsSpillReader` + `FakeNdsSpillReader` | ✅ 代码 + UT |
 | Task 4a | `HbmMappingTable` + `NdsDirectPath` | ✅ 代码 + UT（本 PR） |
-| Task 4b | RegisterHbmBuffer RPC | ⏳ issue 跟踪 |
-| Task 5 | Get 旁路 `worker_oc_service_get_impl.cpp` | ⏳ issue 跟踪 |
-| Task 6 | `NdsBinmockFlow` e2e ST | ⏳ issue 跟踪 |
+| Task 4b | RegisterHbmBuffer RPC | ⏳ 后续 PR（见 WBS） |
+| Task 5 | Get 旁路 `worker_oc_service_get_impl.cpp` | ⏳ 后续 PR（见 WBS） |
+| Task 6 | `NdsBinmockFlow` e2e ST | ⏳ 后续 PR（见 WBS） |
 
 ---
 
@@ -63,8 +64,8 @@ bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
 | 项 | 结果 | 证据 |
 |----|------|------|
 | 隔离编 `ds_device_llt` | 已产出 | `/root/workspace/build-ssd-hbm-direct/tests/st/ds_device_llt` |
-| Gate 0（5 cases） | _待填_ | `nds-ssd-hbm-meta/latest_gate0_st.log` |
-| `ds_ut_nds`（8 cases） | _待填_ | incremental build + UT log |
+| Gate 0（5 cases） | **PASS** 5/5 | `nds-ssd-hbm-meta/latest_gate0_st.log` |
+| `ds_ut_nds`（14 cases） | **PASS** 14/14 | `nds-ssd-hbm-meta/latest_ut_nds.log` |
 | `NdsBinmockFlow` e2e | N/A | Task 6 未实现 |
 
 > 注：曾用 `HeteroD2H*` 误跑 Evict/Tcp 变体导致 7 FAIL；已收窄 filter（`gtest_filters.sh`）。
@@ -85,18 +86,16 @@ bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
 
 ---
 
-## GitCode / GitHub Issues（跟踪）
+## GitCode Issue（本 PR）
 
-| # | 标题 | 优先级 | 说明 |
-|---|------|--------|------|
-| _TBD_ | [Feature] SSD→HBM Task 4: HbmMappingTable + RegisterHbmBuffer RPC | P1 | MockIpc Import 填表 |
-| #13 | [Feature] SSD→HBM Task 5: local spilled Get NDS bypass + fallback | P1 | `worker_oc_service_get_impl.cpp` |
-| #14 | [Feature] SSD→HBM Task 6: NdsBinmockFlow e2e ST | P1 | binmock 全链路判据 |
-| #15 | [Feature] SSD→HBM Task 9: CannIpcHbmBackend（L2 Stage A） | P2 | 真 CANN IPC |
-| #17 | [Feature] SSD→HBM Task 10: XdsNdsSpillReader（L2 Stage B） | P2 | 依赖 Stage A |
-| #18 | [Tech Debt] observability: WORKER_NDS_* PerfKey + access keys | P2 | Task 8 |
+**仓库**：`openeuler/yuanrong-datasystem`（PR 从 fork `yche-huawei/yuanrong-datasystem` `feat/ssd-hbm-direct` 提交）  
+**约定**：**1 PR ↔ 1 issue**。本 PR 只关联下列 issue；Task 4b–6 / L2 等在 [work-breakdown.md](./work-breakdown.md) 跟踪，**不**另开 issue。
 
-_PR 合入后由 maintainer/agent 在 GitCode 创建 issue 并回填 `#` 列。_
+| # | 标题 | PR |
+|---|------|-----|
+| [#12](https://gitcode.com/yche-huawei/yuanrong-datasystem/issues/12) | SSD→HBM Direct Track① — injectable interfaces + binmock verify | **本 PR** `Fixes #12` |
+
+> 若曾误建 #13–#18 子 issue，可关闭；后续小步 PR 各自再开 **1 issue / 1 PR** 即可。
 
 ---
 
