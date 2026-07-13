@@ -13,7 +13,9 @@ HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId}"
 export NDS_UT_GTEST_FILTER="${NDS_UT_GTEST_FILTER:-\
 AlignmentGateTest.*:\
 MockIpcHbmBackendTest.*:\
-FakeNdsSpillReaderTest.*}"
+FakeNdsSpillReaderTest.*:\
+HbmMappingTableTest.*:\
+NdsDirectPathTest.*}"
 
 # Task 6 e2e (when NdsBinmockFlow lands) + minimal Hetero regression
 export BINMOCK_FLOW_GTEST_FILTER="${BINMOCK_FLOW_GTEST_FILTER:-\

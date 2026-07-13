@@ -5,6 +5,31 @@
 **Issue 跟踪:** [issue-rfc.md](./issue-rfc.md)  
 **复现:** [test-walkthrough.md](./test-walkthrough.md)
 
+## 提 PR（必须用 `ds-create-pr`，不要用 `gh pr create`）
+
+Skill：`yuanrong-datasystem/.skills/ds-create-pr/SKILL.md`
+
+```bash
+# 1. commit + push 到 GitCode fork（origin = yche-huawei，勿推 main/openeuler）
+git push origin feat/ssd-hbm-direct
+
+# 2. 一键：workbench 提交 + GitCode issues + ds-create-pr
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/publish_gitcode_track1.sh
+
+# 或分步：
+python3 rfc/2026-07-12-ssd-hbm-direct/scripts/create_tracking_issues.py
+python3 .skills/ds-create-pr/scripts/create_pr.py \
+  --owner openeuler \
+  --repo yuanrong-datasystem \
+  --base master \
+  --head feat/ssd-hbm-direct \
+  --fork-path yche-huawei/yuanrong-datasystem \
+  --title "feat(nds): SSD→HBM Track① injectable interfaces and mapping table" \
+  --body-file ../yuanrong-datasystem-agent-workbench/rfc/2026-07-12-ssd-hbm-direct/pr-body.gitcode.md
+```
+
+Token：`GITCODE_TOKEN` 或 `~/.local/gitcode_token`（勿打印到 chat）。
+
 ---
 
 ## Summary

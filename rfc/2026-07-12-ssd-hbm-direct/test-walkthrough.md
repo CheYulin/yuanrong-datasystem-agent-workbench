@@ -1,6 +1,6 @@
 # Gate 0 / Track① 用例复现手册
 
-**节点**：`xqyun-32c32g`（隔离树，不用主工程旧二进制）  
+**节点**：`xqyun-32c32g`（隔离树首选）；**xqyun SSH 不可用时**用 `tiantiyun-80c128g` + `scripts/verify_track1_tiantiyun.sh`（build：`/home/cache/build-ssd-hbm-direct`）  
 **原则**：只跑与本 RFC 相关的用例，**不**跑全量 `ds_device_llt` / `ctest`。
 
 ---
@@ -13,7 +13,8 @@
 | **Task 1 代码** | 已落地 | `AlignmentGatePass()` — 4K 默认对齐门禁，不对齐返回 false |
 | **Task 2 代码** | 已落地 | `MockIpcHbmBackend` — Export→Import 同指针，模拟 CANN IPC |
 | **Task 3 代码** | 已落地 | `FakeNdsSpillReader` — pread spill 文件 → memcpy 到 imported VA |
-| **Task 4–6** | 未做 | Register RPC、Get 旁路、`NdsBinmockFlow` ST 尚未串通 |
+| **Task 4a 代码** | 已落地 | `HbmMappingTable` + `NdsDirectPath` eligibility（Register/inflight UT） |
+| **Task 4b–6** | 未做 | Register RPC、Get 旁路、`NdsBinmockFlow` ST 尚未串通 |
 | **端到端 SSD→HBM** | 未达成 | 尚无 Worker Get 旁路；binmock 全链路 ST 待 Task 6 |
 
 > **注意**：此前 Gate 0 用 `HeteroD2H*` 误跑了 `HeteroD2HTestEvcit` / `HeteroD2HThroughTcpTest`（7 FAIL）。已收窄为 **5 个核心 binmock D2H 用例**。
@@ -57,19 +58,14 @@ bash rfc/2026-07-12-ssd-hbm-direct/scripts/prepare_build_and_st_xqyun.sh
 bash rfc/2026-07-12-ssd-hbm-direct/scripts/prepare_build_and_st_xqyun.sh --skip-sync --skip-build
 ```
 
-### 手动（xqyun 上）
+### 手动（xqyun 上）— 必须用 ctest 带上 CMake 的 LD_LIBRARY_PATH
 
 ```bash
-cd /root/workspace/build-ssd-hbm-direct/tests/st
-export LD_LIBRARY_PATH="/root/workspace/build-ssd-hbm-direct/tests/st:${LD_LIBRARY_PATH:-}"
-
-./ds_device_llt --gtest_filter='\
-HeteroD2HTest.Perf:\
-HeteroD2HTest.TestNoExist:\
-HeteroD2HTest.TestAllExist:\
-HeteroD2HTest.TestPartExist:\
-HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId'
+export GTEST_FILTER='HeteroD2HTest.Perf:HeteroD2HTest.TestNoExist:...'
+ctest --test-dir /root/workspace/build-ssd-hbm-direct --output-on-failure -R '^ds_device_llt$' -j 1
 ```
+
+**不要**只设 `LD_LIBRARY_PATH=tests/st` 直接 `./ds_device_llt` — worker 二进制在 `src/datasystem/worker/`，缺库会导致 `Subprocess is abnormal`。
 
 **binmock 机制**：`hetero_d2h_test.cpp` 在 `ASCEND_HOME_PATH` 未设置时，`BINEXPECT_CALL(AclDeviceManager::Instance, ...)` 返回 `AclDeviceManagerMock`，H2D/D2H 走 host memcpy。
 
@@ -77,11 +73,11 @@ HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId'
 
 ---
 
-## 2. Track① UT — Task 1–3 单元测试
+## 2. Track① UT — Task 1–4a 单元测试
 
-**目的**：验证对齐门禁、Mock IPC、Fake NDS 三个可注入接口（不启集群）。
+**目的**：验证对齐门禁、Mock IPC、Fake NDS、HbmMappingTable、NdsDirectPath eligibility（不启集群）。
 
-**跑哪些用例**（`ds_ut_nds`，共 8 个）：
+**跑哪些用例**（`ds_ut_nds`，共 **14** 个）：
 
 | Suite | Case | 验证点 |
 |-------|------|--------|
@@ -93,20 +89,32 @@ HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId'
 | `MockIpcHbmBackendTest` | `ReExportSameVaReturnsSameHandle` | 同 VA 重复 Export 同 handle |
 | `FakeNdsSpillReaderTest` | `ReadToHbmCopiesFileBytes` | 临时文件 pattern → dest buffer |
 | `FakeNdsSpillReaderTest` | `ReadWithFileOffsetAndDestOff` | file offset + destOff 正确 |
+| `HbmMappingTableTest` | `RegisterAndLookupDataMapping` | Register DATA mapping + Lookup |
+| `HbmMappingTableTest` | `UnregisterRemovesMapping` | Unregister 后 Lookup 失败 |
+| `HbmMappingTableTest` | `UnregisterRejectedWhileInflight` | inflight>0 时 Unregister → `K_TRY_AGAIN` |
+| `NdsDirectPathTest` | `SpillBufferPresentFallsBack` | SPILL_BUFFER 存在 → DRAM fallback |
+| `NdsDirectPathTest` | `MisalignedOffsetFallsBack` | 不对齐 offset → fallback |
+| `NdsDirectPathTest` | `AlignedWithMappingSelectsDirect` | 对齐 + mapping → DIRECT |
 
-### 一键
+### 一键（xqyun 或 tiantiyun fallback）
 
 ```bash
+# xqyun 隔离（首选）
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
+
+# xqyun SSH 不可用时 — Gate0 + UT 一次跑完
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_tiantiyun.sh
+
+# 仅 UT
 bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_nds_ut_remote.sh
-# 已编过、仅 sync+跑 UT：
-bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_nds_ut_remote.sh --skip-sync  # 若脚本支持
+# tiantiyun: REMOTE=tiantiyun-80c128g BUILD=/home/cache/build-ssd-hbm-direct bash ...
 ```
 
 ### 手动 filter
 
 ```bash
-cd /root/workspace/build-ssd-hbm-direct/tests/ut
-./ds_ut_nds --gtest_filter='AlignmentGateTest.*:MockIpcHbmBackendTest.*:FakeNdsSpillReaderTest.*'
+export GTEST_FILTER='AlignmentGateTest.*:MockIpcHbmBackendTest.*:FakeNdsSpillReaderTest.*:HbmMappingTableTest.*:NdsDirectPathTest.*'
+ctest --test-dir /root/workspace/build-ssd-hbm-direct --output-on-failure -R '^ds_ut_nds$' -j 1
 ```
 
 ---

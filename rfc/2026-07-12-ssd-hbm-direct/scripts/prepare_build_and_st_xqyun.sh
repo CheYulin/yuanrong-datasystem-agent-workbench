@@ -85,26 +85,25 @@ if [[ "${BUILD_ONLY}" -eq 1 ]]; then
   exit 0
 fi
 
-echo "== ST (ds-dev style: ctest -R ${ST_CTEST_REGEX}) =="
-ssh -o BatchMode=yes "$REMOTE" "bash -lc '
+echo "== ST (ctest ds_device_llt + GTEST_FILTER; see gtest_filters.sh) =="
+ssh -o BatchMode=yes "$REMOTE" "bash -s" <<REMOTE
 set -euo pipefail
-test -x ${BUILD}/tests/st/ds_device_llt
-mkdir -p ${BUILD}/tests/st/cluster ${META}
-# same helper as run_worktree_verify_remote
+BUILD='${BUILD}'
+META='${META}'
+FILTER='${ST_CTEST_REGEX}'
+test -x \${BUILD}/tests/st/ds_device_llt
+mkdir -p \${BUILD}/tests/st/cluster \${META}
 ln -sf ${REPO}/tests/st/cluster/mock_obs_service.py \
-  ${BUILD}/tests/st/cluster/mock_obs_service.py 2>/dev/null || true
-cd ${BUILD}/tests/st
-export LD_LIBRARY_PATH=\"${BUILD}/tests/st:\${LD_LIBRARY_PATH:-}\"
+  \${BUILD}/tests/st/cluster/mock_obs_service.py 2>/dev/null || true
 STAMP=\$(date -u +%Y%m%d_%H%M%S)
-LOG=${META}/gate0_st_\${STAMP}.log
-ln -sf \"\$LOG\" ${META}/latest_gate0_st.log
+LOG=\${META}/gate0_st_\${STAMP}.log
+ln -sf "\$LOG" \${META}/latest_gate0_st.log
+export GTEST_FILTER="\${FILTER}"
 set +e
-# Prefer gtest filter on ds_device_llt for device suite (ctest label may wrap whole binary)
-# Gate0: 5 focused HeteroD2HTest cases only — see gtest_filters.sh / test-walkthrough.md
-./ds_device_llt --gtest_filter=\"${ST_CTEST_REGEX}\" 2>&1 | tee \"\$LOG\"
+ctest --test-dir "\${BUILD}" --output-on-failure -R '^ds_device_llt\$' -j 1 2>&1 | tee "\$LOG"
 RC=\${PIPESTATUS[0]}
 set -e
-grep -E \"\\[  PASSED  \\]|\\[  FAILED  \\]|tests from\" \"\$LOG\" | tail -n 20
+grep -E "\\[  PASSED  \\]|\\[  FAILED  \\]|tests from" "\$LOG" | tail -n 20
 echo RC=\$RC LOG=\$LOG
 exit \$RC
-'"
+REMOTE

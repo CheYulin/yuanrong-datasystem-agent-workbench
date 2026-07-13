@@ -29,6 +29,9 @@
 
 | 日期 | RFC | Status | 落地位置（datasystem） |
 |------|-----|--------|-----------------------|
+| 2026-07-12 | [2026-07-12-ssd-hbm-direct/](2026-07-12-ssd-hbm-direct/README.md) | **Draft** | 三事项：①模块+mock / ②IPC穿刺 / ③SSD→HBM穿刺；见 [WBS](2026-07-12-ssd-hbm-direct/work-breakdown.md)、[decisions](2026-07-12-ssd-hbm-direct/decisions.md) |
+| 2026-07-12 | [2026-07-12-ub-data-plane-quarantine/](2026-07-12-ub-data-plane-quarantine/README.md) | **Draft** | UB data-plane 故障隔离：client-worker / worker-worker 读写、迁移、Rebalance 隔离与恢复设计；见 [story](2026-07-12-ub-data-plane-quarantine/design-and-story.md)、[design](2026-07-12-ub-data-plane-quarantine/design.md)、[flow-analysis](2026-07-12-ub-data-plane-quarantine/flow-analysis.md) |
+| 2026-07-09 | [2026-07-09-datasystem-skills-migration/](2026-07-09-datasystem-skills-migration/README.md) | **Draft** | `yuanrong-datasystem/.skills/`：`ds-harness`、`ds-build`、`ds-dev`、`ds-daily`、`ds-perf`、`ds-pr-review`、`ds-pr-flow`、`ds-docs`；workbench `wb-*` 降级为薄壳 |
 | 2026-05-05 | [2026-05-05-metrics-summary-multi-part-test-support/](2026-05-05-metrics-summary-multi-part-test-support/README.md) | **In-Progress** | **`DumpSummariesForTest`**（全 part）+ **`DumpSummaryForTest` 保持首段**；Z **`DumpSummaryJson` 多分片合并**；见 [README](2026-05-05-metrics-summary-multi-part-test-support/README.md)、[pr-description.md](2026-05-05-metrics-summary-multi-part-test-support/pr-description.md) |
 | 2026-05-11 | [2026-05-11-metrics-biz-view/](2026-05-11-metrics-biz-view/README.md) | **Draft** | `scripts/metrics/metrics_biz_view.py`（Python ECharts 仪表盘）+ `docs/metrics-biz-view/design.md`；见 [run_commands](2026-05-11-metrics-biz-view/run_commands.md)、[design](2026-05-11-metrics-biz-view/design.md) |
 | 2026-05-03 | [2026-05-03-metrics-p99-histogram/](2026-05-03-metrics-p99-histogram/README.md) | **Draft** | **Histogram P99**（20 固定桶，`common/metrics` + `metrics_test`）；见 [implementation-plan](2026-05-03-metrics-p99-histogram/implementation-plan.md) |

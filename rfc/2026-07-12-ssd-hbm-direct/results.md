@@ -7,10 +7,10 @@
 
 ## Tonight's plan
 
-1. [ ] Gate 0: 5 个聚焦 `HeteroD2HTest` PASS（已修正 filter，不再跑 Evict/Tcp）
-2. [x] Task 1–3 代码：`AlignmentGate` + `MockIpc` + `FakeNds`
-3. [ ] Task 1–3 verify：`ds_ut_nds` 8 cases *(后台跑)*
-4. [ ] Task 4–6：Register + Get 旁路 + `NdsBinmockFlow` ST
+1. [x] Gate 0: 5 个聚焦 `HeteroD2HTest` PASS（xqyun direct gtest，09:46 确认）
+2. [x] Task 1–4a 代码：`AlignmentGate` + `MockIpc` + `FakeNds` + `HbmMappingTable` + `NdsDirectPath`
+3. [x] Task 1–4a verify：`ds_ut_nds` **14/14** PASS（xqyun，09:46）
+4. [ ] Task 4b–6：Register RPC + Get 旁路 + `NdsBinmockFlow` ST
 
 **复现**：见 [test-walkthrough.md](./test-walkthrough.md)
 
@@ -26,6 +26,16 @@
 | 00:58 | Build check | ~67% | `Linking CXX executable ds_device_llt` (0-byte stub) |
 | 00:59 | Task 2–3 code | DONE | `MockIpcHbmBackend`, `FakeNdsSpillReader` + UT |
 | 00:59 | `overnight_iterate.sh` | BACKGROUND | Gate0 ST → sync → `ds_ut_nds` |
+| 00:59 | `ds_device_llt` linked | READY | ~67% isolated build; 284MB binary (later `-rwx`) |
+| 01:00–01:03 | SSH to xqyun | BLOCKED→OK | `Not allowed at this time` ×2, recovered poll 3 |
+| 01:03 | Gate0 ST (`--skip-sync --skip-build`) | **GATE0_FAIL** | 0/7 `HeteroD2H*`; worker `Subprocess is abnormal` |
+| 01:03 | Task1 UT (`run_nds_ut_remote.sh`) | **UT_FAIL** | zsh glob on `AlignmentGateTest.*`; SSH drop mid-run |
+| 03:30 | `verify_track1_tiantiyun` | **PARTIAL** | build OK; Gate0 **5/5** direct gtest; UT **13/14** (`ZeroLengthOrAlignRejected`) |
+| 03:35 | follow-up fixes | DONE | alignment gate+test; verify scripts → direct gtest |
+| 09:46 | `verify_track1_xqyun` | **PASS** | build ~256s; Gate0 **5/5**; UT **14/14** |
+
+**Evidence (local RFC dir):** `gate0_st_run.log`, `overnight_verify.log`, `gate0_poll.log`, `nds_ut_run.log`  
+**Evidence (xqyun):** `/root/workspace/nds-ssd-hbm-meta/gate0_st_20260712_170323.log`
 
 ---
 
@@ -64,8 +74,9 @@ Results appended to this file when complete.
 
 ## Issues / blockers
 
-- SSH to xqyun intermittently `Connection closed` — retry via `bash -lc` from WSL workbench cwd.
-- Gate 0 build started before Task 1–3 sync; ST uses pre-sync baseline; UT uses post-sync incremental.
+- **Gate0 ST 根因（已修）**：脚本直接 `./ds_device_llt` 且 `LD_LIBRARY_PATH` 仅含 `tests/st`，缺 `_WORKER_BIN_DIR`（`src/datasystem/worker`）→ worker 子进程秒退 `Subprocess is abnormal`。修复：改用 `ctest -R ds_device_llt` + `GTEST_FILTER`（CMake `TEST_ENVIRONMENT`）。
+- **UT 根因（已修）**：`run_nds_ut_remote.sh` 经 zsh 解析 `*` glob + 多行引号断裂。修复：heredoc `bash -s` + `ctest -R ds_ut_nds`。
+- SSH to xqyun intermittently `Connection closed` — retry via `bash -s` heredoc。
 
 ---
 
@@ -92,3 +103,23 @@ Results appended to this file when complete.
 bash rfc/2026-07-12-ssd-hbm-direct/scripts/overnight_iterate.sh
 bash rfc/2026-07-12-ssd-hbm-direct/scripts/check_cmake_puncture_xqyun.sh
 ```
+
+## Verification 2026-07-13 xqyun
+Gate0 FAIL: 5 run, 0 passed, 5 failed, exit 1
+UT FAIL: 8 run, 7 passed, 1 failed (AlignmentGateTest.ZeroLengthOrAlignRejected); run_nds_ut_remote build failed CMake
+Filter: HeteroD2H star 7 fail narrowed to 5 focused Gate0 cases
+Gate0 grep PASSED/FAILED:
+[  PASSED  ] 0 tests.
+[  FAILED  ] HeteroD2HTest.Perf
+[  FAILED  ] HeteroD2HTest.TestNoExist
+[  FAILED  ] HeteroD2HTest.TestAllExist
+[  FAILED  ] HeteroD2HTest.TestPartExist
+[  FAILED  ] HeteroD2HTest.TestMSetD2HMsgWithInvalidDeviceId
+[  FAILED  ] 5 tests, listed below:
+UT grep PASSED/FAILED:
+[  PASSED  ] 7 tests.
+[  FAILED  ] AlignmentGateTest.ZeroLengthOrAlignRejected
+[  FAILED  ] 1 test, listed below:
+run_nds_ut_remote exit: CMake configure incomplete (build failed)
+run_existing_hetero_st_xqyun ctest exit: 8
+Follow-up direct Gate0 rerun: ds_device_llt ABORTED (core dump) after HeteroD2HTest.Perf; worse than first run (5 clean failures)

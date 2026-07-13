@@ -23,13 +23,14 @@
 
 | Task | 内容 | 状态 |
 |------|------|------|
-| Gate 0 | 隔离树 + 5 个聚焦 `HeteroD2HTest`（binmock 基线） | 验证中 |
+| Gate 0 | 隔离树 + 5 个聚焦 `HeteroD2HTest`（binmock 基线） | ✅ xqyun 5/5 |
 | Task 1 | `AlignmentGatePass()` | ✅ 代码 + UT |
 | Task 2 | `IpcHbmBackend` + `MockIpcHbmBackend` | ✅ 代码 + UT |
 | Task 3 | `NdsSpillReader` + `FakeNdsSpillReader` | ✅ 代码 + UT |
-| Task 4 | `HbmMappingTable` + Register RPC | ⏳ 待开 |
-| Task 5 | Get 旁路 `worker_oc_service_get_impl.cpp` | ⏳ 待开 |
-| Task 6 | `NdsBinmockFlow` e2e ST | ⏳ 待开 |
+| Task 4a | `HbmMappingTable` + `NdsDirectPath` | ✅ 代码 + UT（本 PR） |
+| Task 4b | RegisterHbmBuffer RPC | ⏳ issue 跟踪 |
+| Task 5 | Get 旁路 `worker_oc_service_get_impl.cpp` | ⏳ issue 跟踪 |
+| Task 6 | `NdsBinmockFlow` e2e ST | ⏳ issue 跟踪 |
 
 ---
 
@@ -45,14 +46,14 @@ bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_existing_hetero_st_xqyun.sh
 
 Filter：`HeteroD2HTest.{Perf,TestNoExist,TestAllExist,TestPartExist,TestMSetD2HMsgWithInvalidDeviceId}`
 
-### Track① UT — 8 cases
+### Track① UT — 14 cases
 
 ```bash
-bash rfc/2026-07-12-ssd-hbm-direct/scripts/run_nds_ut_remote.sh
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
 ```
 
 ```bash
-./ds_ut_nds --gtest_filter='AlignmentGateTest.*:MockIpcHbmBackendTest.*:FakeNdsSpillReaderTest.*'
+./ds_ut_nds --gtest_filter='AlignmentGateTest.*:MockIpcHbmBackendTest.*:FakeNdsSpillReaderTest.*:HbmMappingTableTest.*:NdsDirectPathTest.*'
 ```
 
 ---

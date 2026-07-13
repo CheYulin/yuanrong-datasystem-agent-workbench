@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 REMOTE=xqyun-32c32g
 REPO=/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct
