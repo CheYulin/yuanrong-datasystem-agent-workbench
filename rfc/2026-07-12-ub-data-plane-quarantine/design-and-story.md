@@ -32,7 +32,41 @@
 | TCP fallback | UB 失败后改用 TCP payload 搬运数据 | 默认关闭；显式开启时也只有不超过 1 MiB 的 payload 可切 TCP，且必须可观测 |
 | recovery probe | quarantine 后的恢复探测 | 使用 handshake/warmup/小数据传输，成功 N 次后恢复 |
 
-## 双视角故障处理模型
+## 关键概念定义
+
+本章按全局事实、局部观测和对象状态三层组织概念。核心原则是：UB 故障首先是
+Transport / Local Observation，不是 Cluster Node Table 的全局 DOWN；是否换 worker、
+是否刷新 hash ring、是否重查 metadata、是否 fail fast，由读写 Flow 基于状态域做决策。
+
+### 集群管理状态：全局事实与局部观测
+
+| 状态域 | 权威来源 | 本特性如何消费 | 边界 |
+| ---- | ---- | ---- | ---- |
+| Cluster Node Table / membership | Coordinator / etcd / ClusterManager | 作为 worker 是否仍属于集群、是否可被选择的全局事实 | 不能被单个 client/worker 的 UB 失败直接改写 |
+| HashRing / Topology | Coordinator，经 Worker-Cluster 暴露 | 决定 meta owner、worker 候选集合、scale/moving/stale route 处理 | 只回答“该问谁”，不证明 UB path 可达 |
+| WorkerServiceMode | worker self-healing 特性本地维护 | 判断 worker 本进程是否能对外服务；非 `RUNNING` 时是更强阻断 | UB probe 成功不能把 `RECOVERING` 推成 `RUNNING` |
+| WorkerUbPathHealth | 当前 client/worker 的 UB 数据面观测 | 判断当前进程是否还应通过 UB 访问目的 worker | 局部、可恢复；不能升级为全局 worker DOWN |
+| Transport observation | Transport / URMA Operator | ERROR 4、timeout、reconnect、fallback、RTT、pool pressure | 需要先分类，再决定是 quarantine、backpressure 还是普通错误 |
+
+### 对象状态：Meta/Layout 与 Data Local
+
+| 状态域 | 权威来源 | 本特性如何消费 | 边界 |
+| ---- | ---- | ---- | ---- |
+| Object Metadata / Layout | Worker-Meta / master metadata manager | Get 根据 data locations 选择 source；migration/rebalance 根据 layout 迁移数据 | data location 属于 metadata/layout，不属于单个 data worker 自己声明 |
+| Primary / local copy / L2 | metadata layout + local data ownership | TCP self-healing 负责 ownership 对账；UB 隔离只避免继续向不可达 path 制造新数据 | UB quarantine 第一版不重建 metadata ownership |
+| Data Local State | Worker-Data 本地 object table、payload、resident/spill | URMA Operator 写回/读 source 时检查本地 entry 与 payload；失败后回报 health | 本地数据存在不代表 metadata commit 成功或对象全局可见 |
+
+### 变化与故障归属
+
+| 信号 | 归属状态域 | 默认处理 |
+| ---- | ---- | ---- |
+| ERROR 4 / UB port unavailable | Transport observation -> `WorkerUbPathHealth` | 标记目的 worker UB path `UNAVAILABLE`，阻断后续 UB 写入/迁移 |
+| send Jetty pool `K_TRY_AGAIN` | 本地 transport resource pressure | 快速返回/背压，不隔离远端 worker |
+| TCP/RPC unavailable / etcd disconnect | WorkerServiceMode / membership / transport observation | 交给 TCP self-healing 或 membership 隔离；不直接记为 UB failure |
+| stale route / `K_SCALE_DOWN` | HashRing / topology | 刷新路由、exclude stale worker，不混成 UB failure |
+| data migration / primary 切换 | Object Metadata / Layout + Data Local | 以 metadata 返回的新 location 为准，旧 location UB 失败不等于对象不存在 |
+
+### 三角色故障处理模型
 
 同一次 UB 数据传输按三个角色看最清楚：**Coordinator**、**URMA Operator** 和
 **Endpoint**。
@@ -838,3 +872,4 @@ fail fast，redirect retry 不回到同一坏 target。
 | [flow-analysis.md](./flow-analysis.md) | main/master 读写、迁移、rebalance 代码流分析 |
 | [../2026-06-29-urma-send-jetty-lane-isolation/design-and-story.md](../2026-06-29-urma-send-jetty-lane-isolation/design-and-story.md) | PR1277/发送端 Jetty 池化相关 story 结构参考 |
 | [../2026-07-01-client-direct-read-routing/design-and-story.md](../2026-07-01-client-direct-read-routing/design-and-story.md) | 读路径 story 结构参考 |
+| [DataSystem Client 访问远端 Worker 模块设计](https://yche.me/design/ds-client-remote-worker-mde-design-v2-20260715.html#concepts) | 全局状态、局部观测、Meta/Layout、Data Local 分层参考 |

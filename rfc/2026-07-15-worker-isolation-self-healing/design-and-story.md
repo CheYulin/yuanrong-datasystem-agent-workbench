@@ -1,3 +1,5 @@
+# Worker Isolation Self-Healing Story
+
 关联文档:
 
 + Source baseline: `main/master`
@@ -27,6 +29,41 @@
 | runtime state | worker 本地运行状态 | 用于服务准入，不等同于进程是否存活 |
 | service admission | 请求入口准入 | 只有 `RUNNING` 可正常读写/迁移；`RECOVERING` 只允许内部恢复 RPC |
 | reconciliation / 对账 | 恢复时检查本地数据、master metadata、hash ring、slot recovery 的一致性 | 恢复完成前不对外宣称 RUNNING |
+
+## 关键概念定义
+
+本章按全局事实、本地服务状态、对象布局和本地数据四层组织概念。核心原则是：
+worker 可以本地更保守地拒绝服务，但不能用本地状态反向改写集群事实；恢复后能否
+重新 `RUNNING`，必须同时满足 membership/ring 事实和 metadata/data ownership 对账。
+
+### 集群管理状态：全局事实与本地准入
+
+| 状态域 | 权威来源 | 本特性如何消费 | 边界 |
+| ---- | ---- | ---- | ---- |
+| Coordination / lease / keepalive | etcd / coordination backend | 判断本 worker 是否仍被 coordination 确认 | keepalive 恢复只是进入 `RECOVERING` 的证据，不等于可服务 |
+| Cluster Node Table | Coordinator / ClusterManager | 判断 worker identity、membership、ACTIVE/TIMEOUT/FAILED | worker 本地不能把自己写成 ACTIVE |
+| HashRing / Topology | Coordinator / HashRing snapshot | 判断 worker 是否仍在 ring、是否 JOINING/ACTIVE/LEAVING、是否在 `del_node_info` | ring state 是全局/集群事实，不由 `WorkerServiceMode` 覆盖 |
+| WorkerServiceMode | worker 本地 runtime manager | 唯一服务准入状态，决定普通读写/迁移/recovery RPC 是否允许 | 只能收紧服务资格，不能放大集群权限 |
+| WorkerUbPathHealth | UB data-plane quarantine | 作为更细的数据面 path eligibility 输入 | UB 恢复不能把 `WorkerServiceMode` 推成 `RUNNING` |
+
+### 对象状态：Meta/Layout 与 LocalDataOwnership
+
+| 状态域 | 权威来源 | 本特性如何消费 | 边界 |
+| ---- | ---- | ---- | ---- |
+| Object Metadata / Layout | Worker-Meta / master metadata manager | 判断对象是否存在、primary/local copy/L2 layout、data locations | 本地 object table 存在不代表对象全局可见 |
+| ClusterMetaOwnership | master metadata / QueryMeta / recovery metadata | 判断本 worker 在集群 meta 中是 primary、local copy、L2 holder 还是已被清理 | 恢复时以 master confirmed metadata 为准 |
+| LocalDataOwnership | worker 本地 object table、L2/spill/write-back 状态 | 判断本地实际还持有什么数据和版本 | 默认不可见，必须经过 metadata recovery/reconciliation |
+| Primary Copy Transition | `ChangePrimaryCopy` / metadata update | 隔离后其它 local copy 可升 primary | 恢复 worker 不能凭旧本地状态抢回 primary |
+
+### 变化与故障归属
+
+| 信号 | 归属状态域 | 默认处理 |
+| ---- | ---- | ---- |
+| 本 worker keepalive 失败但其它节点正常 | Coordination + WorkerServiceMode | `RUNNING -> LOCAL_ISOLATED`，不自杀，不普通服务 |
+| 本 worker 出现在 `del_node_info` 或从 ring 消失 | HashRing / topology + WorkerServiceMode | 进入隔离或恢复判断；不能直接认为本地数据仍可见 |
+| TCP/etcd 恢复 | Coordination observation | 只允许进入 `RECOVERING`，等待 membership revalidate 和 metadata/data 对账 |
+| OOM / `K_OUT_OF_MEMORY` | Worker-Data local resource pressure | 进入 `OUT_OF_MEMORY`，拒绝新写和迁移 target，允许 cleanup/recovery 类动作 |
+| UB ERROR 4 / UB path unavailable | Transport local observation | 交给 `WorkerUbPathHealth`；不升级为 worker service mode 全局故障 |
 
 ## 场景分析
 
@@ -1046,3 +1083,11 @@ RUNNING -> DRAINING -> STOPPING
 2. `auto_del_dead_node=true` 是否改为“不 kill 本地隔离 worker，但仍允许删除远端 dead worker”。推荐保留远端被动 scale down，只改 self-kill。
 3. 恢复后如果 worker 已被从 ring 删除，是自动 rejoin 还是保持 isolated 等待管理员/重启。推荐第一版保持 isolated 或走已有 restart/rejoin，不直接 RUNNING。
 4. `enable_metadata_recovery` 当前默认 false。若本需求依赖元数据重建，是否需要在该场景下默认打开或由恢复流程显式检查并报警。
+
+## 参考文档
+
+| 文档 | 用途 |
+| ---- | ---- |
+| [../2026-07-12-ub-data-plane-quarantine/design-and-story.md](../2026-07-12-ub-data-plane-quarantine/design-and-story.md) | UB data-plane quarantine 边界与组合 admission |
+| [../2026-07-01-client-direct-read-routing/design-and-story.md](../2026-07-01-client-direct-read-routing/design-and-story.md) | Story 文档组织模板 |
+| [DataSystem Client 访问远端 Worker 模块设计](https://yche.me/design/ds-client-remote-worker-mde-design-v2-20260715.html#concepts) | 全局事实、局部观测、Meta/Layout、Data Local、变化/故障归属分层参考 |
