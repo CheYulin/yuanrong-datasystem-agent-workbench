@@ -775,7 +775,10 @@ WorkerRuntimeStateManager::MarkLocalIsolated(reason)
 
 #### 5. 代码关键类图、运行视图、数据表设计
 
-运行视图如下。
+运行视图按 `client remote worker MDE` 的概念分层展开：全局状态由
+Coordinator/Worker-Cluster 权威维护，worker 本地只读消费；局部观测只影响本
+worker 的 service admission；对象可见性由 Meta/Layout 决定，本地 Data Local
+只能证明本 worker 是否真的持有对应数据和版本。
 
 ##### 场景 1: keepalive 失败但进程不退出
 
@@ -794,6 +797,14 @@ sequenceDiagram
     Note over E,S: no SIGKILL; process remains alive for recovery
 ```
 
+生命周期编号:
+
++ 1: `EtcdStore` 发现本地 keepalive renew 失败。
++ 2: 通过 `checkEtcdStateWhenNetworkFailedHandler_` 确认其它节点/coordination store 仍可用，判定为本节点局部隔离。
++ 3: 不再进入 `deathTimer -> SIGKILL`，而是上抛 local isolation event。
++ 4: `WorkerRuntimeStateManager` 进入 `LOCAL_ISOLATED`。
++ 5: 所有普通读写、迁移 target、rebalance target 通过 `WorkerServiceAdmission` 快速失败。
+
 ##### 场景 2: hash ring passive scale down self
 
 ```mermaid
@@ -811,6 +822,13 @@ sequenceDiagram
         R-->>S: close service admission
     end
 ```
+
+生命周期编号:
+
++ 1: HashRing 根据 cluster/ring 事件发现 local worker 被 remove 或处于 `del_node_info`。
++ 2: 如果是 voluntary scale down，进入 `DRAINING`，保留现有缩容迁移和最终 `SIGTERM`。
++ 3: 如果是非预期 self passive scale down，进入 `LOCAL_ISOLATED`，避免直接 `SIGKILL`。
++ 4: 远端 worker 的 passive scale down 语义不变，仍由集群侧处理 failed worker。
 
 ##### 场景 3: 网络恢复后进入恢复态
 
@@ -833,6 +851,107 @@ sequenceDiagram
         W->>R: remain isolated or stop
     end
 ```
+
+生命周期编号:
+
++ 1: coordination reconnect 或 node recovery event 触发恢复控制器。
++ 2: 本地先进入 `RECOVERING`，继续拒绝普通业务请求。
++ 3: 只读消费 membership、cluster node table、hash ring membership/local state。
++ 4: 构建 `ClusterMetaOwnership` 与 `LocalDataOwnership`，对账 primary/local copy/L2 归属。
++ 5: 复用 metadata recovery、slot recovery、clear data without meta 等已有恢复能力。
++ 6: 所有 evidence 通过后才 `MarkRunning`；否则保持 isolated 或进入 `STOPPING`。
+
+##### 场景 4: 启动 ready 与 scale-out joining
+
+```mermaid
+sequenceDiagram
+    participant W as WorkerOCServer
+    participant R as WorkerRuntimeStateManager
+    participant C as ClusterManager
+    participant H as HashRing
+    participant S as Worker Services
+    W->>R: 1. MarkStarting
+    W->>W: 2. CommonServer::Start / listen ports
+    W->>C: 3. SetWorkerReady
+    C->>H: 4. observe ring membership
+    alt hash ring PRE_RUNNING / JOINING
+        H->>R: 5. MarkJoining
+        R-->>S: allow only scale-out/migration internal RPC
+    else evidence complete
+        H->>R: 6. MarkRunning
+        R-->>S: normal read/write/migration target allowed
+    end
+```
+
+生命周期编号:
+
++ 1: 进程启动后进入 `STARTING`，即使进程 alive 也不代表可服务。
++ 2: 端口监听、ready file、service health check 完成前，普通读写均拒绝。
++ 3: `SetWorkerReady` 后只说明服务入口可被发现，还需要 ring/membership evidence。
++ 4: 如果本 worker 处于 scale-out 加入中，进入 `JOINING`。
++ 5: `JOINING` 只允许必要的 migration/scale-out 内部 RPC，不开放普通写入或 rebalance target。
++ 6: membership、ring、metadata/data ownership evidence 都满足后，进入 `RUNNING`。
+
+##### 场景 5: OOM 资源保护态
+
+```mermaid
+sequenceDiagram
+    participant A as Allocator/Arena/Jemalloc
+    participant R as WorkerRuntimeStateManager
+    participant S as Worker Services
+    participant E as Eviction/Cleanup
+    participant M as Master Metadata
+    S->>A: 1. allocate for Create/Put/migration
+    A-->>S: 2. K_OUT_OF_MEMORY
+    S->>R: 3. MarkOutOfMemory
+    R-->>S: 4. reject write and migration target
+    R-->>E: 5. allow cleanup/evict/free resource
+    E->>M: 6. optional metadata / L2 ownership check
+    alt resource recovered and evidence pass
+        E->>R: 7. MarkRunning
+    else unrecoverable
+        E->>R: 8. MarkStopping
+    end
+```
+
+生命周期编号:
+
++ 1: OOM 来自 Worker-Data local resource domain，不等价于 cluster worker DOWN。
++ 2: 进入 `OUT_OF_MEMORY` 后，membership/ring 可能仍健康，但本地不能继续制造新数据。
++ 3: 普通写、迁移 target、rebalance target 均拒绝。
++ 4: cleanup、evict、free resource、只读对账和诊断仍允许。
++ 5: 资源释放后重新检查 RunningEvidence；无法恢复时才进入 `STOPPING`。
+
+##### 场景 6: meta/data ownership 对账
+
+```mermaid
+sequenceDiagram
+    participant W as WorkerRecoveryController
+    participant M as Master Metadata
+    participant D as Worker Data Local
+    participant R as WorkerRuntimeStateManager
+    W->>M: 1. query cluster meta ownership
+    M-->>W: 2. primary/local copy/L2 layout + version
+    W->>D: 3. scan local object table and L2 state
+    D-->>W: 4. local primary/local/L2 role + version
+    alt master primary moved to other worker
+        W->>D: 5. downgrade or clear local old primary
+    else master meta missing but local recoverable
+        W->>M: 6. metadata recovery request
+    else local stale/orphan
+        W->>D: 7. ClearDataWithoutMeta
+    end
+    W->>R: 8. ownership reconciliation result as RunningEvidence
+```
+
+生命周期编号:
+
++ 1: `ClusterMetaOwnership` 由 master metadata/layout 决策，worker 本地只读消费。
++ 2: `LocalDataOwnership` 由 worker object table、local entry、L2/persistence 观测得到。
++ 3: master meta 指向其它 primary 时，本地旧 primary 必须降级或清理。
++ 4: master meta 已清理但本地数据可恢复时，走 metadata recovery。
++ 5: 本地残留无法恢复时，走 `ClearDataWithoutMeta` 或保持不可见。
++ 6: ownership 对账结果进入 `RunningEvidence`，而不是写回 cluster node table/hash ring。
 
 类图如下。
 
