@@ -164,7 +164,7 @@ th { background: #f8fafc; font-size: 12px; }
           </div>
           <div class="card">
             <div class="card-title">Local Observation</div>
-            <p>由单个 client 或 worker 发起 URMA 单边操作时获得的局部观测，例如 ERROR 4、CQE error、wait timeout、Jetty async event。</p>
+            <p>由单个 client 或 worker 发起 URMA 单边操作时获得的局部观测。ERROR 4 是 UB 端口不可用的确定信号；CQE error、wait timeout、Jetty async event 需要按类型分类。</p>
           </div>
           <div class="card">
             <div class="card-title">Admission Result</div>
@@ -291,7 +291,7 @@ sequenceDiagram
     A-->>C: RUNNING + AVAILABLE
     C->>W: Create/MultiCreate RPC, get URMA addr
     C->>U: UrmaWritePayload(W)
-    U--xC: ERROR 4 / CQE error / timeout
+    U--xC: ERROR 4 port unavailable
     C->>A: MarkFailure(W, reason, epoch)
     A-->>C: Write blocked
     C-->>C: return K_OC_DATA_PROVIDER_UB_UNAVAILABLE
@@ -313,8 +313,8 @@ sequenceDiagram
     P->>A: CheckWriteTarget(R)
     A-->>P: R path AVAILABLE
     P->>U: UrmaWritePayload(to R)
-    U--xP: write failed
-    P->>A: MarkFailure(R, provider_write)
+    U--xP: ERROR 4 port unavailable
+    P->>A: MarkFailure(R, ERROR 4)
     P-->>R: K_OC_DATA_PROVIDER_UB_UNAVAILABLE
     R-->>R: Get fail fast or choose another replica
           </div>
@@ -432,7 +432,8 @@ sequenceDiagram
           <div class="mermaid">
 stateDiagram-v2
     [*] --> AVAILABLE
-    AVAILABLE --> UNAVAILABLE: URMA ERROR 4 / CQE error / timeout threshold
+    AVAILABLE --> UNAVAILABLE: ERROR 4 port unavailable
+    AVAILABLE --> UNAVAILABLE: thresholded timeout / reconnect failure
     UNAVAILABLE --> PROBING: cooldown elapsed
     PROBING --> AVAILABLE: probe success
     PROBING --> UNAVAILABLE: probe failed

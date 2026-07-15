@@ -46,7 +46,7 @@ Transport / Local Observation，不是 Cluster Node Table 的全局 DOWN；是�
 | HashRing / Topology | Coordinator，经 Worker-Cluster 暴露 | 决定 meta owner、worker 候选集合、scale/moving/stale route 处理 | 只回答“该问谁”，不证明 UB path 可达 |
 | WorkerServiceMode | worker self-healing 特性本地维护 | 判断 worker 本进程是否能对外服务；非 `RUNNING` 时是更强阻断 | UB probe 成功不能把 `RECOVERING` 推成 `RUNNING` |
 | WorkerUbPathHealth | 当前 client/worker 的 UB 数据面观测 | 判断当前进程是否还应通过 UB 访问目的 worker | 局部、可恢复；不能升级为全局 worker DOWN |
-| Transport observation | Transport / URMA Operator | ERROR 4、timeout、reconnect、fallback、RTT、pool pressure | 需要先分类，再决定是 quarantine、backpressure 还是普通错误 |
+| Transport observation | Transport / URMA Operator | ERROR 4、timeout、reconnect、fallback、RTT、pool pressure | ERROR 4 是 UB 端口不可用的确定信号，直接 quarantine；timeout/reconnect 先按策略确认 |
 
 ### 对象状态：Meta/Layout 与 Data Local
 
@@ -75,7 +75,8 @@ Transport / Local Observation，不是 Cluster Node Table 的全局 DOWN；是�
   通过 RPC 触发对端执行 URMA。它负责发起前准入、选点过滤、消费返回的 URMA 错误并
   快速失败或重选。
 + **URMA Operator 视角**: 真正调用 `UrmaWritePayload` / `UrmaRead` 的一端。它最先
-  知道 ERROR 4、timeout、reconnect 失败等真实原因，负责分类、记录本地 health，并把
+  知道 ERROR 4、timeout、reconnect 失败等真实原因。ERROR 4 表示 UB 端口不可用，
+  可直接记录 `UNAVAILABLE`；timeout/reconnect 失败则按阈值或确认策略处理，并把
   错误传回 Coordinator/Endpoint。
 + **Endpoint 视角**: 被写入/被读取的一端，或将要接收新写入/迁移的 worker。它通过
   RPC status、fallback tracking 或 health publication 学到对端 URMA 失败；未恢复前要
@@ -83,8 +84,9 @@ Transport / Local Observation，不是 Cluster Node Table 的全局 DOWN；是�
 
 关键机制是 **发起 URMA 单边操作的一端先报错，被操作端学习后做 gate**：
 
-+ 发起 `UrmaWritePayload` / `UrmaRead` 的一端最先知道真实失败原因，比如 ERROR 4、
-  timeout、reconnect 失败或 handshake 失败，因此它要快速返回明确错误。
++ 发起 `UrmaWritePayload` / `UrmaRead` 的一端最先知道真实失败原因。ERROR 4 是
+  端口不可用的硬信号，需要快速返回明确错误并立刻标记该 UB path 不可用；timeout、
+  reconnect 失败或 handshake 失败则进入对应的确认/阈值策略。
 + 被单边操作的一端不能天然知道对端发生了什么，需要通过当前 RPC response/status、
   fallback tracking 或 worker health publication 学到这个错误。
 + 一旦知道对应 UB path 还没恢复，被操作端要避免继续接受写入或迁移 target 流量。
@@ -644,8 +646,8 @@ PR1277 相关边界:
 + `enable_transport_fallback=false` 仍为默认；若现有 fallback flag 已存在，则新增
   `ub_fallback_max_payload_size=1MiB` 或复用现有 size cap，但默认不得无限 fallback。
 + `ub_quarantine_cooldown_ms`、`ub_recovery_probe_success_count`、
-  `ub_quarantine_failure_threshold` 控制隔离与恢复。ERROR 4 可一击隔离，
-  timeout/reconnect 可按阈值隔离。
+  `ub_quarantine_failure_threshold` 控制隔离与恢复。ERROR 4 是 UB 端口不可用的
+  确定信号，一击隔离；timeout/reconnect 可按阈值隔离。
 + 第一版状态至少在 worker 进程内共享；cluster-wide 扩散可通过 resource report、
   master/resource view 或轻量健康广播作为后续增强。
 
@@ -784,7 +786,9 @@ flowchart TD
     B -->|allowed| C[RPC or local URMA operation]
     C --> D{Actual URMA Operator}
     D -->|success| E[Commit / response success]
-    D -->|ERROR 4 timeout reconnect failed| G[Classify and MarkUbFailure]
+    D -->|ERROR 4 port unavailable| G[MarkUbFailure immediately]
+    D -->|timeout reconnect failed| Q[Confirm by threshold]
+    Q --> G
     G --> H[WorkerUbPathHealth UNAVAILABLE]
     H --> I[Block new writes and migration target]
     H --> J[Read fail-fast if no healthy source]
@@ -797,9 +801,11 @@ flowchart TD
 
 ### Story 1: Client Put/Set UB 写失败后阻断目的 worker
 
-注入 client->worker `UrmaWritePayload` 返回 ERROR 4 或 `K_URMA_WAIT_TIMEOUT`。
-首次请求返回明确 URMA 错误；后续同 target 写入在 admission 阶段返回
-`K_URMA_WORKER_UNAVAILABLE` 或重选健康 worker，默认不附带 TCP payload。
+注入 client->worker `UrmaWritePayload` 返回 ERROR 4。首次请求返回明确 URMA
+端口不可用错误，并立即把该 target 的 UB path 标记为 `UNAVAILABLE`；后续同
+target 写入在 admission 阶段返回 `K_URMA_WORKER_UNAVAILABLE` 或重选健康
+worker，默认不附带 TCP payload。`K_URMA_WAIT_TIMEOUT` 另走连续失败/低成功率
+阈值策略。
 
 ### Story 2: ShmOnly Worker UB 异常不提交集群不可读对象
 

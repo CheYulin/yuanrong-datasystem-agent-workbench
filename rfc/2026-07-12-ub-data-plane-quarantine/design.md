@@ -130,8 +130,10 @@ AVAILABLE -> UNAVAILABLE -> PROBING -> AVAILABLE
 
 Transition guidance:
 
-- `AVAILABLE -> UNAVAILABLE`: strong UB failure for the destination worker,
-  such as ERROR 4, failed reconnect, repeated timeout, or failed handshake.
+- `AVAILABLE -> UNAVAILABLE`: `ERROR 4` is the clear URMA port-unavailable
+  signal and should mark the destination worker unavailable immediately. Other
+  failures, such as failed reconnect, repeated timeout, or failed handshake,
+  can still use threshold/confirmation policy.
 - `UNAVAILABLE -> PROBING`: cooldown expires.
 - `PROBING -> AVAILABLE`: consecutive recovery probes succeed.
 - `PROBING -> UNAVAILABLE`: probe fails, with exponential backoff.
@@ -143,7 +145,8 @@ membership errors should remain in the existing membership path.
 
 Candidate UB signals:
 
-- `K_URMA_ERROR`
+- `K_URMA_ERROR`, especially provider/CQE `ERROR 4` that explicitly means the
+  UB port is unavailable
 - `K_URMA_WAIT_TIMEOUT`
 - `K_URMA_CONNECT_FAILED`
 - UB handshake/finalize failures
@@ -286,9 +289,9 @@ Classification guidance with PR1277:
 
 ### 7.3 UbFailureClassifier
 
-The sender side already knows why UB failed. For example, a completion error
-whose provider status is `ERROR 4` generally means the UB port is unavailable.
-That error is serious enough to stop normal traffic quickly, but it is not
+The sender side already knows why UB failed. A completion/provider error whose
+status is `ERROR 4` is treated as the explicit UB port-unavailable signal. That
+error is serious enough to stop normal traffic immediately, but it is not
 permanent: the port may recover and should be tested by probe.
 
 Classifier output:
@@ -297,15 +300,15 @@ Classifier output:
 |--------|-----------------|--------|
 | `SUCCESS` | UB operation completed | Count as probe success or clear local failure streak. |
 | `CONNECT_OR_PATH_FAILURE` | `K_URMA_NEED_CONNECT` after reconnect fails, handshake/finalize failure, connect failed | Mark the destination worker UB path unavailable for this observer. |
-| `PORT_OR_PATH_UNAVAILABLE` | CQE/provider status such as `ERROR 4`, `K_URMA_WAIT_TIMEOUT`, repeated no-progress write/read | Mark the destination worker UB path unavailable quickly. |
+| `PORT_OR_PATH_UNAVAILABLE` | CQE/provider status `ERROR 4`; or thresholded `K_URMA_WAIT_TIMEOUT` / repeated no-progress write/read | Mark the destination worker UB path unavailable. `ERROR 4` is immediate; timeout/no-progress is thresholded. |
 | `LOCAL_UB_UNAVAILABLE` | local URMA disabled unexpectedly, local device/port error, warmup to multiple peers fails | Mark local worker UB unavailable; reject ShmOnly writes and publish local self-health if available. |
 | `NON_UB_FAILURE` | TCP/RPC unavailable, etcd disconnect, auth, object not found, no space | Do not feed UB quarantine. |
 
 Minimum threshold recommendation:
 
 - `ERROR 4` / port unavailable: mark the destination worker UB path unavailable
-  immediately or after one confirm failure. Continuing to send real writes will
-  only create visible success-rate loss.
+  immediately. Continuing to send real writes will only create visible
+  success-rate loss.
 - `K_URMA_NEED_CONNECT`: allow one reset/reconnect attempt first; quarantine
   only if reconnect fails or repeats for the same destination worker.
 - `K_URMA_WAIT_TIMEOUT`: quarantine after consecutive timeout or low success
