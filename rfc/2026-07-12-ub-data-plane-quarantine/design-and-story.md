@@ -302,6 +302,59 @@ sequenceDiagram
 + fallback 关闭时，Get 返回失败而不是自动带 TCP payload 成功。
 + fallback 打开时，只有 payload 不超过 1 MiB 才能成功；fallback 计数、失败码、目的端信息可观测。
 
+### 场景 3.1: Client direct read 直接访问 data worker
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as DirectReadFlow
+    participant M as Meta Worker/Master
+    participant A as TransportPathAdmission
+    participant T as ClientRemoteDataTransport
+    participant W as Data Worker Provider
+    participant H as WorkerUbPathHealth
+    C->>F: 1. Get / Read enters direct read
+    F->>M: 2. meta phase via ClientQueryMetaTransport
+    M-->>F: 3. query meta with data worker W
+    F->>A: 4. CheckReadSource(W)
+    alt W data path unavailable for this client
+        A-->>F: 5. K_URMA_DATA_WORKER_UNAVAILABLE
+        F-->>C: 6. fail fast, no hidden TCP fallback
+    else source allowed
+        F->>T: 5. ObjectReadDataFlow data phase
+        T->>W: 6. GetObjectRemote/BatchGetObjectRemote(client URMA info)
+        W->>C: 7. UrmaWritePayload(data -> client buffer)
+        alt W returns explicit URMA ERROR 4
+            W-->>T: 8a. response/status carries UB failure
+            T->>H: 9a. ReportOutcome(peer=W, op=client_direct_read)
+            T-->>F: 10a. mapped data_worker_unavailable
+        else RPC timeout/failure before explicit status
+            T-->>F: 8b. RPC/peer suspect only
+        else success
+            W-->>T: 8c. DATA_ALREADY_TRANSFERRED or payload
+            T-->>F: 9c. append payload/buffer
+        end
+    end
+```
+
+编号含义:
+
++ 1-3: direct read 只把 client 的数据面从 local worker gateway 改成直接访问 data
+  worker；数据 Provider 仍然是 worker。
++ 4-6: 进入 `ObjectReadDataFlow` 的 data phase 前先过滤 data worker。这个 hook
+  可以放在 `ClientRemoteDataTransport::ReadData` 和 `CommitRemoteFetches` 分组前，
+  不需要重写 meta phase。
++ 7-10: worker provider 是 URMA operator，只有 provider 返回的显式 URMA status
+  才能作为强健康信号。client 看到 RPC timeout/failure 时只做快速失败或走现有
+  fallback/cutback 语义，不能把它改写为 ERROR 4。
+
+测试关注:
+
++ `ClientRemoteDataTransport::ReadData` 在 data worker 已隔离时直接返回
+  `K_URMA_DATA_WORKER_UNAVAILABLE`。
++ `BatchGetObjectRemote` 按 data worker 分组前过滤隔离 source，避免 batch 内重复撞同一坏 worker。
++ `DirectReadFlow` 的 cutback to local worker 与 UB admission 独立；local gateway 恢复不自动清除 data worker UB health。
+
 ### 场景 4: Worker A 从 Worker B remote get，隔离坏 source 或坏 destination
 
 ```mermaid
@@ -600,6 +653,20 @@ sequenceDiagram
 一次 UB ERROR 4、timeout 或 reconnect 失败之后，业务可能通过 TCP payload
 fallback 成功，后续写入/迁移仍继续选择同一个坏 worker，形成持续静默降级。
 
+#### 现有访问路径校准
+
+基于 `master-latest` 与 `feature/client-direct-read-flow` 的 CodeGraph/源码校验，
+现有 client-worker、worker-worker 访问要拆成几类关键流:
+
+| 路径 | 当前代码事实 | 隔离设计含义 |
+| ---- | ---- | ---- |
+| Client 连接 worker | `ObjectClientImpl::InitClientWorkerConnectAt` 根据本地/远端创建 `ClientWorkerLocalApi` 或 `ClientWorkerRemoteApi`，并注册 `ConfigureUrmaDataPlaneFailureCallback`。direct read 分支在 `ObjectClientImpl::AcquireDirectReadSession` 复用 `DirectReadRpcAdapter`、`ClientHashRingSource`、`ClientUbTransportRegistry`。 | health key 必须按真实 worker address，而不是 `LOCAL_WORKER` slot；现有 data-plane switch/cutback 只负责切 local gateway，不能替代 UB path admission。 |
+| Client -> Worker Put/Set | `ClientWorkerBaseApi::SendBufferViaUb` / `SendBufferViaUbFromPool` 是 client 本端调用 `UrmaWritePayload` 的位置；`ClientWorkerRemoteApi::Publish/MultiPublish` 会在未完成 UB memory copy 时追加 TCP payload。 | client 是 coordinator + URMA operator，ERROR 4 可直接标记 target worker；Publish 前后要加 fallback policy，默认不通过 TCP payload 静默成功。 |
+| 传统 Client Get | `ClientWorkerRemoteApi::Get` 在 client 侧准备 UB receive buffer 并发 RPC，worker provider 写回；`ClientWorkerLocalApi::Get` 走 embedded worker service。 | client 不是 data provider；worker 才是 URMA operator。client 只能消费 `rsp.last_rc()` 的显式 URMA status 或 RPC failure，不能把 RPC timeout 推导成 ERROR 4。 |
+| 新 Client direct read | `DirectReadFlow::Get` 先走 `ClientHashRingSource` + `ClientQueryMetaTransport` 查 meta，再通过 `ObjectReadDataFlow` + `ClientRemoteDataTransport` 直接对 data worker 调 `GetObjectRemote/BatchGetObjectRemote`。`ClientUbTransportRegistry` 复用 worker-worker transport handshake。 | direct read 绕过本地 worker 代理数据面，但没有绕过 worker provider。client 在 data phase 前要 `CheckReadSource(dataWorker)`；provider 返回显式 UB 错误后 client 将该 data worker 标成当前 client 视角不可用。 |
+| Worker -> Worker remote get | `WorkerOcServiceGetImpl::PullObjectDataFromRemoteWorker` 构造 `GetObjectRemoteReqPb`，source worker 的 `WorkerWorkerOCServiceImpl::WriteViaFastTransport` 调 `UrmaWritePayload(req.urma_info())` 写回 requester。 | requester 是 coordinator，source worker 是 provider/operator。requester 发 RPC 前过滤 source，source 失败后必须显式返回 URMA status；RPC timeout 只算 RPC/peer suspect。 |
+| Shared read data flow | direct read 分支新增 `ObjectReadRemoteDataClient` / `ObjectReadDataFlow`，通过 transport 注入远端取数能力，`ClientRemoteDataTransport` 实现 queue/commit/fetch。 | 最小改动可在 `ObjectReadRemoteDataClient` 的 transport 实现中接入 admission/ReportOutcome，避免为 direct read 另起一套读流程。 |
+
 ### 方案设计
 
 #### 0. 最小化修改原则
@@ -782,6 +849,7 @@ PR1277 相关边界:
 | Worker 拒绝自身 UB 异常下的新写 | `WorkerOcServiceCreateImpl::CreateImpl/MultiCreateImpl` 返回 URMA addr 前做 self-health gate | 不改 Publish 元数据提交流程 |
 | Get/remote get provider 写回失败 | `GetRequest::UbWriteHelper`、`WorkerWorkerOCServiceImpl::WriteViaFastTransport` 后记录 failure，`HandlePayloadFallback` 加 policy | 不重写 GetRequest 生命周期 |
 | 读 source 过滤 | `PullObjectDataFromRemoteWorker` / batch request 构造前过滤 location | 不改 master metadata 选择算法 |
+| Client direct read 过滤 | `DirectReadFlow::ExecuteDataPhase` / `ClientRemoteDataTransport::ReadData` / `CommitRemoteFetches` 在 data worker 分组前查 `CheckReadSource`，显式 UB status 后 `ReportOutcome` | 不重写 `ObjectReadDataFlow`，不改变 meta phase |
 | Migration target 过滤 | `NodeSelector::SelectNode`、`DataMigrator::ConnectAndCreateRemoteApi` | 不改迁移协议 |
 | Rebalance stale target 拦截 | `RebalanceExecutor::ValidateTask/MigrateToTarget` 执行前二次检查 | 不要求 master 第一版感知 UB health |
 | Recovery | 后台/lazy probe 复用 handshake/warmup | 不用真实业务写请求探测恢复 |

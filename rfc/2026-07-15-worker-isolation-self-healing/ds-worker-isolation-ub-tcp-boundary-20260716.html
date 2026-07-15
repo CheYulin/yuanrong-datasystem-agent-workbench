@@ -458,6 +458,11 @@ sequenceDiagram
             <tbody>
               <tr><td><code>ClientWorkerBaseApi::SendBufferViaUb</code><br><span class="src">client_worker_base_api.cpp:289-324</span></td><td>Client 端准备 UB handle，单次或 pipeline 写入后调用 <code>RecordUrmaDataPlaneResult(rc.IsOk())</code>。</td><td>在返回错误前分类 URMA 错误并 <code>MarkFailure(targetWorker)</code>；下一次 put 先走准入。</td></tr>
               <tr><td><code>ClientWorkerBaseApi::SendBufferViaUbFromPool</code><br><span class="src">client_worker_base_api.cpp:326-355</span></td><td>Client 从池化 buffer 直接调用 <code>UrmaWritePayload</code>，成功才设置 <code>ubDataSentByMemoryCopy</code>。</td><td>这里是 client->worker UB 写最直接的失败观测点。</td></tr>
+              <tr><td><code>ObjectClientImpl::InitClientWorkerConnectAt</code><br><span class="src">object_client_impl.cpp:500-529</span></td><td>根据本地/远端创建 <code>ClientWorkerLocalApi</code> 或 <code>ClientWorkerRemoteApi</code>，并注册 URMA data-plane failure callback。</td><td>健康 key 必须是真实 worker address，不是 <code>LOCAL_WORKER</code> slot；现有切换/恢复逻辑只作为连接切流，不替代 UB admission。</td></tr>
+              <tr><td><code>DirectReadFlow::Get</code><br><span class="src">direct_read_flow.cpp:132-215</span></td><td>Client direct read 先通过 <code>ClientHashRingSource</code>/<code>ClientQueryMetaTransport</code> 查询 meta，再用 <code>ObjectReadDataFlow</code> 进入 data phase。</td><td>direct read 绕过 local worker 数据代理，但 data provider 仍是 worker；data phase 前必须检查 data worker health。</td></tr>
+              <tr><td><code>ClientRemoteDataTransport::ReadData</code><br><span class="src">direct_read_rpc_adapter.cpp:863-897</span></td><td>按 data worker 调 <code>GetObjectRemoteUb</code>，若 UB 不支持才 fallback TCP；非 <code>K_NOT_SUPPORTED</code> 错误映射为 <code>data_worker_unavailable</code>。</td><td>在调用 data worker 前加 <code>CheckReadSource(dataWorker)</code>；显式 URMA status 后 <code>ReportOutcome(peer=dataWorker)</code>。</td></tr>
+              <tr><td><code>ClientRemoteDataTransport::CommitRemoteFetches</code><br><span class="src">direct_read_rpc_adapter.cpp:792-820</span></td><td>Batch direct read 按 <code>queryMeta.address()</code> 分组，再对每个 data worker 提交 batch。</td><td>分组后、发 batch 前过滤隔离 data worker，避免 batch 内重复撞同一坏 source。</td></tr>
+              <tr><td><code>ClientUbTransportRegistry</code><br><span class="src">client_ub_transport_registry.cpp:45-89</span></td><td>Client direct read 复用 worker-worker transport handshake，并在 <code>K_URMA_NEED_CONNECT</code> 时尝试 reconnect。</td><td>reconnect 失败是 connect/path 信号；只有 provider 返回明确 URMA ERROR 4 才按 ERROR 4 隔离。</td></tr>
               <tr><td><code>PrepareGetRequestHelper</code><br><span class="src">worker_oc_service_get_impl.cpp:1035-1080</span></td><td>Requester 分配本地内存，并把自己的 URMA info 填进 RPC，请 provider 写回。</td><td>请求前可检查 provider source 是否处于可读/可写回状态；失败时避免长等待。</td></tr>
               <tr><td><code>PullObjectDataFromRemoteWorker</code><br><span class="src">worker_oc_service_get_impl.cpp:1224-1348</span></td><td>Requester 创建 remote worker API，发送 <code>GetObjectRemote</code>，当前会对若干 RPC/URMA timeout 做 retry。</td><td>收到 provider 返回的显式 UB 不可用错误后不要静默 retry；RPC timeout/failure 只作为 provider/RPC suspect，不直接推导本端 ERROR 4。</td></tr>
               <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code><br><span class="src">worker_worker_oc_service_impl.cpp:590-638</span></td><td>Provider 端调用 <code>UrmaWritePayload(req.urma_info())</code>，失败时目前受 <code>FLAGS_enable_transport_fallback</code> 控制。</td><td>Provider 作为 URMA Operator 要把 requester 的 UB 写失败显式返回；fallback 默认关闭，小对象 opt-in。</td></tr>
@@ -470,6 +475,41 @@ sequenceDiagram
               <tr><td><code>UrmaConnection::ReCreateJetty</code><br><span class="src">urma_resource.cpp:418-460</span></td><td>失败 Jetty 会被 MarkInvalid 并重建，避免错误地 invalid 新 Jetty。</td><td>和 PR 1277 的发送端 Jetty 池化/隔离思路一致：恢复局部资源，但准入状态独立闭环。</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="diagram-card wide">
+          <div class="diagram-title">Client direct read 现有流程与 UB admission 接入点</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant F as DirectReadFlow
+    participant M as Meta Worker/Master
+    participant A as TransportPathAdmission
+    participant T as ClientRemoteDataTransport
+    participant W as Data Worker Provider
+    participant H as WorkerUbPathHealth
+    C->>F: Get / Read enters direct read
+    F->>M: meta phase via ClientQueryMetaTransport
+    M-->>F: query meta returns data worker W
+    F->>A: CheckReadSource(W)
+    alt W data path unavailable
+      A-->>F: K_URMA_DATA_WORKER_UNAVAILABLE
+      F-->>C: fail fast
+    else source allowed
+      F->>T: ObjectReadDataFlow data phase
+      T->>W: GetObjectRemote / BatchGetObjectRemote(client URMA info)
+      W->>C: UrmaWritePayload(data -> client buffer)
+      alt explicit URMA ERROR 4
+        W-->>T: response/status carries UB failure
+        T->>H: ReportOutcome(peer=W, op=client_direct_read)
+        T-->>F: data_worker_unavailable
+      else RPC timeout before status
+        T-->>F: RPC/peer suspect only
+      else success
+        W-->>T: DATA_ALREADY_TRANSFERRED or payload
+        T-->>F: append data
+      end
+    end
+          </div>
         </div>
       </section>
 

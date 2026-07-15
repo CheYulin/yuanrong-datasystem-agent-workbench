@@ -232,6 +232,11 @@ Important flow ownership:
   client-to-worker UB write.
 - Worker-client Get: client is coordinator, but worker is the URMA operator
   because the worker writes into client memory.
+- Client direct read: client skips the local worker data gateway and calls the
+  data worker through `DirectReadFlow` / `ClientRemoteDataTransport`, but the
+  data worker is still the provider and URMA operator. Admission must therefore
+  run before the direct-read data phase selects/calls a data worker, and explicit
+  provider URMA status must be consumed by the client transport.
 - Worker-worker remote get: requester worker is coordinator, source worker is
   URMA operator/provider because it writes into requester memory. There is only
   provider one-sided write on this data path.
@@ -509,6 +514,10 @@ Call-site rules:
   CLIENT_GET_WRITEBACK/WORKER_REMOTE_GET_WRITEBACK)` before `UrmaWritePayload`.
 - Worker remote get calls `CheckReadSource(sourceWorker)` before building
   `GetObjectRemoteReqPb`.
+- Client direct read calls `CheckReadSource(dataWorker)` inside the
+  `ClientRemoteDataTransport` / shared `ObjectReadDataFlow` data phase before
+  issuing `GetObjectRemote` or `BatchGetObjectRemote`. The meta phase and hash
+  ring refresh stay unchanged.
 - Migration/rebalance calls `CheckMigrationTarget(targetWorker)` before
   selecting/executing a target.
 - Fallback success does not clear `WorkerUbPathHealth`; only probe success does.
