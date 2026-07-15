@@ -134,6 +134,15 @@ completion、lane release/retire/recreate。PR1277 引入发送端 Jetty 池化�
 | Direct migration read source | source/driver worker | target worker | target 返回 failedIds/status，source/driver 避免继续选同一路径 |
 | Recovery probe | probe provider | quarantined peer | probe 只传小数据，不承载业务对象；失败只更新健康状态 |
 
+Provider 概念必须固定：**数据 Provider 只能是 worker**。Client 可以是业务
+Coordinator/requester，也可以是 worker 写回数据的 UB receiver，但不提供 object data。
+因此 client 和 worker 都要实现隔离事项，只是职责不同:
+
+| 进程 | Coordinator 场景 | URMA Operator 场景 | 数据 Provider | 必做事项 |
+| ---- | ---- | ---- | ---- | ---- |
+| Client | Put/Set/Get 业务请求；消费 worker 返回的 Get/写回状态 | Client -> Worker Put/Set 的 UB write | 否 | 写前检查 target，读前消费显式 worker URMA status；本端 Put ERROR 4 直接标记 target；RPC timeout/failure 只按 RPC/peer suspect 处理 |
+| Worker | worker-worker remote get、migration、rebalance task 执行 | worker->client Get 写回、worker->worker remote get 写回、migration direct read/write | 是 | provider 写回前做准入；URMA Write ERROR 4 后返回显式状态；remote get 过滤 source；migration/rebalance 过滤 target |
+
 URMA Operator 侧必须避免的静默故障:
 
 + UB write/read 失败后继续为同一 receiver 准备 TCP payload，导致业务成功但 UB
@@ -155,11 +164,11 @@ URMA Operator 侧落点:
 
 数据发起端侧的核心策略是 **do not select or advertise an unhealthy UB path**。
 
-| 发起端场景 | 发起端是谁 | 目的端/Provider | 发起端侧处理 |
+| 发起端场景 | 发起端是谁 | 目的端/Worker Provider | 发起端侧处理 |
 | ---- | ---- | ---- | ---- |
 | Client Put/Set | client | target worker | client 写前检查 target worker UB path；worker create/admission 也做本地自检 |
 | Client Get | client | data worker | client/worker 读路径过滤 UB path unavailable 的唯一 source，无法替代时 fail fast |
-| Worker remote get | requester worker | source worker/provider | requester 构造 request 前过滤 source；source provider 负责单边写回 |
+| Worker remote get | requester worker | source worker/provider | requester 构造 request 前过滤 source；source worker provider 负责单边写回 |
 | Migration | source/driver worker | target worker | worker-only 流程；NodeSelector/ConnectAndCreateRemoteApi 过滤 target |
 | Rebalance | source worker executing task | target worker | worker-only 流程；执行 task 前二次检查 target UB path |
 

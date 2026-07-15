@@ -175,7 +175,7 @@ th { background: #f8fafc; font-size: 12px; }
         <div class="flow">
           <div><strong>Meta/Layout</strong>对象位置、primary、slot、迁移任务。</div>
           <div><strong>Data Local</strong>某 Worker 本地内存/共享内存/SSD 中真实数据。</div>
-          <div><strong>Provider</strong>持有数据并被要求把数据写到 requester 的一端。</div>
+          <div><strong>Worker Provider</strong>持有 object data 并被要求把数据写到 requester 的 worker。</div>
           <div><strong>Requester</strong>发起读写/迁移请求的一端，可能是 client 或 worker。</div>
           <div><strong>Transport</strong>URMA/UCP/TCP 的实际数据传输路径。</div>
         </div>
@@ -273,6 +273,16 @@ classDiagram
         </div>
         <div class="note warn">
           命名建议：不要用过重的 <code>DataPlaneHealthManager</code> 语义。更贴切的是 <code>UbPathObservationCache</code> + <code>TransportPathAdmission</code>：前者记录局部观测，后者做组合准入。
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption>Client / Worker 双端职责矩阵</caption>
+            <thead><tr><th>进程</th><th>Coordinator 场景</th><th>URMA Operator 场景</th><th>数据 Provider</th><th>必做事项</th></tr></thead>
+            <tbody>
+              <tr><td>Client</td><td>Put/Set/Get 业务请求；消费 worker 返回的 Get/写回状态</td><td>Client -> Worker Put/Set 的 UB write</td><td>否</td><td>写前检查 target，读前消费显式 worker URMA status；本端 Put ERROR 4 直接标记 target；RPC timeout/failure 只按 RPC/peer suspect 处理</td></tr>
+              <tr><td>Worker</td><td>worker-worker remote get、migration、rebalance task 执行</td><td>worker->client Get 写回、worker->worker remote get 写回、migration direct read/write</td><td>是</td><td>provider 写回前做准入；URMA Write ERROR 4 后返回显式状态；remote get 过滤 source；migration/rebalance 过滤 target</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -456,6 +466,7 @@ stateDiagram-v2
             <tbody>
               <tr><td>ShmOnly Worker UB 故障</td><td>Client 得到 UB 异常，其他 Worker 无法读到时直接失败；不静默降成功率。</td><td>错误码、metric、日志包含 target worker、reason、epoch。</td></tr>
               <tr><td>Client 写远端 Worker，远端 UB 不可写</td><td>首次失败后本 client 对该 Worker 写入准入拒绝，恢复前不继续写。</td><td>后续请求 fail fast；无透明 TCP fallback。</td></tr>
+              <tr><td>Client Get 接收 Worker Provider 写回</td><td>Client 消费 worker 显式 URMA status；RPC timeout/failure 只按 RPC/peer suspect 处理。</td><td>Client 侧日志区分 explicit ERROR 4 和 RPC timeout。</td></tr>
               <tr><td>Worker remote get provider 写 requester 失败</td><td>Provider 明确返回 UB unavailable；Requester 不长时间 retry。</td><td>RPC response error 可区分 transport/data-not-found。</td></tr>
               <tr><td>Rebalance 目标 Worker UB 故障</td><td>任务不向该目标迁移；可失败或重选目标。</td><td>rebalance task 记录 target rejected。</td></tr>
               <tr><td>UB 恢复</td><td>probe 成功后重新开放写入/迁移；TCP membership 不被 UB 单独修改。</td><td>状态 UNAVAILABLE -> PROBING -> AVAILABLE，后续写成功。</td></tr>

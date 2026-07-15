@@ -186,6 +186,16 @@ No new business RPC is required for the first cut. Existing write/get/migration
 RPCs return explicit URMA status codes, and existing resource/cluster reporting
 can be extended later if cluster-wide propagation is required.
 
+Data provider is always a worker. A client can be the coordinator/requester and
+can be the receiver of a worker-side URMA write, but it is not a data provider.
+Therefore both client and worker need the admission/observation logic, with
+different responsibilities:
+
+| Process | Can be Coordinator | Can be URMA Operator | Can be data Provider | Required handling |
+|---------|--------------------|----------------------|----------------------|-------------------|
+| Client | Yes: Put/Set/Get business request. | Yes: client-to-worker Put/Set UB write. | No. | Check target/source before request, classify local Put ERROR 4, consume explicit worker URMA status on Get, treat RPC timeout as RPC/peer-suspect only. |
+| Worker | Yes: worker-worker remote get, migration, rebalance task execution. | Yes: worker-to-client Get writeback, worker-to-worker remote get writeback, migration direct read/write path. | Yes: object data is provided by worker only. | Gate provider writeback, return explicit URMA status to requester, filter sources/targets, block migration/rebalance target when UB path is unavailable. |
+
 Module ownership is split by three data-flow roles. This is the important
 abstraction because some paths directly execute URMA locally, while other paths
 only send an RPC that asks the peer to execute URMA.
