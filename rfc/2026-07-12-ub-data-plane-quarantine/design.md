@@ -192,9 +192,9 @@ only send an RPC that asks the peer to execute URMA.
 
 | Role | Who owns the decision | What it does |
 |------|------------------------|--------------|
-| Coordinator | The client or worker that starts a business action or sends an RPC that may cause URMA somewhere else. | Checks `WorkerUbPathHealth` before selecting source/target, sends RPC, consumes returned URMA status, and fast-fails or reselects. |
+| Coordinator | The client or worker that starts a business action or sends an RPC that may cause URMA somewhere else. | Checks `WorkerUbPathHealth` before selecting source/target, sends RPC, consumes returned URMA status, and fast-fails or reselects. If the RPC itself times out or fails before a URMA status is returned, treat it as an RPC/peer-suspect signal, not as direct proof of local URMA port failure. |
 | URMA Operator | The process/thread that actually calls `UrmaWritePayload` or `UrmaRead`. | Knows the concrete URMA failure first, classifies it, updates local health, and returns the error to the coordinator/endpoint. |
-| Endpoint | The process whose memory or worker data is being written/read, or the worker that would receive new writes/migration. | Learns remote URMA failures through RPC/status/health publication, then gates new writes/migration until recovery. |
+| Endpoint | The process whose memory or worker data is being written/read, or the worker that would receive new writes/migration. | Does not observe a remote URMA Write completion directly. It only learns through explicit RPC response/status, fallback tracking, or later health publication. RPC timeout/failure is an indirect signal and must not be re-labeled as `ERROR 4`. |
 | Recovery probe owner | Worker first, client lazily if needed. | Tests an `UNAVAILABLE` worker path after cooldown and marks it `AVAILABLE` only after probe success. |
 
 The key signal flow is **sender reports, peer gates**:
@@ -205,9 +205,15 @@ The key signal flow is **sender reports, peer gates**:
 2. The peer that is being written to or read from cannot infer the same detail
    by itself. It learns through the current RPC response/status, fallback
    tracking, or later worker health publication.
-3. After learning that its UB path is not recovered, that peer must avoid
-   accepting new writes and migration target traffic.
-4. Reads may still be attempted, but they must use the health view to fail fast
+3. If the RPC returns an explicit URMA status such as `ERROR 4`, the coordinator
+   can treat it as a strong UB-path signal from the actual operator. If the RPC
+   times out or fails before returning that status, the coordinator should fail
+   the current operation quickly and reselect/retry by existing RPC/TCP policy,
+   but should not mark the receive endpoint as `ERROR 4` by inference.
+4. After learning from an explicit operator report that its UB path is not
+   recovered, that peer must avoid accepting new writes and migration target
+   traffic.
+5. Reads may still be attempted, but they must use the health view to fail fast
    when the object data is only on an unavailable worker.
 
 Important flow ownership:
@@ -500,10 +506,16 @@ Feedback requirement:
 
 - Source worker, as the one-sided UB sender/provider, knows the concrete send
   failure first and returns it through `GetObjectRemoteRspPb` or stream status.
-- Requester learns that source-to-requester UB failed. If its own receive path
-  is not recovered, it should avoid issuing more remote get requests that
-  advertise the same broken receive memory and should fail fast when no
-  alternate source exists.
+- Requester learns that source-to-requester UB failed only when the source
+  returns an explicit URMA operator result, for example `ERROR 4`.
+- If the requester only sees `GetObjectRemote` RPC timeout/failure, it should
+  classify that as provider/RPC-suspect, fail fast or choose another source, and
+  avoid silently retrying the same path. It should not infer that its own receive
+  UB port produced `ERROR 4`.
+- After an explicit operator report says its receive path is unavailable, the
+  requester should avoid issuing more remote get requests that advertise the
+  same broken receive memory and should fail fast when no alternate source
+  exists.
 
 ### 8.4 Migration and Rebalance
 

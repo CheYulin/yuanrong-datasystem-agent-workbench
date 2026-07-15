@@ -187,8 +187,8 @@ th { background: #f8fafc; font-size: 12px; }
             <thead><tr><th>场景</th><th>知道故障的一端</th><th>应该阻断什么</th><th>不应该做什么</th></tr></thead>
             <tbody>
               <tr><td>Client -> Worker Put UB 写失败</td><td>Client 发起 URMA write，能拿到错误</td><td>本 client 对该 Worker 的后续 UB 写入；返回明确失败</td><td>默认透明切 TCP；直接下结论 Worker 全局 DOWN</td></tr>
-              <tr><td>Worker Provider -> Client 写回失败</td><td>Provider worker 发起 URMA write</td><td>Provider 返回对方 UB 不可写错误；Client 标记该读取失败</td><td>把对象当作不存在；让 Get 长时间重试</td></tr>
-              <tr><td>Worker Provider -> Worker 写回失败</td><td>Provider worker 发起 URMA write</td><td>Provider 标记 requester 的 UB 路径不可用；Requester 快速失败或换源</td><td>继续向同一不可达 Worker 迁移或写入</td></tr>
+              <tr><td>Worker Provider -> Client 写回失败</td><td>Provider worker 发起 URMA write，只有 Provider 直接看到 completion/error</td><td>Provider 通过 RPC response/status 返回显式 URMA 错误；Client 快速失败或换源</td><td>把 RPC timeout 直接伪装成 Client 本端收到 ERROR 4；把对象当作不存在</td></tr>
+              <tr><td>Worker Provider -> Worker 写回失败</td><td>Provider worker 发起 URMA write，Requester 只通过自己发起的 RPC 结果间接感知</td><td>显式 ERROR 4 返回时，Requester 才标记自身 receive path 不可用；RPC timeout/failure 只按 provider/RPC suspect 处理</td><td>继续向同一不可达 Worker 迁移或写入；把弱 RPC 信号升级成 UB port 硬故障</td></tr>
               <tr><td>Migration/Rebalance 目标 UB 故障</td><td>源 Worker 或迁移执行端</td><td>目标准入拒绝，任务失败或重选目标</td><td>把数据迁移到无法接收 UB 写的 Worker</td></tr>
               <tr><td>TCP/etcd 断链</td><td>Worker 本地 keepalive 与集群事件</td><td>服务级隔离、自愈、metadata reconciliation</td><td>由 UB 局部观测直接驱动 ring 变更</td></tr>
             </tbody>
@@ -260,7 +260,7 @@ classDiagram
           </div>
           <div class="card">
             <div class="card-title">数据 Provider</div>
-            <p>Provider 对外提供数据，并常常根据 RPC 里的 URMA info 写回对端。Provider 失败后要把“对端 UB 不可写”反馈给 requester，避免 requester 继续等待或静默重试。</p>
+            <p>Provider 对外提供数据，并常常根据 RPC 里的 URMA info 写回对端。URMA Write 的真实 completion/error 只在 Provider 侧出现；Provider 失败后要把“对端 UB 不可写”的显式 URMA 状态反馈给 requester，避免 requester 只能靠 RPC 超时猜测。</p>
           </div>
           <div class="card">
             <div class="card-title">服务级状态</div>
@@ -300,7 +300,7 @@ sequenceDiagram
         </div>
         <h3 id="flow-remote-get">4.2 Worker remote get：Provider 按 RPC 写回 requester</h3>
         <div class="diagram">
-          <div class="diagram-title">Provider 端发起 URMA write，Requester 端快速得知失败</div>
+          <div class="diagram-title">Provider 端发起 URMA write；Requester 只通过 RPC 结果间接感知</div>
           <div class="mermaid">
 sequenceDiagram
     participant R as Requester Worker
@@ -313,10 +313,15 @@ sequenceDiagram
     P->>A: CheckWriteTarget(R)
     A-->>P: R path AVAILABLE
     P->>U: UrmaWritePayload(to R)
-    U--xP: ERROR 4 port unavailable
-    P->>A: MarkFailure(R, ERROR 4)
-    P-->>R: K_OC_DATA_PROVIDER_UB_UNAVAILABLE
-    R-->>R: Get fail fast or choose another replica
+    alt Provider observes ERROR 4
+      U--xP: ERROR 4 port unavailable
+      P->>A: MarkFailure(R, ERROR 4)
+      P-->>R: explicit K_OC_DATA_PROVIDER_UB_UNAVAILABLE
+      R-->>R: mark receive path unavailable, fail fast or choose replica
+    else RPC timeout/failure before explicit status
+      R-->>R: mark provider/RPC suspect, fail fast or choose replica
+      Note over R,P: Do not infer local ERROR 4 from RPC timeout alone
+    end
           </div>
         </div>
         <h3 id="flow-migrate">4.3 Migration / Rebalance：目标 Worker 准入</h3>
@@ -395,8 +400,8 @@ sequenceDiagram
               <tr><td><code>ClientWorkerBaseApi::SendBufferViaUb</code><br><span class="src">client_worker_base_api.cpp:289-324</span></td><td>Client 端准备 UB handle，单次或 pipeline 写入后调用 <code>RecordUrmaDataPlaneResult(rc.IsOk())</code>。</td><td>在返回错误前分类 URMA 错误并 <code>MarkFailure(targetWorker)</code>；下一次 put 先走准入。</td></tr>
               <tr><td><code>ClientWorkerBaseApi::SendBufferViaUbFromPool</code><br><span class="src">client_worker_base_api.cpp:326-355</span></td><td>Client 从池化 buffer 直接调用 <code>UrmaWritePayload</code>，成功才设置 <code>ubDataSentByMemoryCopy</code>。</td><td>这里是 client->worker UB 写最直接的失败观测点。</td></tr>
               <tr><td><code>PrepareGetRequestHelper</code><br><span class="src">worker_oc_service_get_impl.cpp:1035-1080</span></td><td>Requester 分配本地内存，并把自己的 URMA info 填进 RPC，请 provider 写回。</td><td>请求前可检查 provider source 是否处于可读/可写回状态；失败时避免长等待。</td></tr>
-              <tr><td><code>PullObjectDataFromRemoteWorker</code><br><span class="src">worker_oc_service_get_impl.cpp:1224-1348</span></td><td>Requester 创建 remote worker API，发送 <code>GetObjectRemote</code>，当前会对若干 RPC/URMA timeout 做 retry。</td><td>收到 provider 返回的 UB 不可用错误后不要静默 retry；直接快速失败或换 replica。</td></tr>
-              <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code><br><span class="src">worker_worker_oc_service_impl.cpp:590-638</span></td><td>Provider 端调用 <code>UrmaWritePayload(req.urma_info())</code>，失败时目前受 <code>FLAGS_enable_transport_fallback</code> 控制。</td><td>Provider 端把 requester 的 UB 写失败显式返回；fallback 默认关闭，小对象 opt-in。</td></tr>
+              <tr><td><code>PullObjectDataFromRemoteWorker</code><br><span class="src">worker_oc_service_get_impl.cpp:1224-1348</span></td><td>Requester 创建 remote worker API，发送 <code>GetObjectRemote</code>，当前会对若干 RPC/URMA timeout 做 retry。</td><td>收到 provider 返回的显式 UB 不可用错误后不要静默 retry；RPC timeout/failure 只作为 provider/RPC suspect，不直接推导本端 ERROR 4。</td></tr>
+              <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code><br><span class="src">worker_worker_oc_service_impl.cpp:590-638</span></td><td>Provider 端调用 <code>UrmaWritePayload(req.urma_info())</code>，失败时目前受 <code>FLAGS_enable_transport_fallback</code> 控制。</td><td>Provider 作为 URMA Operator 要把 requester 的 UB 写失败显式返回；fallback 默认关闭，小对象 opt-in。</td></tr>
               <tr><td><code>DataMigrator::ConnectAndCreateRemoteApi</code><br><span class="src">data_migrator.cpp:394-408</span></td><td>迁移前只检查 worker 连接并创建 remote API。</td><td>在 <code>CheckConnection</code> 后叠加 <code>CheckMigrationTarget</code>，拒绝 UB 不可写目标。</td></tr>
               <tr><td><code>RebalanceExecutor::MigrateToTarget</code><br><span class="src">rebalance_executor.cpp:160-172</span></td><td>Rebalance 最终调用 <code>MigrateToTargetNode(...).get()</code>。</td><td>目标选择或执行前统一复用迁移准入，避免 task 把数据派到隔离目标。</td></tr>
               <tr><td><code>EtcdStore::LaunchKeepAliveThreads</code><br><span class="src">etcd_store.cpp:531-610</span></td><td>etcd keepalive 失败后会确认网络故障、生成 fake delete，超时可触发 kill。</td><td>这是 TCP 服务级自愈边界；UB 隔离不替代它。</td></tr>
@@ -421,8 +426,8 @@ sequenceDiagram
         <h3>6.2 修改路径</h3>
         <ul>
           <li><span class="badge b-blue">Client</span>在 <code>SendBufferViaUb*</code> 前检查目标；失败后标记目标 UB path unavailable，并返回显式错误。</li>
-          <li><span class="badge b-green">Provider Worker</span>在 <code>WriteViaFastTransport</code> 失败后标记 requester UB path，并把错误放进 response。</li>
-          <li><span class="badge b-violet">Requester Worker</span>在 <code>PullObjectDataFromRemoteWorker</code> 收到 UB unavailable 时快速失败或换副本，不作为对象缺失处理。</li>
+          <li><span class="badge b-green">Provider Worker</span>在 <code>WriteViaFastTransport</code> 失败后标记 requester UB path，并把显式 URMA operator status 放进 response。</li>
+          <li><span class="badge b-violet">Requester Worker</span>在 <code>PullObjectDataFromRemoteWorker</code> 收到显式 UB unavailable 时快速失败或换副本；若只是 RPC timeout/failure，则按 provider/RPC suspect 处理，不当成对象缺失或本端 ERROR 4。</li>
           <li><span class="badge b-amber">Migration</span>在 <code>ConnectAndCreateRemoteApi</code> 或更上层目标选择前检查 migration target。</li>
           <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
         </ul>

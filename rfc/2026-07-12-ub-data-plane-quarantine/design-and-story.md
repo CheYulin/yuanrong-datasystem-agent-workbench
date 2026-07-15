@@ -78,9 +78,11 @@ Transport / Local Observation，不是 Cluster Node Table 的全局 DOWN；是�
   知道 ERROR 4、timeout、reconnect 失败等真实原因。ERROR 4 表示 UB 端口不可用，
   可直接记录 `UNAVAILABLE`；timeout/reconnect 失败则按阈值或确认策略处理，并把
   错误传回 Coordinator/Endpoint。
-+ **Endpoint 视角**: 被写入/被读取的一端，或将要接收新写入/迁移的 worker。它通过
-  RPC status、fallback tracking 或 health publication 学到对端 URMA 失败；未恢复前要
-  gate 新写入和迁移，读取则快速失败。
++ **Endpoint 视角**: 被写入/被读取的一端，或将要接收新写入/迁移的 worker。它不会
+  直接感知远端 URMA Write completion，只能通过显式 RPC response/status、
+  fallback tracking 或 health publication 学到对端 URMA 失败；未恢复前要 gate
+  新写入和迁移，读取则快速失败。若只看到 RPC timeout/failure，不能把它伪装成
+  本端已经收到 `ERROR 4`，只能按 RPC/peer suspect 处理。
 
 关键机制是 **发起 URMA 单边操作的一端先报错，被操作端学习后做 gate**：
 
@@ -88,7 +90,9 @@ Transport / Local Observation，不是 Cluster Node Table 的全局 DOWN；是�
   端口不可用的硬信号，需要快速返回明确错误并立刻标记该 UB path 不可用；timeout、
   reconnect 失败或 handshake 失败则进入对应的确认/阈值策略。
 + 被单边操作的一端不能天然知道对端发生了什么，需要通过当前 RPC response/status、
-  fallback tracking 或 worker health publication 学到这个错误。
+  fallback tracking 或 worker health publication 学到这个错误。显式返回的
+  `ERROR 4` 是强信号；RPC timeout/failure 是弱信号，只能说明对端或 RPC 路径有问题，
+  需要快速失败/换源，但不能直接升级成本端 UB port `UNAVAILABLE`。
 + 一旦知道对应 UB path 还没恢复，被操作端要避免继续接受写入或迁移 target 流量。
 + Get 可以尝试读取，但如果数据只在 UB path unavailable 的 worker 上，需要快速返回
   `K_URMA_DATA_WORKER_UNAVAILABLE`，不能靠长超时暴露问题。
@@ -307,6 +311,12 @@ sequenceDiagram
             B-->>A: 4. K_URMA_WORKER_UNAVAILABLE
         else UB write attempted
             B->>A: 4. UrmaWritePayload
+            alt B observes ERROR 4
+                B-->>A: 5a. explicit URMA ERROR 4 in response/status
+                A->>H: 6a. Mark own receive path unavailable
+            else RPC timeout/failure before status
+                A-->>A: 5b. fail fast / reselect source as RPC suspect
+            end
         end
     end
 ```
@@ -317,8 +327,10 @@ sequenceDiagram
 + 2-3: 如果只剩隔离 source，直接失败，不进入 worker-worker RPC 长等待。
 + 3-4: source worker 写回 requester 时，requester 也是一次数据写入目的端；若 requester 被隔离，source 不应默认转 TCP payload。
 + 失败反馈：source worker 作为 `UrmaWritePayload` 发起端先知道 ERROR 4/timeout 等原因，
-  需要通过 remote get response/status 告诉 requester；requester 在恢复前不要继续暴露同一
-  UB receive path，读不到其他 source 时快速失败。
+  需要通过 remote get response/status 告诉 requester。只有 source 明确返回 URMA
+  operator 结果，例如 ERROR 4，requester 才能把自己的 receive path 标成不可用；如果
+  requester 只看到 RPC timeout/failure，只能把本次 source/RPC 路径标成 suspect，快速
+  失败或换源，不能反推出本端收到了 ERROR 4。
 
 测试关注:
 
@@ -703,6 +715,8 @@ CanWriteOrMigrateTo(worker)
   Coordinator/Endpoint。
 + Endpoint: 被写入/被读取的一端，或未来要接收写入/迁移的 worker。它通过当前 RPC
   status、fallback tracking 或健康发布学习对端失败，未恢复前 gate 新写入/迁移。
+  Endpoint 不会直接收到远端 URMA Write completion；RPC timeout/failure 只是间接
+  RPC/peer suspect 信号，只有显式 URMA status 才能驱动 UB path `UNAVAILABLE`。
 
 关键运行规则:
 
