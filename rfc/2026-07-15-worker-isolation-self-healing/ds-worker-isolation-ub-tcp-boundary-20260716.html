@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataSystem UB 数据面隔离与 TCP 自愈边界设计</title>
+<link rel="stylesheet" href="/assets/css/site.css">
+<script src="/design/mermaid.min.js" defer></script>
+<style>
+:root {
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --ink: #17202a;
+  --muted: #667085;
+  --line: #d8dee7;
+  --blue: #2563eb;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+  --violet: #6d28d9;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.58; font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.page { width: min(1280px, calc(100vw - 32px)); margin: 0 auto; padding: 20px 0 46px; }
+.top { background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); border: 1px solid var(--line); border-radius: 12px; padding: 22px 26px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+.top h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: 0; }
+.top p { margin: 9px 0 0; color: var(--muted); font-size: 13px; }
+.meta-line { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pill { display: inline-flex; align-items: center; border: 1px solid var(--line); background: #fff; color: #344054; border-radius: 999px; padding: 3px 9px; font-size: 12px; }
+.layout { display: grid; grid-template-columns: 246px minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 20px; }
+.nav { position: sticky; top: 70px; z-index: 4; max-height: calc(100vh - 92px); overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+.nav-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.nav a { display: block; color: var(--muted); text-decoration: none; border-radius: 6px; padding: 6px 8px; font-size: 13px; line-height: 1.35; }
+.nav a.nav-sub { padding-left: 18px; font-size: 12px; }
+.nav a:hover { background: #f8fafc; color: var(--blue); }
+.content { min-width: 0; }
+.section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 2px rgba(16,24,40,.04); padding: 20px; margin: 16px 0; scroll-margin-top: 72px; }
+h2 { margin: 0 0 12px; font-size: 22px; }
+h3 { margin: 18px 0 10px; font-size: 16px; }
+h4 { margin: 14px 0 8px; font-size: 14px; color: #344054; }
+p { margin: 8px 0; }
+ul { margin: 8px 0 12px 20px; }
+li { margin: 4px 0; }
+code { color: #0f4c81; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 5px; padding: 1px 5px; font-size: .92em; overflow-wrap: anywhere; }
+pre { margin: 14px 0; padding: 14px 16px; border: 1px solid #1e293b; border-radius: 8px; background: #0f172a; overflow: auto; }
+pre code { display: block; color: #dbeafe; background: transparent; border: 0; padding: 0; font-size: 12px; line-height: 1.65; white-space: pre; }
+.grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.card, .metric { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+.metric .n { font-size: 21px; font-weight: 800; line-height: 1.25; }
+.metric .l { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.card-title { font-weight: 800; color: #101828; margin-bottom: 8px; }
+.note { border-left: 4px solid var(--blue); background: #eff6ff; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin: 12px 0; }
+.note.warn { border-left-color: var(--amber); background: #fffbeb; }
+.note.risk { border-left-color: var(--red); background: #fff7f7; }
+.badge { display: inline-block; border-radius: 999px; font-size: 11px; font-weight: 700; padding: 2px 8px; margin-right: 6px; }
+.b-blue { background: #dbeafe; color: #1e40af; }
+.b-green { background: #dcfce7; color: #166534; }
+.b-amber { background: #ffedd5; color: #9a3412; }
+.b-red { background: #fee2e2; color: #991b1b; }
+.b-violet { background: #ede9fe; color: #5b21b6; }
+.diagram { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; overflow: visible; }
+.diagram-title { text-align: center; color: #344054; font-size: 13px; font-weight: 700; margin: 0 0 8px; }
+.mermaid { text-align: center; max-width: 100%; overflow: visible; }
+.mermaid svg { max-width: 100%; width: 100%; height: auto; display: block; margin: 0 auto; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin: 12px 0; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; background: #fff; font-size: 11.5px; margin: 0; }
+caption { caption-side: top; padding: 10px 12px; font-weight: 700; color: #344054; background: #f8fafc; border-bottom: 1px solid var(--line); text-align: center; }
+th, td { text-align: left; vertical-align: top; padding: 8px 9px; border-bottom: 1px solid var(--line); color: #344054; overflow-wrap: anywhere; word-break: break-word; }
+th { background: #f8fafc; font-size: 12px; }
+.src { color: var(--muted); font-size: 11px; }
+.flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; align-items: stretch; margin: 12px 0; }
+.flow div { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; }
+.flow strong { display: block; margin-bottom: 4px; color: var(--ink); }
+@media (max-width: 980px) {
+  .page { width: min(100% - 20px, 1280px); }
+  .layout { display: block; margin-top: 10px; }
+  .nav { position: sticky; top: 0; display: flex; flex-direction: row; flex-wrap: wrap; overflow: visible; max-height: none; margin-bottom: 12px; padding: 8px; }
+  .nav-title { display: none; }
+  .nav a, .nav a.nav-sub { white-space: nowrap; font-size: 12px; background: #fff; border: 1px solid var(--line); padding-left: 8px; }
+  .grid, .grid-2, .grid-3, .flow { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>DataSystem UB 数据面隔离与 TCP 自愈边界设计</h1>
+    <p>Ground Truth：main/master <code>69ec60b41</code> · CodeGraph v0.9.7 已同步：12,608 files / 299,132 nodes / 867,672 edges；输入：UB 数据面隔离 RFC、Worker 自愈 RFC、当前 client-worker / worker-worker / migrate / rebalance / rdma 代码。</p>
+    <div class="meta-line">
+      <span class="pill">目标：避免静默 UB 故障持续降低成功率</span>
+      <span class="pill">默认：故障 Worker 不再写入或迁移</span>
+      <span class="pill">读取：未恢复时快速失败</span>
+      <span class="pill">fallback：默认关闭，开启也只限小对象</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="nav">
+      <div class="nav-title">专题目录</div>
+      <a href="#scope">1. 设计边界与总览</a>
+      <a class="nav-sub" href="#scope-ground">1.1 CodeGraph 校验</a>
+      <a class="nav-sub" href="#scope-summary">1.2 最小结论</a>
+      <a href="#concepts">2. 关键概念</a>
+      <a class="nav-sub" href="#state-model">2.1 全局事实与局部观测</a>
+      <a class="nav-sub" href="#ownership">2.2 Meta/Layout 与 Data Local</a>
+      <a class="nav-sub" href="#failure-owner">2.3 故障归属</a>
+      <a href="#modules">3. 模块与抽象</a>
+      <a class="nav-sub" href="#class-diagram">3.1 类图</a>
+      <a class="nav-sub" href="#module-responsibility">3.2 职责拆分</a>
+      <a href="#flows">4. 时序图</a>
+      <a class="nav-sub" href="#flow-client-put">4.1 Client 写入</a>
+      <a class="nav-sub" href="#flow-remote-get">4.2 Worker remote get</a>
+      <a class="nav-sub" href="#flow-migrate">4.3 迁移与 Rebalance</a>
+      <a class="nav-sub" href="#flow-tcp">4.4 TCP 自愈</a>
+      <a class="nav-sub" href="#flow-recovery">4.5 UB 恢复</a>
+      <a href="#evidence">5. 代码确认</a>
+      <a href="#implementation">6. 落地策略</a>
+      <a href="#stories">7. Story 与验收</a>
+      <a href="#open">8. 待确认点</a>
+    </nav>
+
+    <main class="content">
+      <section id="scope" class="section">
+        <h2>1. 设计边界与总览</h2>
+        <div id="scope-ground" class="grid">
+          <div class="metric"><div class="n">69ec60b41</div><div class="l">datasystem 当前校验提交</div></div>
+          <div class="metric"><div class="n">12,608</div><div class="l">CodeGraph 文件数</div></div>
+          <div class="metric"><div class="n">299,132</div><div class="l">CodeGraph 节点数</div></div>
+          <div class="metric"><div class="n">867,672</div><div class="l">CodeGraph 边数</div></div>
+        </div>
+        <div class="note">
+          本页的结论以 CodeGraph 命中的当前源码为准：Client Put 的 UB write 在 client 发起；Worker remote get 的 UB write 在数据 provider 端发起；Rebalance/Migrate 是 worker-worker RPC 后的数据迁移；TCP 故障隔离/恢复已有 etcd keepalive、HashRing、ClusterManager 的局部自愈链路。
+        </div>
+        <h3 id="scope-summary">1.2 最小结论</h3>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">准入条件</div>
+            <p>所有写入和迁移目标都通过同一个组合判断：<code>WorkerServiceMode(worker) == RUNNING</code> 且 <code>WorkerUbPathHealth(worker) == AVAILABLE</code>。任一不满足，默认 fail fast。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">最小修改原则</div>
+            <p>不新建复杂的数据面健康中心；新增轻量的 UB 路径观测缓存和准入接口，挂到现有 client put、worker provider write、remote get、migration/rebalance 入口。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">隔离含义</div>
+            <p>这里的隔离不是把节点从集群摘除，而是对“向某 Worker 发生 UB 写入/迁移”的数据面准入关闸。读请求命中故障数据所在 Worker 时快速返回可识别错误。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">TCP 边界</div>
+            <p>TCP/etcd 继续负责服务级网络断链、节点自愈、元数据/slot/ownership 恢复；UB 隔离只处理数据面路径，不能把局部 UB 观测直接提升成全局 DOWN。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="concepts" class="section">
+        <h2>2. 关键概念</h2>
+        <h3 id="state-model">2.1 全局事实与局部观测</h3>
+        <div class="grid-3">
+          <div class="card">
+            <div class="card-title">Global Fact</div>
+            <p>由 master/etcd/hash ring/cluster metadata 维护的全局事实，例如 Worker 是否在 ring 中、slot 归属、primary copy、迁移任务状态。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Local Observation</div>
+            <p>由单个 client 或 worker 发起 URMA 单边操作时获得的局部观测，例如 ERROR 4、CQE error、wait timeout、Jetty async event。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Admission Result</div>
+            <p>请求入口对两类信息做组合判断，但局部观测不能直接改写全局事实；最多阻止本进程继续写入，并通过 RPC/错误码把对端 UB 故障传出去。</p>
+          </div>
+        </div>
+        <h3 id="ownership">2.2 Meta/Layout 与 Data Local</h3>
+        <div class="flow">
+          <div><strong>Meta/Layout</strong>对象位置、primary、slot、迁移任务。</div>
+          <div><strong>Data Local</strong>某 Worker 本地内存/共享内存/SSD 中真实数据。</div>
+          <div><strong>Provider</strong>持有数据并被要求把数据写到 requester 的一端。</div>
+          <div><strong>Requester</strong>发起读写/迁移请求的一端，可能是 client 或 worker。</div>
+          <div><strong>Transport</strong>URMA/UCP/TCP 的实际数据传输路径。</div>
+        </div>
+        <p>设计要避免把 transport 层“某一跳不通”误解释为对象不存在或元数据错误。新增错误语义建议为 <code>K_OC_DATA_PROVIDER_UB_UNAVAILABLE</code> 或同类 URMA data-plane code，表达“数据在该 Worker，但该 Worker 的 UB 路径暂不可用”。</p>
+        <h3 id="failure-owner">2.3 故障归属</h3>
+        <div class="table-wrap">
+          <table>
+            <caption>故障归属与处理边界</caption>
+            <thead><tr><th>场景</th><th>知道故障的一端</th><th>应该阻断什么</th><th>不应该做什么</th></tr></thead>
+            <tbody>
+              <tr><td>Client -> Worker Put UB 写失败</td><td>Client 发起 URMA write，能拿到错误</td><td>本 client 对该 Worker 的后续 UB 写入；返回明确失败</td><td>默认透明切 TCP；直接下结论 Worker 全局 DOWN</td></tr>
+              <tr><td>Worker Provider -> Client 写回失败</td><td>Provider worker 发起 URMA write</td><td>Provider 返回对方 UB 不可写错误；Client 标记该读取失败</td><td>把对象当作不存在；让 Get 长时间重试</td></tr>
+              <tr><td>Worker Provider -> Worker 写回失败</td><td>Provider worker 发起 URMA write</td><td>Provider 标记 requester 的 UB 路径不可用；Requester 快速失败或换源</td><td>继续向同一不可达 Worker 迁移或写入</td></tr>
+              <tr><td>Migration/Rebalance 目标 UB 故障</td><td>源 Worker 或迁移执行端</td><td>目标准入拒绝，任务失败或重选目标</td><td>把数据迁移到无法接收 UB 写的 Worker</td></tr>
+              <tr><td>TCP/etcd 断链</td><td>Worker 本地 keepalive 与集群事件</td><td>服务级隔离、自愈、metadata reconciliation</td><td>由 UB 局部观测直接驱动 ring 变更</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="modules" class="section">
+        <h2>3. 模块与抽象</h2>
+        <h3 id="class-diagram">3.1 类图</h3>
+        <div class="diagram">
+          <div class="diagram-title">最小新增抽象与现有模块协同</div>
+          <div class="mermaid">
+classDiagram
+    class WorkerServiceMode {
+      +RUNNING
+      +LOCAL_ISOLATED
+      +RECOVERING
+      +DRAINING
+    }
+    class WorkerUbPathHealth {
+      +AVAILABLE
+      +UNAVAILABLE
+      +PROBING
+      +last_error_code
+      +epoch
+    }
+    class TransportPathAdmission {
+      +CheckWriteTarget(worker)
+      +CheckReadSource(worker)
+      +CheckMigrationTarget(worker)
+    }
+    class UbPathObservationCache {
+      +MarkFailure(peer, reason)
+      +MarkProbing(peer)
+      +MarkAvailable(peer)
+      +Get(peer)
+    }
+    class UrmaManager {
+      +UrmaWritePayload()
+      +TryRecoverFailedJettyFromCompletion()
+    }
+    class UrmaResource {
+      +ReCreateJetty()
+      +RegisterJetty()
+    }
+    class ClusterManager {
+      +ProcessNetworkRecovery()
+      +CheckConnection()
+    }
+    class HashRing {
+      +UpdateLocalState()
+      +NeedToTryRemoveWorker()
+    }
+    TransportPathAdmission --> WorkerServiceMode
+    TransportPathAdmission --> WorkerUbPathHealth
+    WorkerUbPathHealth --> UbPathObservationCache
+    UbPathObservationCache ..> UrmaManager : observe status
+    UrmaManager --> UrmaResource : Jetty/JFC/Event
+    TransportPathAdmission ..> ClusterManager : service/rpc state
+    ClusterManager --> HashRing : membership/recovery
+          </div>
+        </div>
+        <h3 id="module-responsibility">3.2 职责拆分</h3>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">发起端：Requester / URMA Writer</div>
+            <p>发起 URMA 单边操作的一端拥有最可靠的失败观测。它负责分类错误、更新本地 <code>UbPathObservationCache</code>、向上层返回可识别错误，并参与恢复探测。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">数据 Provider</div>
+            <p>Provider 对外提供数据，并常常根据 RPC 里的 URMA info 写回对端。Provider 失败后要把“对端 UB 不可写”反馈给 requester，避免 requester 继续等待或静默重试。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">服务级状态</div>
+            <p><code>WorkerServiceMode</code> 只表达服务是否能参加集群读写、迁移和元数据恢复，复用 TCP/etcd 自愈链路，不和 UB 路径状态混在一起。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">数据面准入</div>
+            <p><code>TransportPathAdmission</code> 是最小公共入口，client put、worker remote get、migration/rebalance 都只问它“这个源/目标现在能否走 UB 写”。</p>
+          </div>
+        </div>
+        <div class="note warn">
+          命名建议：不要用过重的 <code>DataPlaneHealthManager</code> 语义。更贴切的是 <code>UbPathObservationCache</code> + <code>TransportPathAdmission</code>：前者记录局部观测，后者做组合准入。
+        </div>
+      </section>
+
+      <section id="flows" class="section">
+        <h2>4. 关键流程时序图</h2>
+        <h3 id="flow-client-put">4.1 Client -> Worker Put：本端发起 UB 写失败</h3>
+        <div class="diagram">
+          <div class="diagram-title">Client Put 默认快速失败，不透明切 TCP</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant A as TransportPathAdmission
+    participant W as Worker(Data Owner)
+    participant U as UrmaManager
+    C->>A: CheckWriteTarget(W)
+    A-->>C: RUNNING + AVAILABLE
+    C->>W: Create/MultiCreate RPC, get URMA addr
+    C->>U: UrmaWritePayload(W)
+    U--xC: ERROR 4 / CQE error / timeout
+    C->>A: MarkFailure(W, reason, epoch)
+    A-->>C: Write blocked
+    C-->>C: return K_OC_DATA_PROVIDER_UB_UNAVAILABLE
+    Note over C,W: fallback 默认关闭；开启时也只允许 <= 1MB 按策略切 TCP
+          </div>
+        </div>
+        <h3 id="flow-remote-get">4.2 Worker remote get：Provider 按 RPC 写回 requester</h3>
+        <div class="diagram">
+          <div class="diagram-title">Provider 端发起 URMA write，Requester 端快速得知失败</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant R as Requester Worker
+    participant A as TransportPathAdmission
+    participant P as Provider Worker
+    participant U as Provider UrmaManager
+    R->>A: CheckReadSource(P)
+    A-->>R: source allowed
+    R->>P: GetObjectRemote(URMA info of R)
+    P->>A: CheckWriteTarget(R)
+    A-->>P: R path AVAILABLE
+    P->>U: UrmaWritePayload(to R)
+    U--xP: write failed
+    P->>A: MarkFailure(R, provider_write)
+    P-->>R: K_OC_DATA_PROVIDER_UB_UNAVAILABLE
+    R-->>R: Get fail fast or choose another replica
+          </div>
+        </div>
+        <h3 id="flow-migrate">4.3 Migration / Rebalance：目标 Worker 准入</h3>
+        <div class="diagram">
+          <div class="diagram-title">迁移前检查目标服务态与 UB 接收态</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant B as RebalanceExecutor
+    participant A as TransportPathAdmission
+    participant M as DataMigrator
+    participant S as Source Worker
+    participant T as Target Worker
+    B->>A: CheckMigrationTarget(T)
+    alt T not RUNNING or UB unavailable
+      A-->>B: reject target
+      B-->>B: fail task / ask selector re-pick
+    else target allowed
+      A-->>B: ok
+      B->>M: MigrateToTargetNode(T)
+      M->>S: read local object
+      M->>T: worker-worker RPC + data transfer
+      T-->>M: success
+    end
+          </div>
+        </div>
+        <h3 id="flow-tcp">4.4 TCP / etcd 自愈边界</h3>
+        <div class="diagram">
+          <div class="diagram-title">TCP 自愈继续负责服务级隔离与恢复</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant E as Etcd KeepAlive
+    participant C as ClusterManager
+    participant H as HashRing
+    participant S as WorkerServiceMode
+    participant R as Recovery Orchestrator
+    E--xC: keepalive timeout confirmed
+    C->>H: fake delete / ring event
+    H->>S: LOCAL_ISOLATED or FAIL path
+    S-->>R: block normal writes/migration
+    C->>R: ProcessNetworkRecovery
+    R->>H: RecoverMigrationTask
+    R->>S: RECOVERING -> RUNNING after reconciliation
+          </div>
+        </div>
+        <h3 id="flow-recovery">4.5 UB 恢复：探测成功后重新开放写入</h3>
+        <div class="diagram">
+          <div class="diagram-title">UB 恢复只恢复数据面准入，不替代 TCP membership</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant O as UbPathObservationCache
+    participant U as UrmaManager
+    participant P as Probe
+    participant A as TransportPathAdmission
+    O->>O: UNAVAILABLE with cool-down
+    O->>P: enter PROBING
+    P->>U: handshake / small URMA probe
+    alt probe ok
+      U-->>O: MarkAvailable(peer, epoch)
+      O-->>A: AVAILABLE
+      A-->>A: writes/migration allowed if WorkerServiceMode RUNNING
+    else probe failed
+      U-->>O: keep UNAVAILABLE, backoff
+      A-->>A: continue fail fast
+    end
+          </div>
+        </div>
+      </section>
+
+      <section id="evidence" class="section">
+        <h2>5. 代码确认与分析</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>CodeGraph 与源码证据</caption>
+            <thead><tr><th>路径</th><th>当前实现事实</th><th>设计 hook</th></tr></thead>
+            <tbody>
+              <tr><td><code>ClientWorkerBaseApi::SendBufferViaUb</code><br><span class="src">client_worker_base_api.cpp:289-324</span></td><td>Client 端准备 UB handle，单次或 pipeline 写入后调用 <code>RecordUrmaDataPlaneResult(rc.IsOk())</code>。</td><td>在返回错误前分类 URMA 错误并 <code>MarkFailure(targetWorker)</code>；下一次 put 先走准入。</td></tr>
+              <tr><td><code>ClientWorkerBaseApi::SendBufferViaUbFromPool</code><br><span class="src">client_worker_base_api.cpp:326-355</span></td><td>Client 从池化 buffer 直接调用 <code>UrmaWritePayload</code>，成功才设置 <code>ubDataSentByMemoryCopy</code>。</td><td>这里是 client->worker UB 写最直接的失败观测点。</td></tr>
+              <tr><td><code>PrepareGetRequestHelper</code><br><span class="src">worker_oc_service_get_impl.cpp:1035-1080</span></td><td>Requester 分配本地内存，并把自己的 URMA info 填进 RPC，请 provider 写回。</td><td>请求前可检查 provider source 是否处于可读/可写回状态；失败时避免长等待。</td></tr>
+              <tr><td><code>PullObjectDataFromRemoteWorker</code><br><span class="src">worker_oc_service_get_impl.cpp:1224-1348</span></td><td>Requester 创建 remote worker API，发送 <code>GetObjectRemote</code>，当前会对若干 RPC/URMA timeout 做 retry。</td><td>收到 provider 返回的 UB 不可用错误后不要静默 retry；直接快速失败或换 replica。</td></tr>
+              <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code><br><span class="src">worker_worker_oc_service_impl.cpp:590-638</span></td><td>Provider 端调用 <code>UrmaWritePayload(req.urma_info())</code>，失败时目前受 <code>FLAGS_enable_transport_fallback</code> 控制。</td><td>Provider 端把 requester 的 UB 写失败显式返回；fallback 默认关闭，小对象 opt-in。</td></tr>
+              <tr><td><code>DataMigrator::ConnectAndCreateRemoteApi</code><br><span class="src">data_migrator.cpp:394-408</span></td><td>迁移前只检查 worker 连接并创建 remote API。</td><td>在 <code>CheckConnection</code> 后叠加 <code>CheckMigrationTarget</code>，拒绝 UB 不可写目标。</td></tr>
+              <tr><td><code>RebalanceExecutor::MigrateToTarget</code><br><span class="src">rebalance_executor.cpp:160-172</span></td><td>Rebalance 最终调用 <code>MigrateToTargetNode(...).get()</code>。</td><td>目标选择或执行前统一复用迁移准入，避免 task 把数据派到隔离目标。</td></tr>
+              <tr><td><code>EtcdStore::LaunchKeepAliveThreads</code><br><span class="src">etcd_store.cpp:531-610</span></td><td>etcd keepalive 失败后会确认网络故障、生成 fake delete，超时可触发 kill。</td><td>这是 TCP 服务级自愈边界；UB 隔离不替代它。</td></tr>
+              <tr><td><code>ClusterManager::ProcessNetworkRecovery</code><br><span class="src">cluster_manager.cpp:752-773</span></td><td>网络恢复后触发 worker recovery event、恢复迁移任务或请求 metadata。</td><td>TCP recovery 结束后仍需与 UB path health 对账，二者都满足才开放写/迁移。</td></tr>
+              <tr><td><code>UrmaManager::TryRecoverFailedJettyFromCompletion</code><br><span class="src">urma_manager.cpp:954-981</span></td><td>完成队列错误可按策略触发 <code>ReCreateJetty</code>。</td><td>复用该观测点同步标记 peer path PROBING/UNAVAILABLE。</td></tr>
+              <tr><td><code>UrmaAsyncEventHandler</code><br><span class="src">urma_async_event_handler.cpp:93-200</span></td><td>async fd epoll 到 <code>URMA_EVENT_JETTY_ERR</code> 后触发 <code>ReCreateJetty</code>。</td><td>Jetty 自恢复成功不等于 peer 可写；需要 probe 成功后再 MarkAvailable。</td></tr>
+              <tr><td><code>UrmaConnection::ReCreateJetty</code><br><span class="src">urma_resource.cpp:418-460</span></td><td>失败 Jetty 会被 MarkInvalid 并重建，避免错误地 invalid 新 Jetty。</td><td>和 PR 1277 的发送端 Jetty 池化/隔离思路一致：恢复局部资源，但准入状态独立闭环。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="implementation" class="section">
+        <h2>6. 落地策略</h2>
+        <h3>6.1 最小修改点</h3>
+        <div class="grid-2">
+          <div class="card"><div class="card-title">新增轻量模块</div><p><code>UbPathObservationCache</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
+          <div class="card"><div class="card-title">新增准入接口</div><p><code>TransportPathAdmission</code>：给 put/get/migrate/rebalance 调用，组合服务态、UB 观测、fallback 策略。</p></div>
+          <div class="card"><div class="card-title">新增错误码</div><p>新增或复用 URMA error 家族，表达“数据所在 Worker UB 不可用”与“目标 Worker UB 接收不可用”。</p></div>
+          <div class="card"><div class="card-title">新增恢复 probe</div><p>先 cool-down，再 small probe。probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>
+        </div>
+        <h3>6.2 修改路径</h3>
+        <ul>
+          <li><span class="badge b-blue">Client</span>在 <code>SendBufferViaUb*</code> 前检查目标；失败后标记目标 UB path unavailable，并返回显式错误。</li>
+          <li><span class="badge b-green">Provider Worker</span>在 <code>WriteViaFastTransport</code> 失败后标记 requester UB path，并把错误放进 response。</li>
+          <li><span class="badge b-violet">Requester Worker</span>在 <code>PullObjectDataFromRemoteWorker</code> 收到 UB unavailable 时快速失败或换副本，不作为对象缺失处理。</li>
+          <li><span class="badge b-amber">Migration</span>在 <code>ConnectAndCreateRemoteApi</code> 或更上层目标选择前检查 migration target。</li>
+          <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
+        </ul>
+        <h3>6.3 状态机</h3>
+        <div class="diagram">
+          <div class="diagram-title">WorkerUbPathHealth 状态机</div>
+          <div class="mermaid">
+stateDiagram-v2
+    [*] --> AVAILABLE
+    AVAILABLE --> UNAVAILABLE: URMA ERROR 4 / CQE error / timeout threshold
+    UNAVAILABLE --> PROBING: cooldown elapsed
+    PROBING --> AVAILABLE: probe success
+    PROBING --> UNAVAILABLE: probe failed
+    AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
+          </div>
+        </div>
+      </section>
+
+      <section id="stories" class="section">
+        <h2>7. Story 与验收</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>验收用例</caption>
+            <thead><tr><th>Story</th><th>期望行为</th><th>可观测证据</th></tr></thead>
+            <tbody>
+              <tr><td>ShmOnly Worker UB 故障</td><td>Client 得到 UB 异常，其他 Worker 无法读到时直接失败；不静默降成功率。</td><td>错误码、metric、日志包含 target worker、reason、epoch。</td></tr>
+              <tr><td>Client 写远端 Worker，远端 UB 不可写</td><td>首次失败后本 client 对该 Worker 写入准入拒绝，恢复前不继续写。</td><td>后续请求 fail fast；无透明 TCP fallback。</td></tr>
+              <tr><td>Worker remote get provider 写 requester 失败</td><td>Provider 明确返回 UB unavailable；Requester 不长时间 retry。</td><td>RPC response error 可区分 transport/data-not-found。</td></tr>
+              <tr><td>Rebalance 目标 Worker UB 故障</td><td>任务不向该目标迁移；可失败或重选目标。</td><td>rebalance task 记录 target rejected。</td></tr>
+              <tr><td>UB 恢复</td><td>probe 成功后重新开放写入/迁移；TCP membership 不被 UB 单独修改。</td><td>状态 UNAVAILABLE -> PROBING -> AVAILABLE，后续写成功。</td></tr>
+              <tr><td>TCP 闪断恢复</td><td>走原有 keepalive/hash ring/cluster recovery；服务态恢复后再看 UB path。</td><td>ClusterManager recovery 日志与 UB admission 状态均满足。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="open" class="section">
+        <h2>8. 待确认点</h2>
+        <ul>
+          <li>错误码命名：建议放在 OC/URMA 交界处，保留 provider UB unavailable 与 requester UB unavailable 两类语义。</li>
+          <li>恢复 probe 的实现：优先复用现有 handshake / small URMA write，不引入持续心跳。</li>
+          <li>fallback 策略：默认关闭；开启时建议只覆盖 <= 1MB 普通读写，不覆盖迁移和 bulk rebalance。</li>
+          <li>局部观测是否需要广播：第一阶段不做全局传播，只通过 RPC response 传给本次 requester；后续如需要再加 coordinator 汇聚。</li>
+        </ul>
+        <div class="note">
+          一句话版本：TCP 负责“这个 Worker 是否还能作为集群成员服务”，UB admission 负责“现在能不能往这个 Worker 的数据面写”。二者独立建模，在入口处组合判断。
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<script src="/assets/js/site.js"></script>
+<script>
+window.addEventListener("DOMContentLoaded", function () {
+  if (window.mermaid) {
+    mermaid.initialize({ startOnLoad: true, securityLevel: "loose", theme: "default" });
+  }
+});
+</script>
+</body>
+</html>
