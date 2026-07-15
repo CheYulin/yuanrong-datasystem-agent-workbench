@@ -242,6 +242,26 @@ UpdateLocalState()
   -> runtime state = RUNNING
 ```
 
+### 与 UB data-plane quarantine 的边界
+
+本 RFC 与 `2026-07-12-ub-data-plane-quarantine` 解决的是相邻但不同的问题。
+
+| 维度 | UB data-plane quarantine | Worker isolation self-healing |
+| ---- | ---- | ---- |
+| 触发对象 | UB/URMA data-plane path、目的 worker UB 端口、单边写失败 | worker 进程发现自己被 TCP/etcd/coordination/hash ring 隔离或处于本地问题态 |
+| 核心目标 | 避免继续向 UB 故障 worker 写入/迁移，默认不 fallback 到 TCP | 避免网络抖动导致 worker 自杀；用本地 service mode、恢复和 ownership 对账代替 kill |
+| 状态 owner | higher-level UB path health/admission，`common/rdma` 只提供 URMA outcome/resource | worker runtime/admission，本地只消费 cluster/ring/meta evidence |
+| 默认写语义 | 故障 worker 被隔离后默认不能写；fallback 仅显式开启且受大小策略限制 | 非 `RUNNING` worker 默认不能写；`DRAINING/OUT_OF_MEMORY/LOCAL_ISOLATED/RECOVERING` 都拒绝新增写入 |
+| 恢复条件 | UB path probe/URMA 状态恢复后解除 data-plane 隔离 | coordination/ring/meta/data ownership 全部对账后才 `RUNNING` |
+| 数据归属 | 不决定 primary/local copy/L2 归属，只影响是否允许使用某条 data-plane 写路径 | 必须判断 cluster meta 和本地 data ownership，决定恢复、降级、清理或重新可见 |
+
+协同关系:
+
++ UB quarantine 可以作为 `WorkerServiceMode` 的外部 evidence：若本 worker 作为数据提供端的 UB 故障且策略要求 hard quarantine，则本地或远端 admission 需要拒绝写入/迁移 target。
++ 本 RFC 不把 UB fallback 策略内嵌进 worker runtime state。是否 fallback TCP 仍由 UB quarantine 的 `UbFallbackPolicy` 决定，且默认关闭。
++ 两个 RFC 都遵循同一个原则：**宁可快速显式失败，也不要让静默故障持续降低成功率或制造不一致数据**。
++ 如果同时发生 UB 故障和 TCP/coordination 隔离，优先以更保守的状态生效：普通读写/迁移 target 均拒绝，恢复后再按 UB path health 与 meta/data ownership 双重对账开放。
+
 ### 关联流程清单
 
 本特性只改“本地隔离后的进程生死和服务准入”，但会影响多个现有流程的语义边界。
