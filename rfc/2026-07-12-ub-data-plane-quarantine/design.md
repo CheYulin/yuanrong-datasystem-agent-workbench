@@ -274,20 +274,11 @@ Minimal first-cut integration should avoid pushing quarantine policy into
 hook possible: `UrmaManager` can expose an optional operation outcome structure
 without knowing the object-cache policy.
 
-Suggested structured outcome:
-
-```cpp
-struct UbOpOutcome {
-    HostPort peer;
-    OperationKind operation; // READ or WRITE
-    Status status;
-    std::optional<int> cqeStatus;
-    std::optional<uint32_t> localJettyId;
-    uint64_t dataSize;
-    bool laneRetired;
-    FailureReason reason; // connect, timeout, cqe_error, post_failed, pool_exhausted
-};
-```
+Suggested structured outcome is the `UbOpOutcome` defined in the classifier
+section below. It must include peer, operation, reporter role, `Status`,
+provider/CQE status when available, request id, and payload size. PR1277 fields
+such as local Jetty id or lane-retired flag can be added as optional transport
+metadata later without changing admission semantics.
 
 Classification guidance with PR1277:
 
@@ -309,6 +300,53 @@ The sender side already knows why UB failed. A completion/provider error whose
 status is `ERROR 4` is treated as the explicit UB port-unavailable signal. That
 error is serious enough to stop normal traffic immediately, but it is not
 permanent: the port may recover and should be tested by probe.
+
+Input structure:
+
+```cpp
+enum class UbOperationKind {
+    CLIENT_PUT,
+    CLIENT_GET_WRITEBACK,
+    WORKER_REMOTE_GET_WRITEBACK,
+    MIGRATION_DIRECT_READ,
+    MIGRATION_WRITE,
+    REBALANCE_WRITE,
+    RECOVERY_PROBE,
+};
+
+enum class UbReporterRole {
+    COORDINATOR,
+    URMA_OPERATOR,
+    WORKER_PROVIDER,
+    RECEIVER_ENDPOINT,
+    RECOVERY_PROBE,
+};
+
+struct UbOpOutcome {
+    HostPort peer;
+    UbOperationKind op;
+    UbReporterRole reporter;
+    Status status;
+    std::optional<int> providerStatus;
+    std::optional<int> cqeStatus;
+    uint64_t payloadSize = 0;
+    std::string requestId;
+    std::string learnedFrom; // local_completion / rpc_status / fallback / probe.
+};
+```
+
+API:
+
+```cpp
+class UbFailureClassifier {
+public:
+    UbFailureClass Classify(const UbOpOutcome &outcome) const;
+    bool ShouldMarkUnavailable(const UbOpOutcome &outcome, const UbPathState &oldState) const;
+};
+```
+
+`ERROR 4` must come from explicit URMA provider/CQE/operator status. A requester
+that only observes RPC timeout must not synthesize `ERROR 4`.
 
 Classifier output:
 
@@ -384,12 +422,21 @@ admission.
 Main APIs:
 
 ```cpp
-Status CheckUbReachable(const HostPort &worker) const;
-bool IsUbReachable(const HostPort &worker) const;
-void MarkUbFailure(const HostPort &worker, OperationKind op, const Status &rc, UbFailureReason reason);
-void MarkProbeSuccess(const HostPort &worker);
-void MarkProbeFailure(const HostPort &worker, const Status &rc, UbFailureReason reason);
-std::vector<HostPort> FilterUbReachableWorkers(std::vector<HostPort> candidates) const;
+class WorkerUbPathHealth {
+public:
+    Status CheckUbReachable(const HostPort &peer, UbOperationKind op) const;
+    bool IsUbReachable(const HostPort &peer, UbOperationKind op) const;
+    std::vector<HostPort> FilterUbReachableWorkers(
+        const std::vector<HostPort> &candidates, UbOperationKind op) const;
+
+    void ReportOutcome(const UbOpOutcome &outcome);
+    void MarkUbFailure(const HostPort &peer, UbOperationKind op, const Status &rc,
+                       UbFailureClass failureClass, const std::string &learnedFrom);
+    void MarkProbeStart(const HostPort &peer);
+    void MarkProbeSuccess(const HostPort &peer);
+    void MarkProbeFailure(const HostPort &peer, const Status &rc, UbFailureClass failureClass);
+    std::optional<UbPathState> GetState(const HostPort &peer) const;
+};
 ```
 
 How to interpret the key:
@@ -433,6 +480,38 @@ Probe logic:
 6. Any probe failure returns the worker to `UNAVAILABLE` and increases backoff.
 
 Normal business writes remain blocked while `PROBING`.
+
+### 7.6 TransportPathAdmission and Fallback Policy
+
+`TransportPathAdmission` is the small facade used by client and worker call
+sites. It keeps the detailed state model out of put/get/migration code.
+
+```cpp
+class TransportPathAdmission {
+public:
+    Status CheckWriteTarget(const HostPort &worker, UbOperationKind op) const;
+    Status CheckReadSource(const HostPort &worker) const;
+    Status CheckMigrationTarget(const HostPort &worker) const;
+    Status CheckReceiverEndpoint(const HostPort &receiver, UbOperationKind op) const;
+};
+
+class UbFallbackPolicy {
+public:
+    bool CanFallback(UbOperationKind op, uint64_t payloadSize, const Status &fastTransportStatus) const;
+};
+```
+
+Call-site rules:
+
+- Client put calls `CheckWriteTarget(targetWorker, CLIENT_PUT)` before returning
+  or using a worker URMA address.
+- Worker provider writeback calls `CheckReceiverEndpoint(receiver,
+  CLIENT_GET_WRITEBACK/WORKER_REMOTE_GET_WRITEBACK)` before `UrmaWritePayload`.
+- Worker remote get calls `CheckReadSource(sourceWorker)` before building
+  `GetObjectRemoteReqPb`.
+- Migration/rebalance calls `CheckMigrationTarget(targetWorker)` before
+  selecting/executing a target.
+- Fallback success does not clear `WorkerUbPathHealth`; only probe success does.
 
 ## 8. Detailed Flow Adaptation
 

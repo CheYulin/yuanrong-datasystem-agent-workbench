@@ -109,6 +109,7 @@ th { background: #f8fafc; font-size: 12px; }
       <a href="#modules">3. 模块与抽象</a>
       <a class="nav-sub" href="#class-diagram">3.1 类图</a>
       <a class="nav-sub" href="#module-responsibility">3.2 职责拆分</a>
+      <a class="nav-sub" href="#interfaces">3.3 接口草案</a>
       <a href="#flows">4. 时序图</a>
       <a class="nav-sub" href="#flow-client-put">4.1 Client 写入</a>
       <a class="nav-sub" href="#flow-remote-get">4.2 Worker remote get</a>
@@ -210,22 +211,36 @@ classDiagram
       +DRAINING
     }
     class WorkerUbPathHealth {
-      +AVAILABLE
-      +UNAVAILABLE
-      +PROBING
-      +last_error_code
-      +epoch
+      +CheckUbReachable(peer, op)
+      +FilterUbReachableWorkers(candidates, op)
+      +ReportOutcome(outcome)
+      +MarkProbeSuccess(peer)
+      +GetState(peer)
     }
     class TransportPathAdmission {
       +CheckWriteTarget(worker)
       +CheckReadSource(worker)
       +CheckMigrationTarget(worker)
+      +CheckReceiverEndpoint(receiver)
     }
-    class UbPathObservationCache {
-      +MarkFailure(peer, reason)
-      +MarkProbing(peer)
-      +MarkAvailable(peer)
-      +Get(peer)
+    class UbFailureClassifier {
+      +Classify(outcome)
+      +ShouldMarkUnavailable(outcome, oldState)
+    }
+    class UbOpOutcome {
+      +peer
+      +operation
+      +reporter
+      +status
+      +providerStatus
+      +cqeStatus
+    }
+    class UbRecoveryProbe {
+      +TryEnterProbe(peer)
+      +Probe(peer)
+    }
+    class UbFallbackPolicy {
+      +CanFallback(op, payloadSize, status)
     }
     class UrmaManager {
       +UrmaWritePayload()
@@ -245,8 +260,11 @@ classDiagram
     }
     TransportPathAdmission --> WorkerServiceMode
     TransportPathAdmission --> WorkerUbPathHealth
-    WorkerUbPathHealth --> UbPathObservationCache
-    UbPathObservationCache ..> UrmaManager : observe status
+    TransportPathAdmission --> UbFallbackPolicy
+    WorkerUbPathHealth --> UbFailureClassifier
+    UbFailureClassifier --> UbOpOutcome
+    UbRecoveryProbe --> WorkerUbPathHealth
+    UrmaManager ..> UbOpOutcome : explicit operator status
     UrmaManager --> UrmaResource : Jetty/JFC/Event
     TransportPathAdmission ..> ClusterManager : service/rpc state
     ClusterManager --> HashRing : membership/recovery
@@ -256,11 +274,11 @@ classDiagram
         <div class="grid-2">
           <div class="card">
             <div class="card-title">发起端：Requester / URMA Writer</div>
-            <p>发起 URMA 单边操作的一端拥有最可靠的失败观测。它负责分类错误、更新本地 <code>UbPathObservationCache</code>、向上层返回可识别错误，并参与恢复探测。</p>
+            <p>发起 URMA 单边操作的一端拥有最可靠的失败观测。它负责形成 <code>UbOpOutcome</code>、调用 <code>UbFailureClassifier</code> 分类，并通过 <code>WorkerUbPathHealth</code> 更新本地 health。</p>
           </div>
           <div class="card">
-            <div class="card-title">数据 Provider</div>
-            <p>Provider 对外提供数据，并常常根据 RPC 里的 URMA info 写回对端。URMA Write 的真实 completion/error 只在 Provider 侧出现；Provider 失败后要把“对端 UB 不可写”的显式 URMA 状态反馈给 requester，避免 requester 只能靠 RPC 超时猜测。</p>
+            <div class="card-title">Worker Provider</div>
+            <p>只有 Worker 提供 object data，并常常根据 RPC 里的 URMA info 写回对端。URMA Write 的真实 completion/error 只在 Worker Provider 侧出现；Provider 失败后要把“对端 UB 不可写”的显式 URMA 状态反馈给 requester，避免 requester 只能靠 RPC 超时猜测。</p>
           </div>
           <div class="card">
             <div class="card-title">服务级状态</div>
@@ -272,7 +290,7 @@ classDiagram
           </div>
         </div>
         <div class="note warn">
-          命名建议：不要用过重的 <code>DataPlaneHealthManager</code> 语义。更贴切的是 <code>UbPathObservationCache</code> + <code>TransportPathAdmission</code>：前者记录局部观测，后者做组合准入。
+          命名建议：不要用过重的 <code>DataPlaneHealthManager</code> 语义。更贴切的是 <code>WorkerUbPathHealth</code> + <code>TransportPathAdmission</code>：前者记录局部观测和恢复状态，后者做组合准入。
         </div>
         <div class="table-wrap">
           <table>
@@ -281,6 +299,37 @@ classDiagram
             <tbody>
               <tr><td>Client</td><td>Put/Set/Get 业务请求；消费 worker 返回的 Get/写回状态</td><td>Client -> Worker Put/Set 的 UB write</td><td>否</td><td>写前检查 target，读前消费显式 worker URMA status；本端 Put ERROR 4 直接标记 target；RPC timeout/failure 只按 RPC/peer suspect 处理</td></tr>
               <tr><td>Worker</td><td>worker-worker remote get、migration、rebalance task 执行</td><td>worker->client Get 写回、worker->worker remote get 写回、migration direct read/write</td><td>是</td><td>provider 写回前做准入；URMA Write ERROR 4 后返回显式状态；remote get 过滤 source；migration/rebalance 过滤 target</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3 id="interfaces">3.3 接口草案</h3>
+        <div class="table-wrap">
+          <table>
+            <caption>关键接口和语义</caption>
+            <thead><tr><th>接口</th><th>调用方</th><th>语义</th><th>返回/副作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>UbFailureClassifier::Classify(outcome)</code></td><td>URMA operator wrapper、RPC response consumer</td><td>把显式 URMA status 分类。<code>ERROR 4</code> 必须来自 provider/CQE/operator status，不能由 RPC timeout 合成。</td><td><code>PORT_UNAVAILABLE_ERROR4</code>、<code>TIMEOUT_THRESHOLD</code>、<code>NON_UB_FAILURE</code> 等。</td></tr>
+              <tr><td><code>WorkerUbPathHealth::ReportOutcome(outcome)</code></td><td>Client Put、worker provider writeback、migration direct read/write、probe</td><td>记录一次真实 operator outcome 或显式 RPC status。</td><td>必要时把 peer 状态置为 <code>UNAVAILABLE</code>，更新 epoch、reason、cooldown。</td></tr>
+              <tr><td><code>TransportPathAdmission::CheckWriteTarget(worker)</code></td><td>Client Put/Set、worker create/admission</td><td>判断目标 worker 是否可继续作为 UB 写入目的端。</td><td>失败返回 <code>K_URMA_WORKER_UNAVAILABLE</code>，不进入真实 UB write。</td></tr>
+              <tr><td><code>TransportPathAdmission::CheckReadSource(worker)</code></td><td>Client Get / worker remote get source selection</td><td>过滤 UB path unavailable 的数据 location。</td><td>无健康 source 时返回 <code>K_URMA_DATA_WORKER_UNAVAILABLE</code>。</td></tr>
+              <tr><td><code>TransportPathAdmission::CheckReceiverEndpoint(receiver)</code></td><td>Worker Provider 写回 client/worker 前</td><td>判断是否还能把 UB 数据写到 requester/receiver。</td><td>失败时 provider 显式返回 URMA 数据面异常，不默认 TCP fallback。</td></tr>
+              <tr><td><code>TransportPathAdmission::CheckMigrationTarget(worker)</code></td><td>DataMigrator、NodeSelector、RebalanceExecutor</td><td>判断目标 worker 是否可作为迁移/rebalance target。</td><td>失败时 task fail fast 或重选 target。</td></tr>
+              <tr><td><code>UbFallbackPolicy::CanFallback(op, size, status)</code></td><td>Get/remote get fallback 分支</td><td>统一控制 fallback。默认 false；开启时也只允许小对象。</td><td>fallback 成功不清除 UB health，只打点记录降级。</td></tr>
+              <tr><td><code>UbRecoveryProbe::Probe(peer)</code></td><td>worker 后台 probe，client lazy probe</td><td>cooldown 后通过 handshake/warmup/small transfer 验证恢复。</td><td>N 次成功后 <code>AVAILABLE</code>；失败回 <code>UNAVAILABLE</code> 并 backoff。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption>现有代码接入点</caption>
+            <thead><tr><th>路径</th><th>新增调用</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td><code>ClientWorkerBaseApi::SendBufferViaUb*</code></td><td><code>CheckWriteTarget</code> + <code>ReportOutcome</code></td><td>Client 自己发起 URMA write，ERROR 4 直接标记 target worker。</td></tr>
+              <tr><td><code>GetRequest::UbWriteHelper</code></td><td><code>CheckReceiverEndpoint</code> + <code>ReportOutcome</code></td><td>Worker Provider 写回 client；client 只消费显式 response/status。</td></tr>
+              <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code></td><td><code>CheckReceiverEndpoint</code> + <code>UbFallbackPolicy</code></td><td>Worker Provider 写回 requester worker；RPC timeout 不能合成 ERROR 4。</td></tr>
+              <tr><td><code>PullObjectDataFromRemoteWorker</code></td><td><code>CheckReadSource</code></td><td>Requester worker 构造 remote get 前过滤 source。</td></tr>
+              <tr><td><code>DataMigrator::ConnectAndCreateRemoteApi</code></td><td><code>CheckMigrationTarget</code></td><td>迁移目标二次准入，避免任务撞坏 target。</td></tr>
+              <tr><td><code>RebalanceExecutor::MigrateToTarget</code></td><td><code>CheckMigrationTarget</code></td><td>处理 stale task：执行前再查一次 target UB path。</td></tr>
             </tbody>
           </table>
         </div>
@@ -381,7 +430,7 @@ sequenceDiagram
           <div class="diagram-title">UB 恢复只恢复数据面准入，不替代 TCP membership</div>
           <div class="mermaid">
 sequenceDiagram
-    participant O as UbPathObservationCache
+    participant O as WorkerUbPathHealth
     participant U as UrmaManager
     participant P as Probe
     participant A as TransportPathAdmission
@@ -428,7 +477,7 @@ sequenceDiagram
         <h2>6. 落地策略</h2>
         <h3>6.1 最小修改点</h3>
         <div class="grid-2">
-          <div class="card"><div class="card-title">新增轻量模块</div><p><code>UbPathObservationCache</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
+          <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
           <div class="card"><div class="card-title">新增准入接口</div><p><code>TransportPathAdmission</code>：给 put/get/migrate/rebalance 调用，组合服务态、UB 观测、fallback 策略。</p></div>
           <div class="card"><div class="card-title">新增错误码</div><p>新增或复用 URMA error 家族，表达“数据所在 Worker UB 不可用”与“目标 Worker UB 接收不可用”。</p></div>
           <div class="card"><div class="card-title">新增恢复 probe</div><p>先 cool-down，再 small probe。probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>

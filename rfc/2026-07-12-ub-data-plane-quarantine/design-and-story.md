@@ -633,6 +633,135 @@ fallback 成功，后续写入/迁移仍继续选择同一个坏 worker，形成
   `K_URMA_DATA_WORKER_UNAVAILABLE`。前者用于写/迁移目的端被挡，后者用于 Get
   只能依赖 UB unavailable 数据 worker 时 fail-fast。
 
+#### 1.1 关键类与模块职责
+
+第一版建议放在 Object Cache / transport adapter 边界，而不是塞进 `common/rdma`。
+`common/rdma` 继续只暴露 URMA 执行结果、completion、Jetty/lane 恢复能力。
+
+| 类 / 模块 | 建议归属 | 责任 | 不负责 |
+| ---- | ---- | ---- | ---- |
+| `UbOpOutcome` | object-cache/common transport adapter | 承载一次 URMA 操作结果: peer、operation、reporter、status、provider/CQE status、payload size、request id | 不做 admission，不修改 health |
+| `UbFailureClassifier` | object-cache/common utility | 把 `Status` + `UbOpOutcome` 分类为 success、ERROR 4 port unavailable、connect/path failure、timeout-threshold、non-UB failure | 不保存状态 |
+| `WorkerUbPathHealth` | client/worker 进程内组件 | 按 worker address 维护 `AVAILABLE / UNAVAILABLE / PROBING`，提供 mark/filter/check API | 不读写 metadata，不判断 worker membership |
+| `TransportPathAdmission` | object-cache admission facade | 组合 `WorkerServiceMode`、`WorkerUbPathHealth`、fallback policy，给 put/get/migrate/rebalance 做统一准入 | 不执行 URMA，不做恢复 probe |
+| `UbRecoveryProbe` | worker 优先，client lazy | cooldown 后探测 peer UB path，连续成功后恢复 `AVAILABLE` | 不使用真实业务写请求做探测 |
+| `UbFallbackPolicy` | object-cache policy utility | 判断当前 op 是否允许 TCP fallback，默认 false，payload `<=1MiB` 才可放行 | fallback 成功不清除 UB failure |
+| `UbHealthReporter` | 后续增强 | 把 worker 本地 UB 状态通过已有 resource/health report 扩散 | 第一版不要求 cluster-wide 一致视图 |
+
+#### 1.2 核心数据结构
+
+```cpp
+enum class UbOperationKind {
+    CLIENT_PUT,
+    CLIENT_GET_WRITEBACK,
+    WORKER_REMOTE_GET_WRITEBACK,
+    MIGRATION_DIRECT_READ,
+    MIGRATION_WRITE,
+    REBALANCE_WRITE,
+    RECOVERY_PROBE,
+};
+
+enum class UbReporterRole {
+    COORDINATOR,
+    URMA_OPERATOR,
+    WORKER_PROVIDER,
+    RECEIVER_ENDPOINT,
+    RECOVERY_PROBE,
+};
+
+enum class UbFailureClass {
+    SUCCESS,
+    PORT_UNAVAILABLE_ERROR4,
+    CONNECT_OR_PATH_FAILURE,
+    TIMEOUT_THRESHOLD,
+    LOCAL_UB_UNAVAILABLE,
+    NON_UB_FAILURE,
+};
+
+struct UbOpOutcome {
+    HostPort peer;
+    UbOperationKind op;
+    UbReporterRole reporter;
+    Status status;
+    std::optional<int> providerStatus; // ERROR 4 lives here when available.
+    std::optional<int> cqeStatus;
+    uint64_t payloadSize = 0;
+    std::string requestId;
+    std::string learnedFrom; // local_completion / rpc_status / fallback / probe.
+};
+
+struct UbPathState {
+    UbPathHealthState state = UbPathHealthState::AVAILABLE;
+    Status lastStatus = Status::OK();
+    UbFailureClass lastFailureClass = UbFailureClass::SUCCESS;
+    uint64_t firstFailureMs = 0;
+    uint64_t lastFailureMs = 0;
+    uint64_t quarantineUntilMs = 0;
+    uint64_t nextProbeMs = 0;
+    uint32_t consecutiveFailures = 0;
+    uint32_t consecutiveProbeSuccess = 0;
+    uint64_t epoch = 0;
+};
+```
+
+关键约束:
+
++ `ERROR 4` 必须通过 `UbOpOutcome.providerStatus/cqeStatus` 或明确 URMA status
+  传递，不能由 RPC timeout 推导。
++ `peer` 的含义按操作解释: client put 是 target worker；provider 写回 client/worker
+  是 receiver endpoint；migration/rebalance 是 target worker；read source 过滤是 data
+  location worker。
++ client 和 worker 都各自有本进程内 `WorkerUbPathHealth`。第一版不要求所有进程
+  立刻共享相同视图。
+
+#### 1.3 接口草案
+
+```cpp
+class UbFailureClassifier {
+public:
+    UbFailureClass Classify(const UbOpOutcome &outcome) const;
+    bool ShouldMarkUnavailable(const UbOpOutcome &outcome, const UbPathState &oldState) const;
+};
+
+class WorkerUbPathHealth {
+public:
+    Status CheckUbReachable(const HostPort &peer, UbOperationKind op) const;
+    bool IsUbReachable(const HostPort &peer, UbOperationKind op) const;
+    std::vector<HostPort> FilterUbReachableWorkers(
+        const std::vector<HostPort> &candidates, UbOperationKind op) const;
+
+    void ReportOutcome(const UbOpOutcome &outcome);
+    void MarkUbFailure(const HostPort &peer, UbOperationKind op, const Status &rc,
+                       UbFailureClass failureClass, const std::string &learnedFrom);
+    void MarkProbeStart(const HostPort &peer);
+    void MarkProbeSuccess(const HostPort &peer);
+    void MarkProbeFailure(const HostPort &peer, const Status &rc, UbFailureClass failureClass);
+    std::optional<UbPathState> GetState(const HostPort &peer) const;
+};
+
+class TransportPathAdmission {
+public:
+    Status CheckWriteTarget(const HostPort &worker, UbOperationKind op) const;
+    Status CheckReadSource(const HostPort &worker) const;
+    Status CheckMigrationTarget(const HostPort &worker) const;
+    Status CheckReceiverEndpoint(const HostPort &receiver, UbOperationKind op) const;
+};
+
+class UbFallbackPolicy {
+public:
+    bool CanFallback(UbOperationKind op, uint64_t payloadSize, const Status &fastTransportStatus) const;
+};
+```
+
+接口语义:
+
++ `Check*` 返回 `K_URMA_WORKER_UNAVAILABLE` 或
+  `K_URMA_DATA_WORKER_UNAVAILABLE` 时，调用方不再进入真实 URMA 操作。
++ `ReportOutcome` 只接受真实 operator outcome 或显式 RPC status。RPC timeout/failure
+  可以记录为 `provider/RPC suspect` metric，但不能生成 `PORT_UNAVAILABLE_ERROR4`。
++ `CheckReceiverEndpoint` 专门给 worker provider 写回 client/worker 前使用；它回答
+  “当前是否还应该把 UB 数据写到这个 receiver”。
+
 PR1277 相关边界:
 
 + `common/rdma` 继续负责 lane acquire/release/retire、Jetty recreate、completion
