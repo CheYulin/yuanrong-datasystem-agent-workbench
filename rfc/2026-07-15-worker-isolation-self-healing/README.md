@@ -1,0 +1,16 @@
+# Worker Isolation Self-Healing RFC
+
+**Status**: Draft  
+**Date**: 2026-07-15  
+**Source baseline**: `main/master` `911abcefb36b4ff5e4138ccc5a90f439342dcc24`
+
+This RFC analyzes current worker self-termination paths when
+`auto_del_dead_node=true`, and proposes replacing network-jitter-triggered
+self-kill with explicit worker runtime state, service admission control, and
+recovery/reconciliation.
+
+Documents:
+
+- [design-and-story.md](./design-and-story.md): story, existing exit path
+  analysis, impact, module abstraction, and core logic.
+

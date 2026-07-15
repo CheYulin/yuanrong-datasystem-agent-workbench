@@ -623,6 +623,39 @@ PR1277 相关边界:
 + worker 可以 membership `READY`，但 UB path `UNAVAILABLE`；此时控制面可达，
   数据面写入/迁移被挡。
 
+与 TCP 闪断自愈特性的边界:
+
++ TCP/etcd 闪断自愈特性负责 worker 本地服务状态和集群身份恢复，核心抽象是
+  `WorkerServiceMode`：`STARTING / JOINING / RUNNING / DRAINING /
+  LOCAL_ISOLATED / OUT_OF_MEMORY / RECOVERING / STOPPING`。它回答的问题是
+  **这个 worker 本进程现在能不能对外服务**。
++ UB data-plane quarantine 负责 UB 数据面路径可用性，核心抽象是
+  `WorkerUbPathHealth`：`AVAILABLE / UNAVAILABLE / PROBING`。它回答的问题是
+  **当前 client/worker 是否还应该通过 UB 访问目的 worker W**。
++ TCP 闪断恢复进入 `LOCAL_ISOLATED`、`RECOVERING`、`DRAINING`、
+  `OUT_OF_MEMORY` 或 `STOPPING` 时，该 worker 不应作为普通写入、迁移、rebalance
+  target；UB 层不需要重复判断这些本地 service mode，只消费最终 admission 结果。
++ UB path `UNAVAILABLE` 不等价于 worker `LOCAL_ISOLATED`。worker 可能 TCP/RPC
+  可达、membership 正常、甚至 `WorkerServiceMode=RUNNING`，但 UB port/path
+  不可用，此时只阻断 UB 相关写入/迁移和唯一 source 读取。
++ TCP 闪断恢复要处理 metadata 清理、primary/local copy/L2 ownership 对账和恢复后
+  是否重新 `RUNNING`；UB 隔离第一版不处理 ownership 重建，只避免继续向 UB
+  不可达 worker 制造新数据或迁移数据。
++ 两个特性共同参与 admission 时取更保守结果:
+
+```text
+CanWriteOrMigrateTo(worker)
+  = WorkerServiceMode(worker) == RUNNING
+    && WorkerUbPathHealth(worker) == AVAILABLE
+```
+
++ Get/read 的判断也分层：`WorkerServiceMode != RUNNING` 表示 worker 本身不可作为
+  正常数据 provider；`WorkerUbPathHealth != AVAILABLE` 表示当前路径不应继续尝试
+  UB 数据搬运。如果没有其它健康 location，返回快速失败。
++ 恢复也分层：TCP/etcd 恢复完成并不自动清除 UB quarantine；UB 恢复必须由
+  `UbRecoveryProbe` 成功后才回 `AVAILABLE`。反过来，UB probe 成功也不能把
+  `WorkerServiceMode` 从 `RECOVERING` 推成 `RUNNING`。
+
 #### 3. 运行
 
 运行期按三角色协作:

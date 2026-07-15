@@ -88,6 +88,34 @@ Optional policy:
   Larger payloads fail fast and keep the UB failure signal visible.
 - Fallback success does not clear quarantine or suppress UB failure accounting.
 
+Relationship with TCP/etcd self-healing:
+
+- TCP/etcd self-healing owns worker local service state, membership
+  revalidation, metadata cleanup, primary/local-copy/L2 ownership
+  reconciliation, and the decision that a worker can return to
+  `WorkerServiceMode=RUNNING`.
+- UB data-plane quarantine owns only UB path eligibility. It decides whether
+  the current client/worker should keep using UB to reach destination worker
+  `W`.
+- `WorkerServiceMode != RUNNING` is a stronger service-level block. Such a
+  worker must not be selected for normal writes, migration, rebalance target, or
+  normal data provider service regardless of UB path state.
+- `WorkerUbPathHealth != AVAILABLE` is a data-plane block. It can happen while
+  TCP/RPC and membership are healthy; in that case the worker may stay in
+  cluster membership, but UB-backed writes/migration and sole-source reads must
+  fail fast or reselect.
+- Recovery is independent and conjunctive: TCP reconnect and metadata
+  reconciliation do not clear UB quarantine; UB probe success does not make a
+  `RECOVERING` worker `RUNNING`.
+
+Combined admission:
+
+```text
+CanWriteOrMigrateTo(worker)
+  = WorkerServiceMode(worker) == RUNNING
+    && WorkerUbPathHealth(worker) == AVAILABLE
+```
+
 ## 5. State Machine
 
 ```text
