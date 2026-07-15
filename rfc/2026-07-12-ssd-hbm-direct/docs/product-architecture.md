@@ -1,7 +1,7 @@
 # Product Architecture Notes (Discussion Material)
 
 **Source**: 内部讨论稿「DataSystem 集成 NDS SSD 直通 HBM…统一 KV 接口」  
-**Mapped into**: [design.md](./design.md), [tech-brief-xds-nds.md](./tech-brief-xds-nds.md)
+**Mapped into**: [design.md](../design.md), [tech-brief-xds-nds.md](./tech-brief-xds-nds.md)
 
 ## Module map
 

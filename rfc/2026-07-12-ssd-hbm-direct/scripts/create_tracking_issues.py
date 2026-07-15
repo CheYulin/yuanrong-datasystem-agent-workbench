@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create GitCode tracking issues for SSD→HBM deferred tasks."""
+"""Create the single GitCode issue for SSD→HBM Track① PR-1 (datasystem repo)."""
 
 from __future__ import annotations
 
@@ -11,66 +11,31 @@ import urllib.request
 from pathlib import Path
 
 API_BASE = os.environ.get("API_BASE", "https://api.gitcode.com/api/v5")
-OWNER = os.environ.get("OWNER", "openeuler")
+# Fork has token permission; openeuler upstream returns 403 for most tokens.
+OWNER = os.environ.get("OWNER", "yche-huawei")
 REPO = os.environ.get("REPO", "yuanrong-datasystem")
 TOKEN_FILE = Path.home() / ".local" / "gitcode_token"
 
-ISSUES = [
-    {
-        "key": "track1_parent",
-        "title": "[Feature] SSD→HBM Direct (NDS) Track① — injectable interfaces + binmock verify",
-        "body": """Phase-1 SSD→HBM direct I/O for local spilled objects only.
+# One PR → one issue. Deferred tasks (4b–6, L2) stay in RFC/WBS, not separate issues.
+ISSUE = {
+    "key": "track1",
+    "title": "[Feature] SSD→HBM Direct (NDS) Track① — injectable interfaces + binmock verify",
+    "body": """Phase-1 SSD→HBM direct I/O for **local spilled objects only** (feat/ssd-hbm-direct → openeuler/yuanrong-datasystem).
 
-**Landed in PR (feat/ssd-hbm-direct)**
-- AlignmentGate, MockIpcHbmBackend, FakeNdsSpillReader
-- HbmMappingTable + NdsDirectPath eligibility
-- ds_ut_nds (14 UT) + Gate0 5× HeteroD2H (xqyun isolated verify)
+**This PR lands**
+- `AlignmentGatePass`, `MockIpcHbmBackend`, `FakeNdsSpillReader`
+- `HbmMappingTable`, `NdsDirectPath` eligibility helpers
+- Focused UT target `ds_ut_nds` (14 cases) + Gate0 5× `HeteroD2HTest` (xqyun isolated verify)
 
-**Deferred**
-- RegisterHbmBuffer RPC
-- Worker Get NDS bypass
-- NdsBinmockFlow e2e ST
+**Explicitly out of scope (follow-up PRs, tracked in workbench RFC/WBS)**
+- RegisterHbmBuffer / Unregister RPC
+- Worker Get NDS bypass in `worker_oc_service_get_impl.cpp`
+- `NdsBinmockFlow` e2e ST
+- L2 real CANN IPC / xds backends
 
-RFC: yuanrong-datasystem-agent-workbench/rfc/2026-07-12-ssd-hbm-direct/""",
-        "labels": "kind/feature",
-    },
-    {
-        "key": "task4b",
-        "title": "[Feature] SSD→HBM Task 4b: RegisterHbmBuffer / Unregister RPC",
-        "body": "Worker/client RPC: Export key → MockIpc Import → HbmMappingTable.\n\nRFC: rfc/2026-07-12-ssd-hbm-direct/implementation-plan.md Task 4b",
-        "labels": "kind/feature",
-    },
-    {
-        "key": "task5",
-        "title": "[Feature] SSD→HBM Task 5: local spilled Get NDS bypass + fallback",
-        "body": "Wire NdsDirectPath into worker_oc_service_get_impl.cpp KeepObjectDataInMemory.\n\nRFC: implementation-plan.md Task 5",
-        "labels": "kind/feature",
-    },
-    {
-        "key": "task6",
-        "title": "[Feature] SSD→HBM Task 6: NdsBinmockFlow e2e ST",
-        "body": "binmock e2e Register → spill → Get → FakeNds → D2H.\n\nRFC: implementation-plan.md Task 6",
-        "labels": "kind/feature",
-    },
-    {
-        "key": "task8",
-        "title": "[Feature] SSD→HBM Task 8: WORKER_NDS_* observability",
-        "body": "PerfKey / AccessRecorder for NDS direct vs fallback.\n\nRFC: observability.md",
-        "labels": "kind/feature",
-    },
-    {
-        "key": "task9",
-        "title": "[Feature] SSD→HBM Task 9: CannIpcHbmBackend (L2 Stage A)",
-        "body": "Real CANN IPC backend. L2 hardware validation.\n\nRFC: tech-brief-cann-ipc-hbm.md",
-        "labels": "kind/feature",
-    },
-    {
-        "key": "task10",
-        "title": "[Feature] SSD→HBM Task 10: XdsNdsSpillReader (L2 Stage B)",
-        "body": "Real xds read_file + drain_read. Depends on Stage A.\n\nRFC: tech-brief-xds-nds.md",
-        "labels": "kind/feature",
-    },
-]
+RFC: `yuanrong-datasystem-agent-workbench/rfc/2026-07-12-ssd-hbm-direct/`""",
+    "labels": "kind/feature",
+}
 
 
 def load_token() -> str:
@@ -102,13 +67,11 @@ def create_issue(token: str, title: str, body: str, labels: str) -> dict:
 def main() -> int:
     token = load_token()
     out_dir = Path(__file__).resolve().parent.parent
-    results: dict[str, dict] = {}
-    for item in ISSUES:
-        data = create_issue(token, item["title"], item["body"], item.get("labels", ""))
-        number = data.get("number") or data.get("iid")
-        url = data.get("html_url") or data.get("web_url") or data.get("url")
-        results[item["key"]] = {"number": number, "url": url, "title": item["title"]}
-        print(f"{item['key']}: #{number} {url}")
+    data = create_issue(token, ISSUE["title"], ISSUE["body"], ISSUE.get("labels", ""))
+    number = data.get("number") or data.get("iid")
+    url = data.get("html_url") or data.get("web_url") or data.get("url")
+    results = {ISSUE["key"]: {"number": number, "url": url, "title": ISSUE["title"]}}
+    print(f"{ISSUE['key']}: #{number} {url}")
     out_file = out_dir / "issues-created.json"
     out_file.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {out_file}")

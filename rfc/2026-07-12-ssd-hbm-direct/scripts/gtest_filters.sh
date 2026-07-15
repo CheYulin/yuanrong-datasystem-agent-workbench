@@ -20,4 +20,5 @@ NdsDirectPathTest.*}"
 # Task 6 e2e (when NdsBinmockFlow lands) + minimal Hetero regression
 export BINMOCK_FLOW_GTEST_FILTER="${BINMOCK_FLOW_GTEST_FILTER:-\
 NdsBinmockFlow*:\
+NdsClusterSpillRwTest.*:\
 HeteroD2HTest.TestAllExist}"

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Process:** Superpowers `writing-plans` · Spec: [README](./README.md) / [decisions.md](./decisions.md) / [work-breakdown.md](./work-breakdown.md) / [env-validation.md](./env-validation.md)
+> **Process:** Superpowers `writing-plans` · Spec: [README](../README.md) / [decisions.md](../decisions.md) / [work-breakdown.md](../work-breakdown.md) / [env-validation.md](./env-validation.md)
 
 **Goal:** 在无 NPU 的 L0/L1 上用 **binmock + FakeNds** 把 Register → Get(spilled) → HBM 交付整条流程串通；L2 真机由人工跑 Agent 准备好的脚本完成 ② IPC / ③ SSD→HBM 穿刺。
 
@@ -25,7 +25,7 @@
 | 项 | 值 |
 |----|-----|
 | Local worktree | `yuanrong-datasystem/.worktrees/ssd-hbm-direct` |
-| Branch | `feat/ssd-hbm-direct` ← `origin/master` |
+| Branch | `feat/ssd-hbm-direct` ← **`main/master`** |
 | xqyun 隔离源码 | `/root/workspace/git-repos/yuanrong-datasystem-ssd-hbm-direct` |
 | xqyun 隔离 build | `/root/workspace/build-ssd-hbm-direct` |
 | 现成 ST 二进制（Gate 0） | `/root/workspace/git-repos/yuanrong-datasystem/build/tests/st/ds_device_llt` |
@@ -38,14 +38,14 @@
 
 **禁止**用其他工程目录的旧 `ds_device_llt`。
 
-- [x] Worktree `feat/ssd-hbm-direct` ← `origin/master`
+- [x] Worktree `feat/ssd-hbm-direct` ← **`main/master`**（rebase 脚本：`scripts/rebase_onto_main_master.sh`）
 - [x] 三方件：`/root/.cache/yuanrong-datasystem-third-party`（`nodes.yaml` xqyun；openssl 缓存命中 ~3s）
 - [x] 隔离源码 / build：`...-ssd-hbm-direct` / `build-ssd-hbm-direct`
 - [ ] 隔离编出 `ds_device_llt`（进行中）
 - [ ] 对该二进制：`HeteroD2H*` PASS
 
 ```bash
-bash rfc/2026-07-12-ssd-hbm-direct/scripts/prepare_build_and_st_xqyun.sh
+bash rfc/2026-07-12-ssd-hbm-direct/scripts/verify_track1_xqyun.sh
 ```
 
 ---

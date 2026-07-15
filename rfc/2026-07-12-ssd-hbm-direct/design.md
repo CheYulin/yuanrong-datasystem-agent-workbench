@@ -1,8 +1,8 @@
 # Design: DataSystem × NDS SSD→HBM Direct
 
-**Status**: Draft（brainstorming in progress）  
-**Date**: 2026-07-12  
-**Related**: [flow-analysis.md](./flow-analysis.md), [references.md](./references.md)
+**Status**: In-Progress（Track① PR-1；见 [README](./README.md)）
+**Date**: 2026-07-12
+**Related**: [docs/flow-analysis.md](./docs/flow-analysis.md), [docs/references.md](./docs/references.md), [design-and-story.md](./design-and-story.md)
 
 ## 1. Why
 
@@ -44,12 +44,12 @@ local object table hit
 && AlignmentGate(file_offset, length, hbm_va+dest_off)  // 见 alignment.md
 ```
 
-不满足任一项 → `LoadSpilledObjectToMemory` / 既有 Get 路径。  
+不满足任一项 → `LoadSpilledObjectToMemory` / 既有 Get 路径。
 **对齐失败不得强行走 xds**（公开 so 对偏移/地址敏感；错对齐风险高于多一次 DRAM）。
 
 ## 3.1 Alignment（一等约束）
 
-完整条文见 [alignment.md](./alignment.md)。摘要：
+完整条文见 [docs/alignment.md](./docs/alignment.md)。摘要：
 
 | 侧 | Phase-1 建议门禁 | 产品下限 |
 |----|------------------|----------|
@@ -66,7 +66,7 @@ Spill 现状不保证对象文件内对齐 → 读侧检查 + fallback；后续�
 | 仍在 `SpillBuffer`（未 flush 到文件） | **旧 DRAM 路径**（`LoadSpilledObjectToMemory` / host `Get`） |
 | 已有文件 `ObjectLocation`（已落盘） | 可走 **NDS 直通**（再过 AlignmentGate / IPC 等） |
 
-不做直通前强制 flush：避免读路径耦合写放大与 buffer 锁；小对象短窗口走 DRAM 可接受。  
+不做直通前强制 flush：避免读路径耦合写放大与 buffer 锁；小对象短窗口走 DRAM 可接受。
 判定：`SpillFileManager` 侧 `buffer_.Exist(key)` → 禁 NDS；仅 `objLocations_` 命中文件再考虑直通。
 ## 4. Architecture（To-Be 本地读）
 
@@ -90,7 +90,7 @@ Spill 现状不保证对象文件内对齐 → 读侧检查 + fallback；后续�
                               Local SSD (RAID0 ×3)
 ```
 
-写路径 Phase-1 **不改**：仍是现有 Eviction → `WorkerOcSpill::Spill` → SSD。  
+写路径 Phase-1 **不改**：仍是现有 Eviction → `WorkerOcSpill::Spill` → SSD。
 （讨论中的「HBM 满再 spill」属容量策略，可后续与多级缓存一并做。）
 
 ## 5. Approaches Considered
@@ -153,24 +153,24 @@ Client process                         Worker process
 
 ### 6.1 Client
 
-- **RegisterHbmBuffer(deviceIdx, ptr, size, flags)**  
-  - 注册用户数据区（或显式通信区）→ 直通 **零拷贝**。  
-  - Client 进程 Export IPC key → RPC 给 Worker Import。  
-- **EnsureCommBuffer()**（内部，未 Register 时）：`aclrtMalloc` 专用 comm → **同一套** IPC+RPC；Get 完成后 **拷到用户 data**，调用方不可见 comm。  
-- **Get / MGet**：本地 spilled 且已有 Import mapping 时走 NDS 直通；完成后按 §5.3 交付。  
+- **RegisterHbmBuffer(deviceIdx, ptr, size, flags)**
+  - 注册用户数据区（或显式通信区）→ 直通 **零拷贝**。
+  - Client 进程 Export IPC key → RPC 给 Worker Import。
+- **EnsureCommBuffer()**（内部，未 Register 时）：`aclrtMalloc` 专用 comm → **同一套** IPC+RPC；Get 完成后 **拷到用户 data**，调用方不可见 comm。
+- **Get / MGet**：本地 spilled 且已有 Import mapping 时走 NDS 直通；完成后按 §5.3 交付。
 - Unregister / 析构：等 in-flight 结束后 `IpcMemClose` / free（专用 comm 仅 SDK 释放）。
 
 ### 6.2 Worker
 
 - 识别 `KeepObjectDataInMemory` / `PreProcessGetObject` 中 spilled 本地命中。
 - 新旁路：**不要**先 `AllocateMemoryForObject(DRAM)`；改为解析 `ObjectLocation` → 对已 Import 的 HBM VA 调 NDS。
-- 维护 `ImportedHbmMapping`：`clientId → {ipcKey, localVa, deviceIdx, size, role, refcount}`。  
+- 维护 `ImportedHbmMapping`：`clientId → {ipcKey, localVa, deviceIdx, size, role, refcount}`。
   - **不**因 `role=data|comm` 切换共享或 IO 实现。
 - 不修改 `LoadPayloadAndFillResponse` 的「spilled → 禁 RH2D」语义（远端仍禁）。
 
 ### 6.3 NDS / xds 适配层（新）
 
-详见 [tech-brief-xds-nds.md](./tech-brief-xds-nds.md)。要点：
+详见 [docs/tech-brief-xds-nds.md](./docs/tech-brief-xds-nds.md)。要点：
 
 - Userspace：`read_file` / `read_file_batch` / `drain_read`（`file_p2p_api`）
 - Kernel：`p2p_dev.c` NVMe READ SGL → HBM PA（`devmm_get_mem_pa_list`）
@@ -181,7 +181,7 @@ Client process                         Worker process
 
 ### 6.4 HBM IPC 共享（仓内现状：无 → Phase-1 新建）
 
-详见 [tech-brief-cann-ipc-hbm.md](./tech-brief-cann-ipc-hbm.md)。要点：Export key[65] → SetImportPid → Worker ImportByKey → NDS；Register 与专用 comm **同一套机制**。
+详见 [docs/tech-brief-cann-ipc-hbm.md](./docs/tech-brief-cann-ipc-hbm.md)。要点：Export key[65] → SetImportPid → Worker ImportByKey → NDS；Register 与专用 comm **同一套机制**。
 
 ## 7. Data Flow（本地 spilled Get）
 
@@ -237,7 +237,7 @@ Client process                         Worker process
 |------|------|
 | xds 内核模块与发行版内核绑定 | 环境矩阵；不可用即 fallback |
 | Client 数据 Buffer 生命周期 | Register 引用计数；Unregister 等 in-flight |
-| 512B / 2MB / **4K fiemap** 对齐 | **AlignmentGate 一等约束**；见 [alignment.md](./alignment.md) |
+| 512B / 2MB / **4K fiemap** 对齐 | **AlignmentGate 一等约束**；见 [docs/alignment.md](./docs/alignment.md) |
 | 与现有 RH2D 混淆 | 文档与代码路径显式分流；spilled 永不走 RH2D |
 | Spill 小对象 buffer 未落盘 | **已决**：走 DRAM（§3.2），不强制 flush |
 
@@ -245,14 +245,14 @@ Client process                         Worker process
 
 完整表见 [decisions.md](./decisions.md)。原 Open Questions 收口如下：
 
-1. 进程模型 → 同机跨进程 + CANN IPC（§5.1）  
-2. API → 统一 KV + Register；未注册 comm+拷贝（§5.2–5.3）  
-3. SpillBuffer → 未落盘走 DRAM；仅落盘可 NDS（§3.2）  
-4. 写路径 → Phase-1 **不动** HBM→SSD spill 大改  
-5. 验收 → 先相对 A/B；10MB/20ms 作参考不绑死 SLO  
-6. 对齐 → 可配置，**默认 4096**（下限 512）  
-7. Spill 写 pad → Phase-1 **不做**；读侧门禁 + fallback  
-8. XDS → `read_file`+`drain_read`；batch 后置；每请求 fd  
+1. 进程模型 → 同机跨进程 + CANN IPC（§5.1）
+2. API → 统一 KV + Register；未注册 comm+拷贝（§5.2–5.3）
+3. SpillBuffer → 未落盘走 DRAM；仅落盘可 NDS（§3.2）
+4. 写路径 → Phase-1 **不动** HBM→SSD spill 大改
+5. 验收 → 先相对 A/B；10MB/20ms 作参考不绑死 SLO
+6. 对齐 → 可配置，**默认 4096**（下限 512）
+7. Spill 写 pad → Phase-1 **不做**；读侧门禁 + fallback
+8. XDS → `read_file`+`drain_read`；batch 后置；每请求 fd
 
 待实机：Import VA⊕NVMe P2P、对齐降到 512、kernel 6.6、bdev 拓扑（decisions **V1–V4**）。
 

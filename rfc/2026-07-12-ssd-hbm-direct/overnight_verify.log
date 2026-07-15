@@ -1,8 +1,0 @@
-overnight start 2026-07-13T01:00:21+08:00
-ssh_wait poll=1 2026-07-13T01:00:22+08:00
-ssh_wait poll=2 2026-07-13T01:01:50+08:00
-ssh_ok poll=3 2026-07-13T01:03:20+08:00
-=== Gate0 ST ===
-GATE0_FAIL ec=1
-=== Task1 UT ===
-UT_FAIL ec=1

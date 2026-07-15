@@ -23,7 +23,7 @@ append() { echo "| $(date '+%H:%M') | $1 | $2 | $3 |" >> "$RESULTS"; }
 if [[ "$SKIP_SYNC" -eq 0 ]]; then
   echo "== sync =="
   ssh -o BatchMode=yes "$REMOTE" "mkdir -p '$REPO'"
-  rsync -az --exclude-from="$IGNORE" "$LOCAL/" "${REMOTE}:${REPO}/"
+  rsync -az --delete --exclude-from="$IGNORE" "$LOCAL/" "${REMOTE}:${REPO}/"
 fi
 
 echo "== build + tests on xqyun =="
@@ -37,6 +37,9 @@ UT_FILTER='${NDS_UT_GTEST_FILTER}'
 export DS_OPENSOURCE_DIR="\${CACHE}"
 cd "\${REPO}"
 echo BUILD_START=\$(date -Is)
+if [[ "${CLEAN_BUILD:-1}" == "1" ]]; then
+  rm -f "\${BUILD}/CMakeCache.txt"
+fi
 bash build.sh -t build -X off -P off -B "\${BUILD}" -j 16 -i on 2>&1 | tail -n 40
 echo BUILD_END=\$(date -Is)
 test -x "\${BUILD}/tests/st/ds_device_llt"

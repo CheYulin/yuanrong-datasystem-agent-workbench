@@ -2,7 +2,7 @@
 
 **Date**: 2026-07-12  
 **Status**: Draft  
-**Related**: [work-breakdown.md](./work-breakdown.md), [tech-brief-cann-ipc-hbm.md](./tech-brief-cann-ipc-hbm.md), [tech-brief-xds-nds.md](./tech-brief-xds-nds.md), [alignment.md](./alignment.md)
+**Related**: [work-breakdown.md](../work-breakdown.md), [tech-brief-cann-ipc-hbm.md](./tech-brief-cann-ipc-hbm.md), [tech-brief-xds-nds.md](./tech-brief-xds-nds.md), [alignment.md](./alignment.md)
 
 ## 1. 分阶段打通（先共享，后直通）
 
