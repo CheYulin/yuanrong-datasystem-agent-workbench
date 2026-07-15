@@ -1,5 +1,3 @@
-# Worker Isolation Self-Healing Story
-
 关联文档:
 
 + Source baseline: `main/master`
@@ -30,9 +28,9 @@
 | service admission | 请求入口准入 | 只有 `RUNNING` 可正常读写/迁移；`RECOVERING` 只允许内部恢复 RPC |
 | reconciliation / 对账 | 恢复时检查本地数据、master metadata、hash ring、slot recovery 的一致性 | 恢复完成前不对外宣称 RUNNING |
 
-## 现有自杀退出路径分析
+## 场景分析
 
-### 路径 1: etcd keepalive 失败确认本地网络隔离后 `SIGKILL`
+### 场景 1: etcd keepalive 失败确认本地网络隔离后 `SIGKILL`
 
 代码位置:
 
@@ -67,7 +65,7 @@ keepalive renew 失败
 + 如果本地仍有 write-back/L2 或未完成异步任务，直接 kill 会让数据恢复依赖后续 slot/meta recovery，放大风险。
 + 业务看到的是 worker 掉线，而不是短暂不可服务状态。
 
-### 路径 2: 本 worker 被 hash ring 判定为 passive scale down 后 `SIGKILL`
+### 场景 2: 本 worker 被 hash ring 判定为 passive scale down 后 `SIGKILL`
 
 代码位置:
 
@@ -100,7 +98,7 @@ ClusterManager 发现 worker timeout/failed
 + 如果是网络抖动导致其它节点误判，它会把误判固化为真实进程退出。
 + `SIGKILL` 无法做优雅收尾，可能绕过本地恢复/对账前置动作。
 
-### 路径 3: voluntary scale down 完成后的 `SIGTERM`
+### 场景 3: voluntary scale down 完成后的 `SIGTERM`
 
 代码位置:
 
@@ -120,7 +118,7 @@ workerAddr == local worker
 + 这是主动缩容/正常退出路径，不属于本需求要禁止的自杀。
 + 方案需要保留 `DRAINING -> STOPPING -> SIGTERM` 语义，避免影响已有 scale down。
 
-### 路径 4: 本 worker 从 ring 消失或进入 `del_node_info` 后进入 `FAIL`
+### 场景 4: 本 worker 从 ring 消失或进入 `del_node_info` 后进入 `FAIL`
 
 代码位置:
 
@@ -147,7 +145,11 @@ UpdateLocalState()
 + hash ring 视角的 `FAIL` 是 terminate state，后续很难恢复为 RUNNING。
 + 对网络恢复语义不友好：即使 TCP/etcd 后面恢复，本 worker 可能已经自杀或进入不可逆本地状态。
 
-## 现有恢复与元数据重建能力
+## 方案详细设计
+
+### 现状分析
+
+#### 现有恢复与元数据重建能力
 
 当前代码里已经有部分恢复能力，本需求应复用，不重做。
 
@@ -168,15 +170,15 @@ UpdateLocalState()
 + 不是缺恢复模块，而是自杀路径太早，进程退出前没有显式进入恢复/对账语义。
 + 第一版应把 kill 改成 runtime state transition，然后复用现有 recovery/reconciliation。
 
-## 影响与风险
+#### 影响与风险
 
-### 业务影响
+##### 业务影响
 
 + 网络抖动导致 worker 自杀，会让短暂不可达变成长时间不可用。
 + 客户端可能经历 worker 切换、请求失败、metadata owner/data owner 变更。
 + 如果本地 worker 与 client 同节点，进程退出会破坏 SHM/本地读写体验。
 
-### 数据可见性影响
+##### 数据可见性影响
 
 隔离前后可能出现数据可见性不一致:
 
@@ -193,7 +195,7 @@ UpdateLocalState()
 本地数据只有完成 metadata recovery/reconciliation 后才能重新对外可见。
 ```
 
-### 数据一致性、残留与可用性约束
+##### 数据一致性、残留与可用性约束
 
 本特性不能只把 `SIGKILL` 改成“不退出”。进程保活之后，必须显式处理三类约束。
 
@@ -212,15 +214,15 @@ UpdateLocalState()
 + **集群可用性不被单点抖动拖垮**：如果只有本 worker TCP/etcd 断链，其他 worker 没断，其他 worker 继续按现有 membership/ring 服务；本 worker 不自杀但也不服务。
 + **远端故障处理保留**：其它 worker 确认某个远端 worker failed 后，仍可走现有 passive scale down；第一版只改变“本 worker 自己因为隔离而 kill 自己”的路径。
 
-### 运维/DFX 影响
+##### 运维/DFX 影响
 
 + 不自杀后，worker 进程仍在，但不代表可服务；需要明确 runtime state 指标。
 + 需要区分 `process alive`、`coordination alive`、`membership confirmed`、`service admitted`。
 + 需要日志能说明为何进入 `LOCAL_ISOLATED`、何时进入 `RECOVERING`、恢复卡在哪个阶段。
 
-## 方案详细设计
+### 方案设计
 
-### 现状问题抽象
+#### 运行语义抽象
 
 旧语义用进程死亡隐式保证一致性:
 
@@ -242,7 +244,7 @@ UpdateLocalState()
   -> runtime state = RUNNING
 ```
 
-### 与 UB data-plane quarantine 的边界
+#### 与 UB data-plane quarantine 的边界
 
 本 RFC 与 `2026-07-12-ub-data-plane-quarantine` 解决的是相邻但不同的问题。
 
@@ -262,7 +264,7 @@ UpdateLocalState()
 + 两个 RFC 都遵循同一个原则：**宁可快速显式失败，也不要让静默故障持续降低成功率或制造不一致数据**。
 + 如果同时发生 UB 故障和 TCP/coordination 隔离，优先以更保守的状态生效：普通读写/迁移 target 均拒绝，恢复后再按 UB path health 与 meta/data ownership 双重对账开放。
 
-### 关联流程清单
+#### 关联流程清单
 
 本特性只改“本地隔离后的进程生死和服务准入”，但会影响多个现有流程的语义边界。
 
@@ -280,7 +282,7 @@ UpdateLocalState()
 | slot recovery | restart 后处理本地 slot 恢复 | recovering 阶段复用，完成前不 RUNNING |
 | clear data without meta | scale down/recovery 期间清理无 meta 数据 | 作为残留治理的一部分，恢复对账时复用 |
 
-### 当前状态表达的视角区分
+#### 当前状态表达的视角区分
 
 代码里不是完全没有 worker 状态，而是状态分散在不同决策主体。设计上必须区分
 **集群/coordination 决策状态** 和 **worker 本地服务状态**，否则很容易把“集群认为我是谁”
@@ -294,7 +296,7 @@ UpdateLocalState()
 | hash ring local state | worker 本地 HashRing 模块根据 ring 视图推导 | `NO_INIT / INIT / PRE_RUNNING / RUNNING / PRE_LEAVING / FAIL` | 本地 hash ring 是否可用、当前 worker 是否在 ring 内；`FAIL` 当前接近终态 | 作为本地发现“自己不该服务”的输入，不直接触发自杀 |
 | worker service mode | worker 进程本地 runtime/admission 模块 | 新增 `STARTING / JOINING / RUNNING / DRAINING / LOCAL_ISOLATED / OUT_OF_MEMORY / RECOVERING / STOPPING` | 当前进程是否允许普通读写、迁移 target、恢复 RPC | 作为所有 worker service 入口的最终准入门禁 |
 
-### 状态 owner、写权限与消费关系
+#### 状态 owner、写权限与消费关系
 
 为了避免实现时把 evidence 和 mutable state 混在一起，状态关系按 owner 拆开:
 
@@ -362,7 +364,7 @@ flowchart TD
     W -.must not write.-> R
 ```
 
-### Worker 数据归属判断
+#### Worker 数据归属判断
 
 `WorkerServiceMode` 只说明本 worker 当前是否能服务，不说明它在集群里是否拥有数据。
 本需求还需要独立判断 **cluster meta 归属** 和 **worker 本地数据归属**，用于隔离、
@@ -456,9 +458,19 @@ enum class WorkerLocalDataRole {
 + 不能仅凭本地数据存在就把 hash ring membership 改成 `ACTIVE`。
 + 不能在 master metadata 已切 primary 后，用本地旧 primary 状态覆盖集群事实。
 
-### 核心模块抽象
+#### 1. 构建
 
-#### 1. `WorkerRuntimeStateManager`
+第一版不新增跨仓依赖，主要新增或收敛以下 worker 本地构建单元:
+
++ `WorkerRuntimeStateManager`: 本地 service mode 和 evidence 准入。
++ `WorkerServiceAdmission`: Object/Stream/KV 服务入口统一准入 wrapper。
++ `LocalIsolationDetector`: 汇聚 keepalive、本地 hash ring 异常和 self passive scale down 信号。
++ `WorkerRecoveryController`: 网络恢复后的 membership、metadata、slot 和 ownership 对账编排。
++ `WorkerMetadataReconciler`: 复用 metadata recovery、clear meta、clear data without meta 等已有入口。
+
+##### 核心模块抽象
+
+###### 1. `WorkerRuntimeStateManager`
 
 负责 worker 本地服务门禁和恢复阶段。为了简化状态管理，第一版不复制
 cluster node state、hash ring state、etcd lease state；这些仍由原模块持有。
@@ -576,7 +588,7 @@ public:
 + `STOPPING` 表示主动停服、缩容完成或不可恢复错误后的退出流程，不走自愈。
 + 其它细节状态通过 reason/evidence/phase 字段记录在日志和 metrics 中，不进入主状态枚举。
 
-#### 2. `WorkerServiceAdmission`
+###### 2. `WorkerServiceAdmission`
 
 轻量 wrapper，用于请求入口统一检查 runtime state。
 
@@ -595,7 +607,7 @@ public:
 
 第一版建议 Get 也保守拒绝，避免隔离期间返回与 master metadata 不一致的数据。后续可细化本地只读。
 
-#### 3. `LocalIsolationDetector`
+###### 3. `LocalIsolationDetector`
 
 不是新增大模块，而是对现有触发点做统一汇聚:
 
@@ -618,7 +630,7 @@ WorkerRuntimeStateManager::MarkLocalIsolated(reason)
 | `HashRing::NeedToTryRemoveWorker` passive `SIGKILL` | `MarkLocalIsolated(PASSIVE_SCALE_DOWN_SELF)` |
 | voluntary scale down `SIGTERM` | 保留，缩容中 `DRAINING`，完成退出前 `STOPPING` |
 
-#### 4. `WorkerRecoveryController`
+###### 4. `WorkerRecoveryController`
 
 负责从 `LOCAL_ISOLATED` 到 `RECOVERING` 再到 `RUNNING`。
 
@@ -648,7 +660,7 @@ WorkerRuntimeStateManager::MarkLocalIsolated(reason)
 + 如果 master metadata 已清理但本地存在可恢复数据: 仅在 metadata recovery 条件满足时重建 metadata，否则数据保持不可见并进入清理候选。
 + 如果本地数据无 metadata 且不满足恢复条件: 复用 `ClearDataWithoutMeta`/本地 clear flow 清理，避免残留数据恢复后被误读。
 
-#### 5. `WorkerMetadataReconciler`
+###### 5. `WorkerMetadataReconciler`
 
 复用现有组件，封装恢复阶段的决策:
 
@@ -674,7 +686,35 @@ WorkerRuntimeStateManager::MarkLocalIsolated(reason)
 
 这里的重点是复用“隔离会把其它 local copy 转成 primary copy”的现有能力。恢复不是撤销这次切主，而是让恢复 worker 与切主后的集群事实对齐。
 
-### 最小化修改原则
+#### 2. 部署
+
+生产部署不要求新增进程，也不要求改变现有 client API。部署语义:
+
++ `auto_del_dead_node=true` 仍保留远端 dead worker 自动删除能力，但本 worker local isolation self-kill 改为进入 `LOCAL_ISOLATED`。
++ `enable_metadata_recovery` 当前默认 false；如果恢复依赖 metadata recovery，需要在恢复流程中显式检查并记录告警，是否默认打开作为待确认策略。
++ UB/TCP fallback 策略仍由 UB quarantine RFC 管理，本 RFC 不新增 fallback 开关。
++ 观测侧需要新增 worker service mode、reason、recovery phase、ownership reconciliation result 等日志/metric。
+
+#### 3. 运行
+
+运行期由三层门禁组合:
+
++ 集群 evidence 层：membership lifecycle、cluster node table、hash ring membership/hash ring local state，只读消费。
++ 数据 ownership 层：cluster meta ownership 与 local data ownership 对账，判断 primary/local copy/L2 是否一致。
++ service admission 层：`WorkerServiceMode` 决定普通读写、迁移 target、recovery RPC 是否允许。
+
+非 `RUNNING` worker 默认拒绝新增写入和迁移/rebalance target。`JOINING`、`DRAINING`、`OUT_OF_MEMORY`、`RECOVERING` 只开放各自必要的内部 RPC，避免把问题态误暴露成正常服务态。
+
+#### 4. 元戎整体如何使用
+
++ Worker 启动后先进入 `STARTING`，service ready、membership/ring/metadata evidence 满足后进入 `RUNNING`。
++ 扩容加入中进入 `JOINING`，只允许必要的 scale-out/migration 接收。
++ 主动缩容进入 `DRAINING`，停止写入和 target 选择，完成后进入 `STOPPING` 并保留现有 `SIGTERM`。
++ 本地 TCP/etcd/coordination 隔离进入 `LOCAL_ISOLATED`，不再 `SIGKILL`；网络恢复后进入 `RECOVERING`。
++ OOM 进入 `OUT_OF_MEMORY`，拒绝新增写入和迁移 target，允许 cleanup/evict/free 和诊断。
++ 恢复完成前必须完成 membership、ring、metadata、slot 和 primary/local copy/L2 ownership 对账。
+
+#### 最小化修改原则
 
 + 不改 SDK 对外 API。
 + 不重写 hash ring scale down/recovery。
@@ -685,7 +725,7 @@ WorkerRuntimeStateManager::MarkLocalIsolated(reason)
 + 第一版恢复复用已有 metadata recovery、slot recovery、reconciliation。
 + 不新增复杂 worker health 多维状态；只新增本地 service mode，membership/ring/lease 仍由原模块管理。
 
-### 最小代码落点
+#### 最小代码落点
 
 | 目标 | 最小接入点 | 不做什么 |
 | ---- | ---- | ---- |
@@ -696,9 +736,11 @@ WorkerRuntimeStateManager::MarkLocalIsolated(reason)
 | 恢复编排 | 复用 `ProcessNetworkRecovery`、`NodeRestartEvent`、`MetaDataRecoveryManager`、`SlotRecoveryManager` | 不重做恢复数据结构 |
 | DFX | runtime state metric/log/event | 不只靠进程存活判断健康 |
 
-## 核心流程
+#### 5. 代码关键类图、运行视图、数据表设计
 
-### 场景 1: keepalive 失败但进程不退出
+运行视图如下。
+
+##### 场景 1: keepalive 失败但进程不退出
 
 ```mermaid
 sequenceDiagram
@@ -715,7 +757,7 @@ sequenceDiagram
     Note over E,S: no SIGKILL; process remains alive for recovery
 ```
 
-### 场景 2: hash ring passive scale down self
+##### 场景 2: hash ring passive scale down self
 
 ```mermaid
 sequenceDiagram
@@ -733,7 +775,7 @@ sequenceDiagram
     end
 ```
 
-### 场景 3: 网络恢复后进入恢复态
+##### 场景 3: 网络恢复后进入恢复态
 
 ```mermaid
 sequenceDiagram
@@ -755,7 +797,7 @@ sequenceDiagram
     end
 ```
 
-## 类图
+类图如下。
 
 ```mermaid
 classDiagram
@@ -833,6 +875,133 @@ classDiagram
     WorkerRecoveryController --> WorkerMetadataReconciler
     WorkerRecoveryController --> PrimaryCopyManager
 ```
+
+#### 6. 可靠性设计 topic
+
++ 状态收敛必须单向保守：worker 可以本地拒绝服务，但不能本地伪造 cluster `ACTIVE` 或 ring `ACTIVE`。
++ 恢复必须先对账 ownership：primary/local copy/L2 与 master metadata 不一致时，旧本地数据默认不可见。
++ 所有非 `RUNNING` 状态必须有可诊断错误码/日志，避免从“自杀静默”变成“拒绝原因静默”。
++ `OUT_OF_MEMORY` 不能直接等同 `STOPPING`：它优先作为资源保护态，允许清理和释放后恢复。
++ voluntary scale down 的 `DRAINING -> STOPPING` 路径不能被 local isolation 自愈逻辑抢回 `RUNNING`。
+
+### 开源软件选型
+
+不新增开源软件。复用项目已有 protobuf、gflags、EtcdStore/coordination backend、HashRing、Status、Object/Stream worker service、MetaDataRecoveryManager、SlotRecoveryManager、URMA/UB/TCP 传输与现有 metrics/log 能力。
+
+### 外部交互分析&&上下游依赖需求
+
++ Worker -> coordination/etcd：读取和更新 membership lifecycle，恢复时重建/renew keepalive key。
++ Worker -> ClusterManager/HashRing：只读消费 cluster node table、hash ring membership/local state，判断是否允许服务。
++ Worker -> Master metadata：通过 `PureQueryMeta`、`CheckObjectDataLocation`、`ReplacePrimary`、`ChangePrimaryCopy`、`CreateCopyMeta` 等既有入口对账 primary/local copy/L2 ownership。
++ Worker -> Metadata/slot recovery：复用 `NodeRestartEvent`、`RequestMetaFromWorkerEvent`、`MetaDataRecoveryManager`、`SlotRecoveryManager`。
++ Client/Worker -> Worker service：所有普通读写、迁移/rebalance target 请求都经过 `WorkerServiceAdmission`。
+
+## 对外接口
+
+### Proto 接口
+
+第一版不新增 SDK 对外 proto。若实现阶段需要跨进程查询 worker service mode，优先复用现有 diagnostic/health RPC 扩展内部字段，不影响业务 API。
+
+### C++ 接口
+
+新增或收敛 worker 内部接口:
+
+```cpp
+enum class WorkerServiceMode {
+    STARTING,
+    JOINING,
+    RUNNING,
+    DRAINING,
+    LOCAL_ISOLATED,
+    OUT_OF_MEMORY,
+    RECOVERING,
+    STOPPING,
+};
+
+class WorkerRuntimeStateManager {
+public:
+    Status MarkRunning(RunningEvidence evidence);
+    void MarkStarting(StartReason reason);
+    void MarkJoining(JoinReason reason);
+    void MarkDraining(DrainReason reason);
+    void MarkLocalIsolated(IsolationReason reason);
+    void MarkOutOfMemory(OomReason reason);
+    void MarkRecovering(RecoveryReason reason);
+    void MarkStopping(StopReason reason);
+
+    bool CanServeRead() const;
+    bool CanServeWrite() const;
+    bool CanServeMigrationTarget() const;
+    bool CanServeRecoveryRpc() const;
+    WorkerServiceMode GetMode() const;
+};
+```
+
+### 配置接口
+
++ `auto_del_dead_node`: 保留含义，但本地隔离 self-kill 行为改为状态切换。
++ `enable_metadata_recovery`: 恢复阶段是否允许从本地数据/L2 重建 metadata，需要显式检查和告警。
++ UB fallback 相关配置不在本 RFC 新增，继续归属 UB quarantine RFC。
+
+## 约束
+
++ 不改 SDK 对外 API。
++ 不重写 hash ring scale down/recovery。
++ 不删除 `auto_del_dead_node`。
++ 不影响 voluntary scale down 正常退出。
++ 不让 `common/kvstore/etcd` 直接依赖 object-cache；通过 callback/event 通知 worker runtime state。
++ 第一版服务准入保守：非 `RUNNING` 不提供普通业务写入和迁移/rebalance target。
++ 第一版恢复复用已有 metadata recovery、slot recovery、reconciliation。
++ 不新增复杂 worker health 多维状态；只新增本地 service mode，membership/ring/lease 仍由原模块管理。
+
+## Example
+
+### 配置示例
+
+```bash
+# 保留远端 dead worker 自动删除能力；本 RFC 改变的是本地隔离 self-kill 行为
+--auto_del_dead_node=true
+
+# 如恢复依赖 metadata recovery，需要在部署/测试中显式确认
+--enable_metadata_recovery=true
+```
+
+### 运行状态示例
+
+```text
+STARTING -> RUNNING
+RUNNING -> LOCAL_ISOLATED -> RECOVERING -> RUNNING
+RUNNING -> OUT_OF_MEMORY -> RUNNING
+RUNNING -> DRAINING -> STOPPING
+```
+
+# 可信软件
+
+### 安全性 Security
+
+不新增外部认证面。新增诊断字段不应暴露对象 key、tenant secret 或数据内容。
+
+### 韧性 Resilience
+
+核心韧性目标是避免网络抖动触发进程自杀；同时保证非 `RUNNING` 状态快速失败、可恢复、可观测。
+
+### 隐私性 Privacy
+
+不改变数据内容访问策略。metadata/ownership 诊断需控制日志粒度，避免泄露业务对象明文信息。
+
+### 可靠性 Reliability
+
+恢复必须以 master/cluster confirmed metadata 为准；本地旧 primary、残留 object table、L2 数据默认不可见，必须恢复或清理。
+
+### 可用性 Availability
+
+单 worker local isolation 或 OOM 不应拖垮其它 worker；其它 worker 仍按 cluster/ring 继续服务。故障 worker 自身非 `RUNNING` 时拒绝普通写入和迁移 target。
+
+### 安全 Safety
+
+保留主动缩容和管理员停服的 `STOPPING` 路径，避免自愈逻辑误恢复本应退出的 worker。
+
+# 自验 用例
 
 ## 测试 Story
 
