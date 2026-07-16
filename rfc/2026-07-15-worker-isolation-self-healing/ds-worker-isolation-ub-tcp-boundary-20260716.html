@@ -109,6 +109,7 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub" href="#flow-migrate">2.3 迁移与 Rebalance</a>
       <a class="nav-sub" href="#flow-recovery">2.4 UB 恢复</a>
       <a href="#evidence">3. 方案详细设计</a>
+      <a class="nav-sub" href="#key-answers">3.0 关键问题回答</a>
       <a class="nav-sub" href="#current-analysis">3.1 现状分析</a>
       <a class="nav-sub" href="#design-plan">3.2 方案设计</a>
       <a class="nav-sub" href="#build-design">3.2.1 构建</a>
@@ -318,6 +319,28 @@ sequenceDiagram
 
       <section id="evidence" class="section">
         <h2>3. 方案详细设计</h2>
+        <h3 id="key-answers">3.0 关键问题回答</h3>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">发起端如何感知目的端 Worker UB 故障</div>
+            <p>client->worker Put/Set 是 client 自己发起 <code>UrmaWritePayload</code>，因此 client 能直接拿到 ERROR 4、CQE error、wait timeout 等 operator 结果。ERROR 4 是目标 worker UB port 不可用的确定信号，立即把该 worker 写入本地 <code>PeerUbAdmission</code> 的 <code>UNAVAILABLE</code>；ERROR 9 先按可恢复 Jetty/CQE 错误进入 <code>SUSPECT/PROBING</code>，连续失败或 probe 失败后再隔离。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">RemoteGet 触发 UB Write 时如何归因</div>
+            <p>RemoteGet 的 requester 只是发 RPC，真正的 UB Write 发起端是数据 provider worker。provider 在 <code>WriteViaFastTransport</code> 或 <code>UbWriteHelper</code> 里看到真实 URMA 结果后，必须把结构化状态放回 RPC response：<code>failed_endpoint</code>、<code>failure_side</code>、<code>urma_status</code>、<code>operator_worker</code>。requester 只有收到这个显式状态，才能更新本地 admission；RPC timeout/failure 只标记 peer suspect，不能合成 ERROR 4。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">后续如何感知 UB 恢复</div>
+            <p>恢复不依赖业务请求试错。被隔离 peer 进入 cooldown，之后由 <code>UbRecoveryProbe</code> 做 handshake / warmup / small URMA probe；probe 成功 N 次或收到带更高 epoch 的全局健康摘要后，状态从 <code>UNAVAILABLE</code> 转为 <code>PROBING</code> 再到 <code>AVAILABLE</code>。fallback 成功不能恢复 UB health。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">目的端 Worker 如何知道自己故障并通知别人</div>
+            <p>被单边写的一端不能天然看到对端写失败，所以目的端 worker 需要两类输入：本地自检看到 ERROR 4/频繁 ERROR 9/Jetty 重建后 probe 失败；以及其他 client/worker 通过 RPC 上报“写不进该 worker”。worker 聚合这些信号更新 <code>LocalUbHealth</code>，再通过 master heartbeat 的 <code>extend</code> 或 client-worker heartbeat response 带出 <code>UbHealthSummary</code>，让其他节点减少向它写入和迁移。</p>
+          </div>
+        </div>
+        <div class="note warn">
+          结论：第一层必须是发起端局部感知和本地准入，保证 Put/Get/RemoteGet/migrate/rebalance 立即止血；第二层才是轻量全局摘要和保活探测，用于恢复和减少其他节点继续撞同一故障 Worker。持续故障必须指数退避，避免 probe 或重试流量放大。
+        </div>
         <h3 id="current-analysis">3.1 现状分析</h3>
         <p>当前代码已经有明确的 UB 失败观测点，但观测分散在 client 写、provider 写回、direct read transport、migration/rebalance 目标选择等路径。风险不是“完全没有错误码”，而是错误没有形成统一的下一次准入决策，导致 fallback、retry 或 batch 内重复请求继续撞同一条坏 UB 路径。</p>
       </section>
@@ -343,6 +366,22 @@ classDiagram
       +MarkProbeSuccess(peer)
       +GetState(peer)
     }
+    class LocalUbHealth {
+      +ReportLocalError(status)
+      +ReportPeerFeedback(peer, status)
+      +GetSummary()
+    }
+    class PeerUbAdmission {
+      +Check(peer, op)
+      +MarkUnavailable(peer, reason)
+      +MarkProbing(peer)
+      +MarkAvailable(peer, epoch)
+      +NextProbeTime(peer)
+    }
+    class UbHealthGossip {
+      +BuildHeartbeatSummary()
+      +ApplyHeartbeatSummary(summary)
+    }
     class TransportPathAdmission {
       +CheckWriteTarget(worker)
       +CheckReadSource(worker)
@@ -364,6 +403,7 @@ classDiagram
     class UbRecoveryProbe {
       +TryEnterProbe(peer)
       +Probe(peer)
+      +Backoff(peer)
     }
     class UbFallbackPolicy {
       +CanFallback(op, payloadSize, status)
@@ -377,7 +417,11 @@ classDiagram
       +RegisterJetty()
     }
     TransportPathAdmission --> WorkerServiceMode
-    TransportPathAdmission --> WorkerUbPathHealth
+    TransportPathAdmission --> PeerUbAdmission
+    PeerUbAdmission --> WorkerUbPathHealth
+    LocalUbHealth --> WorkerUbPathHealth
+    UbHealthGossip --> LocalUbHealth
+    UbHealthGossip --> PeerUbAdmission
     TransportPathAdmission --> UbFallbackPolicy
     WorkerUbPathHealth --> UbFailureClassifier
     UbFailureClassifier --> UbOpOutcome
@@ -426,6 +470,9 @@ classDiagram
             <tbody>
               <tr><td><code>UbFailureClassifier::Classify(outcome)</code></td><td>URMA operator wrapper、RPC response consumer</td><td>把显式 URMA status 分类。<code>ERROR 4</code> 必须来自 provider/CQE/operator status，不能由 RPC timeout 合成。</td><td><code>PORT_UNAVAILABLE_ERROR4</code>、<code>TIMEOUT_THRESHOLD</code>、<code>NON_UB_FAILURE</code> 等。</td></tr>
               <tr><td><code>WorkerUbPathHealth::ReportOutcome(outcome)</code></td><td>Client Put、worker provider writeback、migration direct read/write、probe</td><td>记录一次真实 operator outcome 或显式 RPC status。</td><td>必要时把 peer 状态置为 <code>UNAVAILABLE</code>，更新 epoch、reason、cooldown。</td></tr>
+              <tr><td><code>LocalUbHealth::ReportLocalError(status)</code></td><td>URMA completion、async event、worker 自检 probe、peer feedback 聚合器</td><td>表达“本 worker 自己的 UB 数据面可能不可用”。频繁 ERROR 9 或 ERROR 4 后进入本地异常态。</td><td>生成本 worker 的 <code>UbHealthSummary</code>，阻止其他人继续把它当作写入/迁移目的端。</td></tr>
+              <tr><td><code>PeerUbAdmission::MarkUnavailable(peer, reason)</code></td><td>client/worker 发起端、RPC response consumer、心跳摘要 consumer</td><td>发起端局部隔离某个目的端 worker 或 data source。</td><td>后续 Put/Get/RemoteGet/migrate/rebalance 对该 peer fail fast，直到 probe/epoch 恢复。</td></tr>
+              <tr><td><code>UbHealthGossip::BuildHeartbeatSummary()</code></td><td>worker->master heartbeat、worker->client heartbeat</td><td>把本 worker 的 local UB health、epoch、reason、backoff_until 放进心跳摘要。</td><td>其他节点通过 <code>ApplyHeartbeatSummary</code> 更新 peer admission；不改写 worker membership。</td></tr>
               <tr><td><code>TransportPathAdmission::CheckWriteTarget(worker)</code></td><td>Client Put/Set、worker create/admission</td><td>判断目标 worker 是否可继续作为 UB 写入目的端。</td><td>失败返回 <code>K_URMA_WORKER_UNAVAILABLE</code>，不进入真实 UB write。</td></tr>
               <tr><td><code>TransportPathAdmission::CheckReadSource(worker)</code></td><td>Client Get / worker remote get source selection</td><td>过滤 UB path unavailable 的数据 location。</td><td>无健康 source 时返回 <code>K_URMA_DATA_WORKER_UNAVAILABLE</code>。</td></tr>
               <tr><td><code>TransportPathAdmission::CheckReceiverEndpoint(receiver)</code></td><td>Worker Provider 写回 client/worker 前</td><td>判断是否还能把 UB 数据写到 requester/receiver。</td><td>失败时 provider 显式返回 URMA 数据面异常，不默认 TCP fallback。</td></tr>
@@ -462,8 +509,9 @@ classDiagram
         <div class="grid-2">
           <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
           <div class="card"><div class="card-title">新增准入接口</div><p><code>TransportPathAdmission</code>：给 put/get/migrate/rebalance 调用，组合服务态、UB 观测、fallback 策略。</p></div>
+          <div class="card"><div class="card-title">新增局部/全局桥接</div><p><code>LocalUbHealth</code> 表示本 worker 自己 UB 数据面是否可写；<code>UbHealthGossip</code> 只通过已有心跳传播摘要，不直接触发 worker 下线。</p></div>
           <div class="card"><div class="card-title">新增错误码</div><p>新增或复用 URMA error 家族，表达“数据所在 Worker UB 不可用”与“目标 Worker UB 接收不可用”。</p></div>
-          <div class="card"><div class="card-title">新增恢复 probe</div><p>先 cool-down，再 small probe。probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>
+          <div class="card"><div class="card-title">新增恢复 probe</div><p>先 cool-down，再 small probe。连续失败按 1s/2s/4s/8s/10s 退避；probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>
         </div>
         <h4>运行路径接入点</h4>
         <ul>
@@ -471,14 +519,31 @@ classDiagram
           <li><span class="badge b-green">Provider Worker</span>在 <code>WriteViaFastTransport</code> 失败后标记 requester UB path，并把显式 URMA operator status 放进 response。</li>
           <li><span class="badge b-violet">Requester Worker</span>在 <code>PullObjectDataFromRemoteWorker</code> 收到显式 UB unavailable 时快速失败或换副本；若只是 RPC timeout/failure，则按 provider/RPC suspect 处理，不当成对象缺失或本端 ERROR 4。</li>
           <li><span class="badge b-amber">Migration</span>在 <code>ConnectAndCreateRemoteApi</code> 或更上层目标选择前检查 migration target。</li>
+          <li><span class="badge b-blue">Heartbeat</span>worker 把本地 UB health epoch/reason/backoff 放进 master heartbeat <code>extend</code> 或 client-worker heartbeat response；接收方只更新 peer admission，不修改 membership。</li>
           <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
         </ul>
+        <div class="table-wrap">
+          <table>
+            <caption>补充覆盖场景</caption>
+            <thead><tr><th>场景</th><th>风险</th><th>补充处理</th></tr></thead>
+            <tbody>
+              <tr><td>Client direct read batch</td><td>按 data worker 分组后，一个坏 data worker 可能让 batch 内多个对象重复等待。</td><td>分组后发 batch 前调用 <code>CheckReadSource</code>，整组 fail fast 或换副本。</td></tr>
+              <tr><td>传统 Client Get provider 写回 client</td><td>UB Write 失败只在 worker provider 看到，client 只看到 RPC 结果。</td><td>provider 返回结构化 URMA status，client 只消费显式状态；RPC timeout 不合成 ERROR 4。</td></tr>
+              <tr><td>Worker remote get / BatchGetObjectRemote</td><td>requester 可能持续读同一个 provider，provider 也可能持续写不进 requester。</td><td>requester 对 provider 做 source admission；provider 对 receiver 做 endpoint admission，并在 response 携带 failed endpoint。</td></tr>
+              <tr><td>Migrate / Move / Rebalance</td><td>扩缩容或故障期间 stale task 仍把数据迁移到 UB 不可写 worker。</td><td>目标选择和执行前都查 <code>CheckMigrationTarget</code>；scale-up 新 worker 初始为 <code>PROBING</code>，scale-down/exiting worker 直接拒绝。</td></tr>
+              <tr><td>持续 ERROR 9</td><td>Jetty 重建可恢复，但频繁重建会把真实业务流量变成 probe。</td><td>ERROR 9 先触发 <code>ReCreateJetty</code> 和 <code>SUSPECT</code>，窗口内超过阈值后进入 <code>UNAVAILABLE</code> 并指数退避 probe。</td></tr>
+              <tr><td>全局恢复</td><td>只有本地隔离会导致不同 client/worker 恢复时间不一致。</td><td>心跳摘要携带 <code>epoch</code>，新 epoch + probe success 才恢复本地 admission；摘要只能加速恢复，不能替代本地 probe。</td></tr>
+            </tbody>
+          </table>
+        </div>
         <h3 id="usage-design">3.2.4 元戎整体如何使用</h3>
         <ul>
           <li>业务使用方式不变；UB 故障隔离作为 client/worker 内部准入和错误返回能力生效。</li>
           <li>client->worker 写入失败后，恢复前同一 target worker 的写入快速失败。</li>
           <li>RemoteGet 路径由 requester 先过滤 data source，provider 在处理请求时上报显式 UB Write 失败。</li>
           <li>migration/rebalance 只把 UB health 当作 target eligibility 输入，不改变 metadata ownership。</li>
+          <li>扩容 worker 在 UB probe 成功前不承接 UB 写入/迁移；缩容或故障 worker 在 service/ring 已不可写时直接拒绝作为 target。</li>
+          <li>心跳摘要用于传播“本 worker UB 数据面是否可写”，但不把局部 UB 故障升级为 worker DOWN。</li>
         </ul>
         <h3 id="code-view-design">3.2.5 代码关键类图、运行视图</h3>
         <h4>WorkerUbPathHealth 状态机</h4>
@@ -488,10 +553,12 @@ classDiagram
 stateDiagram-v2
     [*] --> AVAILABLE
     AVAILABLE --> UNAVAILABLE: ERROR 4 port unavailable
-    AVAILABLE --> UNAVAILABLE: thresholded timeout / reconnect failure
-    UNAVAILABLE --> PROBING: cooldown elapsed
-    PROBING --> AVAILABLE: probe success
-    PROBING --> UNAVAILABLE: probe failed
+    AVAILABLE --> SUSPECT: RPC timeout / ERROR 9 / reconnect failure
+    SUSPECT --> PROBING: local recreate or heartbeat epoch changed
+    SUSPECT --> UNAVAILABLE: threshold exceeded
+    UNAVAILABLE --> PROBING: cooldown elapsed by exponential backoff
+    PROBING --> AVAILABLE: N probe success
+    PROBING --> UNAVAILABLE: probe failed, increase backoff
     AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
           </div>
         </div>
@@ -500,6 +567,7 @@ stateDiagram-v2
           <li>准入判断必须是进程内 O(1) 读本地状态，不能在普通 Put/Get/RemoteGet 关键路径上同步访问外部服务。</li>
           <li>失败后同一 worker/source 的 batch remote get 要按 worker 分组 fail fast，避免 batch 内每个对象重复等待超时。</li>
           <li>恢复 probe 不能借真实业务请求试错；cooldown 后用小数据 handshake/warmup/probe，成功后再放开业务流量。</li>
+          <li>持续故障按指数退避控制 probe 和重试频率，避免所有 client/worker 同时把故障 worker 打满。</li>
           <li>fallback 默认关闭；即使开启，也只对小对象生效，并且 fallback 成功不清除 UB health。</li>
         </ul>
       </section>
@@ -517,6 +585,9 @@ stateDiagram-v2
               <tr><td>Client Get 接收 Worker Provider 写回</td><td>Client 消费 worker 显式 URMA status；RPC timeout/failure 只按 RPC/peer suspect 处理。</td><td>Client 侧日志区分 explicit ERROR 4 和 RPC timeout。</td></tr>
               <tr><td>Worker remote get provider 写 requester 失败</td><td>Provider 明确返回 UB unavailable；Requester 不长时间 retry。</td><td>RPC response error 可区分 transport/data-not-found。</td></tr>
               <tr><td>Rebalance 目标 Worker UB 故障</td><td>任务不向该目标迁移；可失败或重选目标。</td><td>rebalance task 记录 target rejected。</td></tr>
+              <tr><td>扩容 Worker 刚加入</td><td>全局 membership 已可见，但 UB probe 未成功前不作为 UB 写入或迁移目标。</td><td>状态显示 PROBING，probe 成功后才 AVAILABLE。</td></tr>
+              <tr><td>目的端 Worker 自身 UB 故障</td><td>本 worker 聚合本地 ERROR 4/频繁 ERROR 9/peer feedback 后，通过心跳摘要通知其他节点减少写入。</td><td>heartbeat summary 包含 worker、epoch、reason、backoff_until。</td></tr>
+              <tr><td>持续故障退避</td><td>probe/retry 间隔按 1s/2s/4s/8s/10s 增长；业务请求直接 fail fast。</td><td>日志和 metric 展示 backoff level，故障节点流量下降。</td></tr>
               <tr><td>UB 恢复</td><td>probe 成功后重新开放写入/迁移；现有 membership 不被 UB 单独修改。</td><td>状态 UNAVAILABLE -> PROBING -> AVAILABLE，后续写成功。</td></tr>
             </tbody>
           </table>
@@ -527,9 +598,9 @@ stateDiagram-v2
         <h2>4.2 待确认策略</h2>
         <ul>
           <li>错误码命名：建议放在 OC/URMA 交界处，保留 provider UB unavailable 与 requester UB unavailable 两类语义。</li>
-          <li>恢复 probe 的实现：优先复用现有 handshake / small URMA write，不引入持续心跳。</li>
+          <li>恢复 probe 的实现：优先复用现有 handshake / warmup / small URMA write；心跳只传播摘要和 epoch，不承担数据面 probe。</li>
           <li>fallback 策略：默认关闭；开启时建议只覆盖 <= 1MB 普通读写，不覆盖迁移和 bulk rebalance。</li>
-          <li>局部观测是否需要广播：第一阶段不做全局传播，只通过 RPC response 传给本次 requester；后续如需要再加 coordinator 汇聚。</li>
+          <li>局部观测传播范围：第一阶段用 RPC response + heartbeat summary 做轻量传播；master 只保存摘要，不参与普通 Put/Get 同步准入。</li>
         </ul>
         <div class="note">
           一句话版本：本文只回答“现在能不能往这个 Worker 的 UB 数据面写”。已有 worker membership/rpc health 可以作为输入，但不是本文设计对象。
@@ -558,6 +629,10 @@ stateDiagram-v2
               <tr><td><code>UrmaManager::TryRecoverFailedJettyFromCompletion</code><br><span class="src">urma_manager.cpp:954-981</span></td><td>完成队列错误可按策略触发 <code>ReCreateJetty</code>。</td><td>复用该观测点同步标记 peer path PROBING/UNAVAILABLE。</td></tr>
               <tr><td><code>UrmaAsyncEventHandler</code><br><span class="src">urma_async_event_handler.cpp:93-200</span></td><td>async fd epoll 到 <code>URMA_EVENT_JETTY_ERR</code> 后触发 <code>ReCreateJetty</code>。</td><td>Jetty 自恢复成功不等于 peer 可写；需要 probe 成功后再 MarkAvailable。</td></tr>
               <tr><td><code>UrmaConnection::ReCreateJetty</code><br><span class="src">urma_resource.cpp:418-460</span></td><td>失败 Jetty 会被 MarkInvalid 并重建，避免错误地 invalid 新 Jetty。</td><td>和 PR 1277 的发送端 Jetty 池化/隔离思路一致：恢复局部资源，但准入状态独立闭环。</td></tr>
+              <tr><td><code>GetUrmaErrorHandlePolicy</code><br><span class="src">urma_manager.cpp:74-87</span></td><td>当前只把 CQE status 9 映射到 <code>RECREATE_JETTY</code>。</td><td>ERROR 9 默认按可恢复资源错误处理；窗口内频繁出现或 probe 失败才升级为 UB path unavailable。</td></tr>
+              <tr><td><code>UrmaSuccessRateTracker</code><br><span class="src">urma_success_rate_tracker.cpp:34-112</span></td><td>client 侧已有成功率窗口和 1s/2s/4s/8s/10s backoff。</td><td>UB path probe/backoff 可以复用同类模型，但粒度从“切 worker 尝试”扩展为“peer worker admission”。</td></tr>
+              <tr><td><code>master_heartbeat.proto</code><br><span class="src">master_heartbeat.proto:32-47</span></td><td>worker->master heartbeat request/response 预留 <code>extend</code> 字段。</td><td>可承载 <code>UbHealthSummary</code> 的 worker、state、epoch、reason、backoff_until，避免新增同步 RPC。</td></tr>
+              <tr><td><code>share_memory.proto::HeartbeatRspPb</code><br><span class="src">share_memory.proto:146-155</span></td><td>client-worker heartbeat response 已有 <code>available_workers</code>、<code>unhealthy</code> 等健康相关字段。</td><td>可扩展 UB health 摘要给 client；只更新 client 本地 admission，不改变 worker membership。</td></tr>
             </tbody>
           </table>
         </div>
