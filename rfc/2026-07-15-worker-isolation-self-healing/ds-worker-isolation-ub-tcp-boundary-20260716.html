@@ -846,8 +846,8 @@ classDiagram
         <h3 id="runtime-design">3.2.5 运行接入与性能约束</h3>
         <h4 id="deploy-design">最小改动点</h4>
         <div class="grid-2">
-          <div class="card"><div class="card-title">不引入新进程</div><p>不改变 SDK 对外 API；相关逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
-          <div class="card"><div class="card-title">默认策略</div><p>UB fallback 默认关闭；显式开启时仅允许 <= 1MB 的普通读写 fallback，不覆盖 migration / rebalance。</p></div>
+          <div class="card"><div class="card-title">不引入新进程</div><p>不改变 SDK 对外 API，也不新增部署组件；相关逻辑随 client/worker 进程内 object-cache transport adapter 加载，并复用现有 heartbeat / Coordinator / etcd 通道传播摘要。</p></div>
+          <div class="card"><div class="card-title">默认内置策略</div><p>不向用户暴露细碎调参项。UB fallback 默认关闭；小对象 fallback 阈值固定为 1MB；ERROR 9 阈值、probe 成功次数、指数退避和 health summary TTL 均由代码内置默认策略给出。</p></div>
         </div>
         <h4>运行期最小修改点</h4>
         <div class="grid-2">
@@ -1080,7 +1080,7 @@ sequenceDiagram
         <h3 id="cpp">4.2 C++ 接口</h3>
         <p>轻量 C++ 抽象集中在进程内：failure classifier、peer admission、receiver/source/target 准入、recovery probe、fallback policy。业务 SDK 对外 API 不变。</p>
         <h3 id="config">4.3 配置接口</h3>
-        <p>配置建议只覆盖策略开关和阈值：UB fallback 是否开启、小对象阈值、ERROR 9 timeout 连续失败阈值、probe 成功次数、指数退避上限、health summary TTL。</p>
+        <p>正式配置面应尽量收敛：默认不要求用户理解或配置 UB 隔离细节。对外最多保留一个灰度/回滚总开关 <code>enable_ub_fault_isolation</code>；UB fallback 是否允许、1MB 小对象阈值、ERROR 9 timeout 连续阈值、probe 成功次数、指数退避上限、health summary TTL 都作为代码内置策略默认值，不进入普通用户配置。</p>
       </section>
 
       <section id="constraints" class="section">
@@ -1090,17 +1090,16 @@ sequenceDiagram
           <li>普通 Put/Get/RemoteGet 关键路径不能同步访问 Coordinator/etcd；准入判断必须是进程内 O(1) 本地状态读取。</li>
           <li>千级节点下不能传播 peer matrix；心跳只传播本 worker 自身 UB health 摘要。</li>
           <li>RPC timeout 不能合成 URMA ERROR 4；只有 URMA operator 或 provider 显式 status 能作为 ERROR 4 归因依据。</li>
-          <li>fallback 默认关闭；开启时也不覆盖迁移/rebalance，不作为 UB health 恢复证据。</li>
+          <li>fallback 默认关闭，并作为代码内置策略；即使内部灰度开启，也不覆盖迁移/rebalance，不作为 UB health 恢复证据。</li>
         </ul>
       </section>
 
       <section id="examples" class="section">
         <h2>6. Example</h2>
         <h3 id="example-config">6.1 配置示例</h3>
-        <pre><code>enable_ub_fault_isolation=true
-enable_transport_fallback=false
-ub_fallback_max_size=1MB
-ub_probe_backoff_ms=1000,2000,4000,8000,10000</code></pre>
+        <pre><code># Optional gray / rollback switch only.
+# Other UB isolation thresholds are code defaults, not user-facing config.
+enable_ub_fault_isolation=true</code></pre>
         <h3 id="example-status">6.2 运行状态示例</h3>
         <pre><code>worker=10.0.0.8:31501 ub_state=UNAVAILABLE reason=ERROR4 epoch=42 backoff_until=2026-07-16T20:30:15+08:00</code></pre>
         <h3 id="example-failure">6.3 失败响应示例</h3>
