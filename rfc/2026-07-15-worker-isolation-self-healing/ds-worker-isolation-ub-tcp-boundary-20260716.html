@@ -507,50 +507,71 @@ sequenceDiagram
           </table>
         </div>
         <div class="diagram">
-          <div class="diagram-title">图 3-4 GlobalFact 与局部信息维护时序</div>
+          <div class="diagram-title">图 3-4 局部观测进入本地准入</div>
           <div class="mermaid">
 sequenceDiagram
     participant Req as Client/Worker Initiator
     participant Provider as Worker-Data Provider
     participant Local as Local Peer Admission
+
+    Req->>Provider: Put / RemoteGet / Migrate data phase
+    alt requester owns UB operator
+      Req--xReq: observe ERROR 4 / ERROR 9 / timeout
+      Req->>Local: ReportOutcome(peer, explicit local status)
+    else provider owns UB operator
+      Provider--xProvider: observe provider-side URMA status
+      Provider-->>Req: RPC response carries explicit URMA status
+      Req->>Local: ReportOutcome(peer, provider status)
+    end
+    Local-->>Req: same peer fail fast or enter probing
+          </div>
+        </div>
+        <p>图 3-4 只表达访问者本进程如何从真实传输结果更新 <code>PeerUbAdmission</code>。RPC timeout 只能作为弱信号进入 <code>SUSPECT</code>，不能伪造成 ERROR 4。</p>
+        <div class="diagram">
+          <div class="diagram-title">图 3-5 Provider 自身健康摘要上报与消费</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant Provider as Worker-Data Provider
     participant Self as Worker LocalUbHealth
     participant Master as Master GlobalFact
-    participant Probe as Recovery Probe
+    participant Consumer as Client/Worker Consumer
+    participant Local as Local Peer Admission
 
-    rect rgb(239,246,255)
-    Req->>Provider: Put / RemoteGet / Migrate data phase
-    Provider-->>Req: explicit URMA status or RPC result
-    Req->>Local: ReportOutcome(peer, status, op, epoch?)
-    Local-->>Req: fail fast for same peer before recovery
-    end
-
-    rect rgb(240,253,244)
     Provider->>Self: local ERROR 4 / frequent ERROR 9 / self probe failure
-    Self->>Self: bump local_ub_epoch and set UNAVAILABLE
-    Self->>Master: heartbeat extend: UbHealthSummary(worker, epoch, state, reason, backoff_until)
-    Master->>Master: keep worker -> latest UbHealthSummary as GlobalFact
-    Master-->>Req: metadata / heartbeat response includes relevant peer summary
-    Req->>Local: ApplyHeartbeatSummary(peer, epoch, state)
-    Local-->>Req: block write / migration, read returns explicit UB unavailable
-    end
+    Self->>Self: bump local_ub_epoch and set SELF_UNAVAILABLE
+    Self->>Master: heartbeat extend UbHealthSummary(worker, epoch, state, reason)
+    Master->>Master: keep latest worker -> UbHealthSummary
+    Master-->>Consumer: metadata / heartbeat response carries relevant summary
+    Consumer->>Local: ApplyHeartbeatSummary(peer, epoch, state)
+    Local-->>Consumer: block write / migration, read may switch source
+          </div>
+        </div>
+        <p>图 3-5 只表达 Provider 自身健康的全局摘要通道。千级节点下只传播“本 worker 自己”的摘要，不传播 all-to-all peer matrix。</p>
+        <div class="diagram">
+          <div class="diagram-title">图 3-6 Probe 恢复与重新开放本地准入</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant Req as Client/Worker Initiator
+    participant Local as Local Peer Admission
+    participant Probe as Recovery Probe
+    participant Provider as Worker-Data Provider
+    participant Master as Master GlobalFact
 
-    rect rgb(255,251,235)
     Local->>Probe: cooldown expired, schedule small probe
     Probe->>Provider: handshake / warmup / small URMA probe
     Provider-->>Probe: success or explicit failure
-    Probe->>Local: MarkProbing or keep Unavailable with backoff
-    alt provider self recovered
-      Self->>Self: self probe success, bump epoch to AVAILABLE
-      Self->>Master: heartbeat extend: AVAILABLE epoch
-      Master-->>Req: publish newer summary for relevant peer
-      Req->>Local: newer AVAILABLE summary enters PROBING
-      Local-->>Req: resume only after local probe success
-    else probe failed
-      Local-->>Req: keep fail fast and exponential backoff
-    end
+    alt probe failed
+      Probe->>Local: keep UNAVAILABLE and increase backoff
+      Local-->>Req: continue fail fast
+    else probe success
+      Probe->>Master: check service/membership still allowed
+      Master-->>Probe: GlobalFact allows peer
+      Probe->>Local: MarkAvailable(peer, epoch)
+      Local-->>Req: resume business write/read/migration admission
     end
           </div>
         </div>
+        <p>图 3-6 表达恢复只能由 probe 和 GlobalFact 共同确认。fallback 成功或普通业务请求偶然成功，都不能直接清除本地隔离状态。</p>
         <div class="note new-panel">
           合并规则：<strong>GlobalFact 决定“是否应该尝试”</strong>，局部观测决定“本进程现在是否放行”。写入和迁移只要任一侧判定不可写就 fail fast；读取可以换源，但所有候选 source 都不可用时返回明确 UB 数据面错误。GlobalFact 的 AVAILABLE 摘要不能直接清除本地 ERROR 4 隔离，只能触发本地 probe，probe 成功后才开放业务流量。
         </div>
@@ -558,7 +579,7 @@ sequenceDiagram
         <h4 id="class-diagram">设计类图</h4>
         <p>下图用于说明核心抽象之间的职责边界：准入判断、错误分类、局部健康状态、心跳摘要和恢复探测彼此解耦。开发时优先按这些边界落小类，测试时可以按每个类的输入/输出独立注入错误。</p>
         <div class="diagram">
-          <div class="diagram-title">图 3-5 最小抽象与现有模块协同</div>
+          <div class="diagram-title">图 3-7 最小抽象与现有模块协同</div>
           <div class="mermaid">
 classDiagram
     class WorkerServiceMode {
@@ -794,7 +815,7 @@ classDiagram
         <p>以下时序图用于 DryRun 和联调，不要求场景分析章节提前理解方案类名。开发可用它确认模块插入点，测试可用它设计 mock、注入点和可观测断言。</p>
         <h4 id="dryrun-flow-isolation">DryRun 时序：发现故障并进入局部隔离</h4>
         <div class="diagram">
-          <div class="diagram-title">图 3-6 DryRun 流程 1：发现故障并进入局部隔离</div>
+          <div class="diagram-title">图 3-8 DryRun 流程 1：发现故障并进入局部隔离</div>
           <p>该流程验证“谁发起 UB Write，谁先得到真实错误”。Client 本端写失败时由 Client 记录目标不可写；RemoteGet 写回失败时由数据 Worker 把显式状态放回响应，Requester 只能消费这个显式结果，不能把普通 RPC timeout 合成 ERROR 4。</p>
           <div class="mermaid">
 sequenceDiagram
@@ -821,7 +842,7 @@ sequenceDiagram
         </div>
         <h4 id="dryrun-flow-summary">DryRun 时序：Worker 自身 UB 故障摘要传播</h4>
         <div class="diagram">
-          <div class="diagram-title">图 3-7 DryRun 流程 2：Worker 自身 UB 故障摘要传播</div>
+          <div class="diagram-title">图 3-9 DryRun 流程 2：Worker 自身 UB 故障摘要传播</div>
           <p>该流程验证千级节点场景下的传播边界：Worker 只上报自己的 UB health summary，Master/元数据侧保存每个 Worker 的摘要，Client/Worker 只按当前候选目标消费相关摘要，不广播所有 peer 的状态矩阵。</p>
           <div class="mermaid">
 sequenceDiagram
@@ -842,7 +863,7 @@ sequenceDiagram
         </div>
         <h4 id="dryrun-flow-recovery">DryRun 时序：Probe 恢复后平稳放开写入和迁移</h4>
         <div class="diagram">
-          <div class="diagram-title">图 3-8 DryRun 流程 3：Probe 恢复后平稳放开写入和迁移</div>
+          <div class="diagram-title">图 3-10 DryRun 流程 3：Probe 恢复后平稳放开写入和迁移</div>
           <p>该流程验证恢复不是由业务请求试错或 fallback 成功触发，而是由 cooldown 后的 probe 成功和服务态仍允许写入共同决定。测试需要覆盖 probe 失败继续退避、probe 成功但服务态不可写仍拒绝两条分支。</p>
           <div class="mermaid">
 sequenceDiagram
