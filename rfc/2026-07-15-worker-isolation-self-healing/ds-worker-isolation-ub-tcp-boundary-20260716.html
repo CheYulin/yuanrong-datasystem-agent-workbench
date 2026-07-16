@@ -58,7 +58,6 @@ table code, .flow code, .card code, .note code { font-size: .88em; }
 .note.warn { border-left-color: var(--amber); background: #fffbeb; }
 .note.risk { border-left-color: var(--red); background: #fff7f7; }
 .badge { display: inline-block; border-radius: 999px; font-size: 11px; font-weight: 700; padding: 2px 8px; margin-right: 6px; }
-.new-tag { display: inline-block; border-radius: 999px; font-size: 11px; font-weight: 800; padding: 2px 8px; margin-right: 6px; background: #dcfce7; color: #166534; border: 1px solid #86efac; }
 .new-panel { border: 1px solid #86efac; background: #f0fdf4; }
 .b-blue { background: #dbeafe; color: #1e40af; }
 .b-green { background: #dcfce7; color: #166534; }
@@ -140,7 +139,7 @@ th { background: #f8fafc; font-size: 12px; }
         <h3 id="feature-desc">1.1 功能描述</h3>
         <p>UB 端口或路径故障后，业务可能表现为成功率下降、批量请求局部超时、迁移任务反复失败，而不是明确告诉调用方“数据所在 Worker 的 UB 数据面不可用”。本需求的核心目标是避免静默故障：故障 Worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 Worker 时快速返回可识别错误。</p>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>5W1H 说明
+          5W1H 说明
           <ul>
             <li><strong>Who：</strong>Client、发起 RemoteGet 的 Worker、提供数据的 Worker、迁移/Rebalance 执行方；开发和测试都要区分“请求发起端”和“真正发起 UB Write 的一端”。</li>
             <li><strong>What：</strong>UB 写入目的端不可达或端口异常时，停止继续向该 Worker 写入/迁移；读命中该 Worker 时快速失败。</li>
@@ -214,7 +213,7 @@ th { background: #f8fafc; font-size: 12px; }
           <div><strong>Requester</strong>发起读写/迁移请求的一端，可能是 client 或 worker。</div>
           <div><strong>Transport</strong>URMA/UCP/TCP 的实际数据传输路径。</div>
         </div>
-        <p>设计要避免把 transport 层“某一跳不通”误解释为对象不存在或元数据错误。新增错误语义建议为 <code>K_OC_DATA_PROVIDER_UB_UNAVAILABLE</code> 或同类 URMA data-plane code，表达“数据在该 Worker，但该 Worker 的 UB 路径暂不可用”。</p>
+        <p>设计要避免把 transport 层“某一跳不通”误解释为对象不存在或元数据错误。错误语义建议为 <code>K_OC_DATA_PROVIDER_UB_UNAVAILABLE</code> 或同类 URMA data-plane code，表达“数据在该 Worker，但该 Worker 的 UB 路径暂不可用”。</p>
         <h4 id="failure-owner">故障归属</h4>
         <div class="table-wrap">
           <table>
@@ -258,7 +257,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <div class="table-wrap">
           <table>
-            <caption><span class="new-tag">新增</span>场景清单</caption>
+            <caption>场景清单</caption>
             <thead><tr><th>场景</th><th>参与方</th><th>触发条件</th><th>当前风险</th><th>期望行为</th></tr></thead>
             <tbody>
               <tr><td>Client 写 Worker</td><td>Client、目标 Worker</td><td>Client 通过 UB 写入目标 Worker 时返回 ERROR 4/ERROR 9/timeout。</td><td>Client 持续写同一故障 Worker，业务只看到成功率下降。</td><td>后续写同一目标 Worker 快速失败；默认不透明切 TCP。</td></tr>
@@ -273,7 +272,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <h3 id="flow-client-put">2.1 场景 1: Client -> Worker Put 本端发起 UB 写失败</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>场景拆解
+          场景拆解
           <ul>
             <li><strong>最简单 case：</strong>Client Put/Set 写入 Worker A，Client 发起的 UB Write 返回 ERROR 4，或连续出现 ERROR 9/timeout。</li>
             <li><strong>AS IS：</strong>本次写请求失败后，后续请求仍可能按元数据继续选择 Worker A；fallback、retry 或 batch 内部分失败会掩盖根因，业务侧只看到成功率下降。</li>
@@ -284,7 +283,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <h3 id="flow-remote-get">2.2 场景 2: RemoteGet Provider 按 RPC 写回 requester/client</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>场景拆解
+          场景拆解
           <ul>
             <li><strong>最简单 case：</strong>Client 或 Worker 发起 RemoteGet，请求数据所在 Worker B 把对象数据 UB 写回 requester/client，Worker B 侧 UB Write 返回 ERROR 4。</li>
             <li><strong>AS IS：</strong>Requester 可能只看到 RPC timeout 或 RemoteGet 失败，无法稳定区分对象不存在、provider RPC 不通、provider 写回失败，或 requester 接收路径不可用。</li>
@@ -295,7 +294,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <h3 id="flow-migrate">2.3 场景 3: Migration / Rebalance 目标 Worker 准入</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>场景拆解
+          场景拆解
           <ul>
             <li><strong>最简单 case：</strong>Migrate/Move/Rebalance 任务选择 Worker T 作为目标，但 Worker T 当前 UB 接收不可用，源 Worker 或迁移执行方写入 Worker T 失败。</li>
             <li><strong>AS IS：</strong>迁移任务可能只依据任务分配和元数据目标继续执行，反复连接同一个不可写目标，最终表现为迁移超时、迁移失败或 rebalance 进度停滞。</li>
@@ -306,7 +305,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <h3 id="flow-recovery">2.4 场景 4: UB 恢复后重新开放写入</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>场景拆解
+          场景拆解
           <ul>
             <li><strong>最简单 case：</strong>Worker A 的 UB 端口从故障中恢复，Client/Worker 仍保留对 Worker A 的本地隔离记录，或者 Worker A 自身刚从 ERROR 4/频繁 ERROR 9 中恢复。</li>
             <li><strong>AS IS：</strong>恢复可能依赖真实业务请求再次撞路径，或因为 TCP fallback 成功而被误认为 UB 已恢复；持续故障时，业务重试和恢复试探会叠加放大流量。</li>
@@ -353,9 +352,9 @@ th { background: #f8fafc; font-size: 12px; }
       <section id="modules" class="section">
         <h3 id="design-plan">3.2.1 核心模块</h3>
         <h4 id="class-diagram">设计类图</h4>
-        <p>下图用于说明新增抽象之间的职责边界：准入判断、错误分类、局部健康状态、心跳摘要和恢复探测彼此解耦。开发时优先按这些边界落小类，测试时可以按每个类的输入/输出独立注入错误。</p>
+        <p>下图用于说明核心抽象之间的职责边界：准入判断、错误分类、局部健康状态、心跳摘要和恢复探测彼此解耦。开发时优先按这些边界落小类，测试时可以按每个类的输入/输出独立注入错误。</p>
         <div class="diagram">
-          <div class="diagram-title">最小新增抽象与现有模块协同</div>
+          <div class="diagram-title">最小抽象与现有模块协同</div>
           <div class="mermaid">
 classDiagram
     class WorkerServiceMode {
@@ -446,7 +445,7 @@ classDiagram
         <p>GlobalFact 和局部信息不是同一类状态：GlobalFact 只表达已有元数据事实和 Worker 自身上报的 UB 健康摘要，适合被多节点消费；局部信息表达“本进程亲眼看到某个 peer 不通”，用于立即止血。准入判断必须组合两者，但不能让局部观测直接改写全局 membership。</p>
         <div class="table-wrap">
           <table>
-            <caption><span class="new-tag">新增</span>GlobalFact 与局部信息维护边界</caption>
+            <caption>GlobalFact 与局部信息维护边界</caption>
             <thead><tr><th>状态</th><th>维护者</th><th>产生方式</th><th>传播方式</th><th>消费者</th><th>冲突处理</th></tr></thead>
             <tbody>
               <tr><td>membership / ring / del_node_info / migration task</td><td>Master / 元数据侧</td><td>已有集群管理、扩缩容、迁移任务流程</td><td>已有元数据查询、心跳或任务下发</td><td>Client、Worker、迁移执行方</td><td>仍是权威事实；UB 局部故障不能把 Worker 改成全局 DOWN</td></tr>
@@ -502,7 +501,7 @@ sequenceDiagram
           </div>
         </div>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>合并规则：<strong>GlobalFact 决定“是否应该尝试”</strong>，局部观测决定“本进程现在是否放行”。写入和迁移只要任一侧判定不可写就 fail fast；读取可以换源，但所有候选 source 都不可用时返回明确 UB 数据面错误。GlobalFact 的 AVAILABLE 摘要不能直接清除本地 ERROR 4 隔离，只能触发本地 probe，probe 成功后才开放业务流量。
+          合并规则：<strong>GlobalFact 决定“是否应该尝试”</strong>，局部观测决定“本进程现在是否放行”。写入和迁移只要任一侧判定不可写就 fail fast；读取可以换源，但所有候选 source 都不可用时返回明确 UB 数据面错误。GlobalFact 的 AVAILABLE 摘要不能直接清除本地 ERROR 4 隔离，只能触发本地 probe，probe 成功后才开放业务流量。
         </div>
         <h3 id="module-responsibility">3.2.3 职责拆分</h3>
         <div class="grid-2">
@@ -561,17 +560,17 @@ sequenceDiagram
       <section id="implementation" class="section">
         <h3 id="deploy-design">3.2.5 最小改动点</h3>
         <div class="grid-2">
-          <div class="card"><div class="card-title">不新增进程</div><p>不改变 SDK 对外 API；新增逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
+          <div class="card"><div class="card-title">不引入新进程</div><p>不改变 SDK 对外 API；相关逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
           <div class="card"><div class="card-title">默认策略</div><p>UB fallback 默认关闭；显式开启时仅允许 <= 1MB 的普通读写 fallback，不覆盖 migration / rebalance。</p></div>
         </div>
         <h3 id="runtime-design">3.2.6 运行接入点</h3>
         <h4>运行期最小修改点</h4>
         <div class="grid-2">
-          <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
-          <div class="card"><div class="card-title">新增准入接口</div><p><code>TransportPathAdmission</code>：给 put/get/migrate/rebalance 调用，组合服务态、UB 观测、fallback 策略。</p></div>
-          <div class="card"><div class="card-title">新增局部/全局桥接</div><p><code>LocalUbHealth</code> 表示本 worker 自己 UB 数据面是否可写；<code>UbHealthGossip</code> 只通过已有心跳传播摘要，不直接触发 worker 下线。</p></div>
-          <div class="card"><div class="card-title">新增错误码</div><p>新增或复用 URMA error 家族，表达“数据所在 Worker UB 不可用”与“目标 Worker UB 接收不可用”。</p></div>
-          <div class="card"><div class="card-title">新增恢复 probe</div><p>先 cool-down，再 small probe。连续失败按 1s/2s/4s/8s/10s 退避；probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>
+          <div class="card"><div class="card-title">轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
+          <div class="card"><div class="card-title">准入接口</div><p><code>TransportPathAdmission</code>：给 put/get/migrate/rebalance 调用，组合服务态、UB 观测、fallback 策略。</p></div>
+          <div class="card"><div class="card-title">局部/全局桥接</div><p><code>LocalUbHealth</code> 表示本 worker 自己 UB 数据面是否可写；<code>UbHealthGossip</code> 只通过已有心跳传播摘要，不直接触发 worker 下线。</p></div>
+          <div class="card"><div class="card-title">错误码扩展</div><p>扩展或复用 URMA error 家族，表达“数据所在 Worker UB 不可用”与“目标 Worker UB 接收不可用”。</p></div>
+          <div class="card"><div class="card-title">恢复 probe</div><p>先 cool-down，再 small probe。连续失败按 1s/2s/4s/8s/10s 退避；probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>
         </div>
         <h4>运行路径接入点</h4>
         <ul>
@@ -640,7 +639,7 @@ sequenceDiagram
           </table>
         </div>
         <div class="diagram">
-          <div class="diagram-title"><span class="new-tag">新增</span>关键时序摘要</div>
+          <div class="diagram-title">关键时序摘要</div>
           <div class="table-wrap">
             <table>
               <caption>关键生命周期与 DryRun 对应关系</caption>
@@ -693,8 +692,8 @@ stateDiagram-v2
             </tbody>
           </table>
         </div>
-        <h4><span class="new-tag">新增</span>DryRun 变化模块时序</h4>
-        <p>以下时序图用于 DryRun 和联调，不要求场景分析章节提前理解新增类名。开发可用它确认新增模块插入点，测试可用它设计 mock、注入点和可观测断言。</p>
+        <h4>DryRun 变化模块时序</h4>
+        <p>以下时序图用于 DryRun 和联调，不要求场景分析章节提前理解方案类名。开发可用它确认模块插入点，测试可用它设计 mock、注入点和可观测断言。</p>
         <div class="diagram">
           <div class="diagram-title">流程 1：发现故障并进入局部隔离</div>
           <p>该流程验证“谁发起 UB Write，谁先得到真实错误”。Client 本端写失败时由 Client 记录目标不可写；RemoteGet 写回失败时由数据 Worker 把显式状态放回响应，Requester 只能消费这个显式结果，不能把普通 RPC timeout 合成 ERROR 4。</p>
@@ -766,7 +765,7 @@ sequenceDiagram
           </div>
         </div>
         <h3 id="oss">3.4 开源软件选型</h3>
-        <p>本设计不新增第三方开源软件依赖。状态维护、退避、心跳摘要和错误码传播均复用 DataSystem 现有 client/worker、RPC、heartbeat、URMA resource manager 能力。</p>
+        <p>本设计不引入第三方开源软件依赖。状态维护、退避、心跳摘要和错误码传播均复用 DataSystem 现有 client/worker、RPC、heartbeat、URMA resource manager 能力。</p>
         <h3 id="external">3.5 外部交互分析&&上下游依赖需求</h3>
         <div class="table-wrap">
           <table>
@@ -786,9 +785,9 @@ sequenceDiagram
         <h3 id="proto">4.1 Proto 接口</h3>
         <p>建议在 RemoteGet / direct read / heartbeat 相关 response 中扩展结构化 UB 数据面状态：failed endpoint、failure side、URMA status、operator worker、health epoch、backoff until。字段需要保持向后兼容，未携带时按现有 RPC 错误处理。</p>
         <h3 id="cpp">4.2 C++ 接口</h3>
-        <p>新增轻量 C++ 抽象集中在进程内：failure classifier、peer admission、receiver/source/target 准入、recovery probe、fallback policy。业务 SDK 对外 API 不变。</p>
+        <p>轻量 C++ 抽象集中在进程内：failure classifier、peer admission、receiver/source/target 准入、recovery probe、fallback policy。业务 SDK 对外 API 不变。</p>
         <h3 id="config">4.3 配置接口</h3>
-        <p>新增配置建议只覆盖策略开关和阈值：UB fallback 是否开启、小对象阈值、ERROR 9 连续失败阈值、probe 成功次数、指数退避上限、health summary TTL。</p>
+        <p>配置建议只覆盖策略开关和阈值：UB fallback 是否开启、小对象阈值、ERROR 9 连续失败阈值、probe 成功次数、指数退避上限、health summary TTL。</p>
       </section>
 
       <section id="constraints" class="section">
@@ -821,7 +820,7 @@ urma_status=ERROR4</code></pre>
       <section id="trusted" class="section">
         <h2>7. 可信软件</h2>
         <h3>7.1 安全性 Security</h3>
-        <p>不新增外部通信面；health summary 只携带 worker、状态、epoch、reason、backoff 信息，不携带对象数据。</p>
+        <p>不引入外部通信面；health summary 只携带 worker、状态、epoch、reason、backoff 信息，不携带对象数据。</p>
         <h3>7.2 韧性 Resilience</h3>
         <p>通过局部 fail fast、指数退避和 probe 恢复降低持续故障对业务请求和迁移任务的放大影响。</p>
         <h3>7.3 隐私性 Privacy</h3>
@@ -836,11 +835,11 @@ urma_status=ERROR4</code></pre>
 
       <section id="stories" class="section">
         <h2>8. 自验 用例</h2>
-        <p>自验证用例按新增代码分支反推，要求每个分支都能通过可注入的错误、可断言的状态迁移和可观测日志/metric 覆盖。业务级验收用例用于串联端到端场景，分支覆盖矩阵用于指导 UT/ST 补点。</p>
+        <p>自验证用例按代码分支反推，要求每个分支都能通过可注入的错误、可断言的状态迁移和可观测日志/metric 覆盖。业务级验收用例用于串联端到端场景，分支覆盖矩阵用于指导 UT/ST 补点。</p>
         <div class="table-wrap">
           <table>
-            <caption>新增代码分支覆盖矩阵</caption>
-            <thead><tr><th>新增分支</th><th>建议覆盖层级</th><th>注入点</th><th>断言</th><th>关联 Use Case</th></tr></thead>
+            <caption>代码分支覆盖矩阵</caption>
+            <thead><tr><th>代码分支</th><th>建议覆盖层级</th><th>注入点</th><th>断言</th><th>关联 Use Case</th></tr></thead>
             <tbody>
               <tr><td><code>CheckWriteTarget</code> 命中本地 <code>UNAVAILABLE</code></td><td>UT + ST</td><td>预置 <code>PeerUbAdmission(target)=UNAVAILABLE</code>，发起 Put/Set 或 migrate target 选择。</td><td>不调用 <code>UrmaWritePayload</code>，直接返回 UB unavailable；日志带 target、reason、epoch。</td><td>Client 写远端 Worker；Rebalance 目标 Worker UB 故障</td></tr>
               <tr><td><code>CheckReadSource</code> 命中 data worker 不可读/不可写回</td><td>UT + ST</td><td>direct read / batch direct read 前预置 data worker admission unavailable。</td><td>按 data worker 分组 fail fast；同一 worker 只产生一次 target rejected。</td><td>Client Get；Direct read batch 命中故障 data worker</td></tr>
@@ -870,7 +869,7 @@ urma_status=ERROR4</code></pre>
               <tr><td>Client Get 接收 Worker Provider 写回</td><td>Provider 写回 client 时返回显式 URMA ERROR 4；另测 RPC timeout。</td><td>Client 消费 worker 显式 URMA status；RPC timeout/failure 只按 RPC/peer suspect 处理。</td><td>Client 侧日志区分 explicit ERROR 4 和 RPC timeout。</td></tr>
               <tr><td>Worker remote get provider 写 requester 失败</td><td>Requester 发 RemoteGet，Provider 的 UB write 返回 ERROR 4。</td><td>Provider 明确返回 UB unavailable；Requester 不长时间 retry。</td><td>RPC response error 可区分 transport/data-not-found。</td></tr>
               <tr><td>Rebalance 目标 Worker UB 故障</td><td>构造 rebalance task，Global Fact 仍给出 target，但本地 admission 标记 target unavailable。</td><td>任务不向该目标迁移；可失败或重选目标。</td><td>rebalance task 记录 target rejected，迁移字节数为 0。</td></tr>
-              <tr><td>扩容 Worker 刚加入</td><td>新增 worker 已进入 membership，但 UB probe 尚未成功。</td><td>全局 membership 已可见，但 UB probe 未成功前不作为 UB 写入或迁移目标。</td><td>状态显示 PROBING，probe 成功后才 AVAILABLE。</td></tr>
+              <tr><td>扩容 Worker 刚加入</td><td>新加入 worker 已进入 membership，但 UB probe 尚未成功。</td><td>全局 membership 已可见，但 UB probe 未成功前不作为 UB 写入或迁移目标。</td><td>状态显示 PROBING，probe 成功后才 AVAILABLE。</td></tr>
               <tr><td>目的端 Worker 自身 UB 故障</td><td>在 Worker-Data 本地连续注入 ERROR 4 或频繁 ERROR 9，观察心跳摘要。</td><td>本 worker 聚合本地错误后，通过心跳摘要通知其他节点减少写入。</td><td>heartbeat summary 包含 worker、epoch、reason、backoff_until。</td></tr>
               <tr><td>持续故障退避</td><td>保持 probe 失败，连续触发请求和恢复探测。</td><td>probe/retry 间隔按 1s/2s/4s/8s/10s 增长；业务请求直接 fail fast。</td><td>日志和 metric 展示 backoff level，故障节点流量下降。</td></tr>
               <tr><td>UB 恢复</td><td>先注入故障，再放开 probe 成功，同时保持 membership RUNNING。</td><td>probe 成功后重新开放写入/迁移；现有 membership 不被 UB 单独修改。</td><td>状态 UNAVAILABLE -> PROBING -> AVAILABLE，后续写成功。</td></tr>
@@ -904,7 +903,7 @@ urma_status=ERROR4</code></pre>
               <tr><td><code>UrmaConnection::ReCreateJetty</code><br><span class="src">urma_resource.cpp:418-460</span></td><td>失败 Jetty 会被 MarkInvalid 并重建，避免错误地 invalid 新 Jetty。</td><td>和 PR 1277 的发送端 Jetty 池化/隔离思路一致：恢复局部资源，但准入状态独立闭环。</td></tr>
               <tr><td><code>GetUrmaErrorHandlePolicy</code><br><span class="src">urma_manager.cpp:74-87</span></td><td>当前只把 CQE status 9 映射到 <code>RECREATE_JETTY</code>。</td><td>ERROR 9 默认按可恢复资源错误处理；窗口内频繁出现或 probe 失败才升级为 UB path unavailable。</td></tr>
               <tr><td><code>UrmaSuccessRateTracker</code><br><span class="src">urma_success_rate_tracker.cpp:34-112</span></td><td>client 侧已有成功率窗口和 1s/2s/4s/8s/10s backoff。</td><td>UB path probe/backoff 可以复用同类模型，但粒度从“切 worker 尝试”扩展为“peer worker admission”。</td></tr>
-              <tr><td><code>master_heartbeat.proto</code><br><span class="src">master_heartbeat.proto:32-47</span></td><td>worker->master heartbeat request/response 预留 <code>extend</code> 字段。</td><td>可承载 <code>UbHealthSummary</code> 的 worker、state、epoch、reason、backoff_until，避免新增同步 RPC。</td></tr>
+              <tr><td><code>master_heartbeat.proto</code><br><span class="src">master_heartbeat.proto:32-47</span></td><td>worker->master heartbeat request/response 预留 <code>extend</code> 字段。</td><td>可承载 <code>UbHealthSummary</code> 的 worker、state、epoch、reason、backoff_until，避免引入同步 RPC。</td></tr>
               <tr><td><code>share_memory.proto::HeartbeatRspPb</code><br><span class="src">share_memory.proto:146-155</span></td><td>client-worker heartbeat response 已有 <code>available_workers</code>、<code>unhealthy</code> 等健康相关字段。</td><td>可扩展 UB health 摘要给 client；只更新 client 本地 admission，不改变 worker membership。</td></tr>
             </tbody>
           </table>
