@@ -106,6 +106,7 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub" href="#scope-summary">1.2 功能目标与边界</a>
       <a class="nav-sub" href="#concepts">1.3 关键概念定义</a>
       <a href="#flows">2. 场景分析</a>
+      <a class="nav-sub" href="#flow-context">2.0 AS-IS / TO-BE</a>
       <a class="nav-sub" href="#flow-client-put">2.1 Client 写入</a>
       <a class="nav-sub" href="#flow-remote-get">2.2 RemoteGet 写回</a>
       <a class="nav-sub" href="#flow-migrate">2.3 迁移与 Rebalance</a>
@@ -118,8 +119,9 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub" href="#deploy-design">3.2.2 部署</a>
       <a class="nav-sub" href="#runtime-design">3.2.3 运行</a>
       <a class="nav-sub" href="#usage-design">3.2.4 元戎整体如何使用</a>
-      <a class="nav-sub" href="#code-view-design">3.2.5 代码关键类图、运行视图</a>
-      <a class="nav-sub" href="#perf-design">3.2.6 高性能设计 topic</a>
+      <a class="nav-sub" href="#dryrun-design">3.2.5 DryRun Cases</a>
+      <a class="nav-sub" href="#code-view-design">3.2.6 代码关键类图、运行视图</a>
+      <a class="nav-sub" href="#perf-design">3.2.7 高性能设计 topic</a>
       <a href="#stories">4. 自验证用例</a>
       <a class="nav-sub" href="#verify-cases">4.1 验收用例</a>
       <a class="nav-sub" href="#open">4.2 待确认策略</a>
@@ -132,12 +134,12 @@ th { background: #f8fafc; font-size: 12px; }
         <p>UB 端口或路径故障后，业务可能表现为成功率下降、批量请求局部超时、迁移任务反复失败，而不是明确告诉调用方“数据所在 Worker 的 UB 数据面不可用”。本需求的核心目标是避免静默故障：故障 Worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 Worker 时快速返回可识别错误。</p>
         <div class="grid-2">
           <div class="card">
-            <div class="card-title">触发对象</div>
-            <p>Client Put/Set、传统 Client Get、Client direct read、Worker remote get、BatchGetObjectRemote、migrate/move/rebalance 都要进入同一套 UB path admission。</p>
+            <div class="card-title">影响范围</div>
+            <p>Client 写入、Client 读取、Worker 远端读取、批量远端读取、数据迁移、Move/Rebalance 都可能被 UB 静默故障影响。</p>
           </div>
           <div class="card">
-            <div class="card-title">处理原则</div>
-            <p>发起 URMA Write 的一端记录真实 operator 结果；requester 只消费显式 RPC status；fallback 默认关闭，开启时也只允许小对象，并且 fallback 成功不恢复 UB health。</p>
+            <div class="card-title">故障表现</div>
+            <p>调用方需要看到明确错误，而不是成功率下降、长时间等待、批量请求局部静默失败，或迁移任务持续重试同一个异常 Worker。</p>
           </div>
           <div class="card">
             <div class="card-title">用户体验</div>
@@ -160,16 +162,16 @@ th { background: #f8fafc; font-size: 12px; }
         <h3 id="scope-summary">1.2 功能目标与边界</h3>
         <div class="grid-2">
           <div class="card">
-            <div class="card-title">准入条件</div>
-            <p>所有写入和迁移目标都通过同一个组合判断：<code>WorkerServiceMode(worker) == RUNNING</code> 且 <code>WorkerUbPathHealth(worker) == AVAILABLE</code>。任一不满足，默认 fail fast。</p>
+            <div class="card-title">成功标准</div>
+            <p>UB 故障后，后续写入、迁移、rebalance 不再继续打到同一个不可写 Worker；读命中故障数据 Worker 时快速返回可识别错误。</p>
           </div>
           <div class="card">
-            <div class="card-title">最小修改原则</div>
-            <p>不新建复杂的数据面健康中心；新增轻量的 UB 路径观测缓存和准入接口，挂到现有 client put、worker provider write、remote get、migration/rebalance 入口。</p>
+            <div class="card-title">恢复标准</div>
+            <p>故障 Worker 只有在 UB 数据面恢复被确认后，才重新承接写入和迁移；恢复过程不能依赖普通业务请求反复试错。</p>
           </div>
           <div class="card">
             <div class="card-title">隔离含义</div>
-            <p>这里的隔离不是把节点从集群摘除，而是对“向某 Worker 发生 UB 写入/迁移”的数据面准入关闸。读请求命中故障数据所在 Worker 时快速返回可识别错误。</p>
+            <p>这里的隔离不是把节点从集群摘除，而是关闭“向该 Worker 写入或迁移数据”的数据面通路；对象是否存在、primary 属于谁仍以全局元数据为准。</p>
           </div>
           <div class="card">
             <div class="card-title">非目标边界</div>
@@ -231,6 +233,20 @@ th { background: #f8fafc; font-size: 12px; }
 
       <section id="flows" class="section">
         <h2>2. 场景分析</h2>
+        <h3 id="flow-context">2.0 问题上下文：AS-IS / TO-BE</h3>
+        <div class="table-wrap">
+          <table>
+            <caption>从静默失败到显式隔离</caption>
+            <thead><tr><th>维度</th><th>AS-IS</th><th>TO-BE</th></tr></thead>
+            <tbody>
+              <tr><td>失败呈现</td><td>UB 写失败可能被 fallback、retry、batch 内部分失败掩盖，外部只看到成功率下降或延迟升高。</td><td>返回明确的 UB 数据面错误，调用方能区分对象不存在、RPC 不通、数据所在 Worker UB 不可用。</td></tr>
+              <tr><td>写入行为</td><td>同一 client/worker 可能持续向已知 UB 异常的 Worker 写入或迁移数据。</td><td>一旦本地准入判定不可写，恢复前对同一 target fail fast，不继续制造新失败。</td></tr>
+              <tr><td>读取行为</td><td>RemoteGet requester 发 RPC，但 UB Write 失败只在 provider 侧出现，requester 容易只能看到 timeout。</td><td>provider 把 URMA operator 结果显式放回 response；requester 只基于显式状态更新本地判断。</td></tr>
+              <tr><td>全局状态</td><td>Global Fact 只回答 Worker 是否在集群、对象/slot/primary/任务归属，不表达 UB 数据面是否可写。</td><td>Global Fact 仍保持权威；UB health 作为本地或轻量摘要参与数据面准入，不改写 membership。</td></tr>
+              <tr><td>恢复路径</td><td>恢复可能依赖真实业务请求再次撞路径，持续故障时重试流量放大。</td><td>用 probe 和 epoch 验证恢复，持续故障按指数退避，千级节点下只传播本 worker 摘要。</td></tr>
+            </tbody>
+          </table>
+        </div>
         <div class="table-wrap">
           <table>
             <caption>场景清单与接入点</caption>
@@ -608,7 +624,22 @@ classDiagram
           <li>扩容 worker 在 UB probe 成功前不承接 UB 写入/迁移；缩容或故障 worker 在 service/ring 已不可写时直接拒绝作为 target。</li>
           <li>心跳摘要用于传播“本 worker UB 数据面是否可写”，但不把局部 UB 故障升级为 worker DOWN。</li>
         </ul>
-        <h3 id="code-view-design">3.2.5 代码关键类图、运行视图</h3>
+        <h3 id="dryrun-design">3.2.5 DryRun Cases</h3>
+        <div class="table-wrap">
+          <table>
+            <caption>上线前 DryRun 验证</caption>
+            <thead><tr><th>Case</th><th>DryRun 注入/观察</th><th>期望决策</th><th>验收信号</th></tr></thead>
+            <tbody>
+              <tr><td>Client Put 目标 Worker ERROR 4</td><td>在 client UB write 返回处注入 ERROR 4，不改 Global Fact。</td><td>只隔离该 client 对目标 worker 的 UB 写入；不把 worker 标成 DOWN。</td><td>下一次写同 target fail fast，日志包含 target、reason、epoch。</td></tr>
+              <tr><td>RemoteGet provider 写 requester 失败</td><td>在 provider <code>WriteViaFastTransport</code> 注入 URMA error，并通过 RPC response 返回结构化状态。</td><td>requester 消费显式 status；RPC timeout 不合成 ERROR 4。</td><td>response 区分 failed_endpoint、operator_worker、urma_status。</td></tr>
+              <tr><td>Direct read batch 命中故障 data worker</td><td>构造 batch 中多个 object 均在同一 data worker，预置该 worker peer admission unavailable。</td><td>按 data worker 分组后整组 fail fast 或换源，不逐对象等待。</td><td>batch 日志只有一次 target rejected；无 N 次 timeout。</td></tr>
+              <tr><td>Migrate/Rebalance stale target</td><td>Global Fact 里 target 仍来自 task，但本地 UB admission 为 unavailable。</td><td>执行前拒绝该 target，可失败或触发重选；不发送数据。</td><td>task 记录 target rejected，migrated bytes 为 0。</td></tr>
+              <tr><td>千级节点心跳摘要</td><td>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。</td><td>master 侧保持 O(N) 摘要；client/worker 按需消费候选相关状态。</td><td>heartbeat payload 与 worker 数线性相关，普通 Put/Get 不同步访问 master。</td></tr>
+              <tr><td>持续 ERROR 9</td><td>连续注入 CQE status 9，观察 Jetty recreate 与 probe backoff。</td><td>先 SUSPECT/PROBING，超过阈值后 UNAVAILABLE，probe 指数退避。</td><td>backoff level 增长，故障 target 业务流量下降。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3 id="code-view-design">3.2.6 代码关键类图、运行视图</h3>
         <h4>WorkerUbPathHealth 状态机</h4>
         <div class="diagram">
           <div class="diagram-title">WorkerUbPathHealth 状态机</div>
@@ -625,7 +656,7 @@ stateDiagram-v2
     AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
           </div>
         </div>
-        <h3 id="perf-design">3.2.6 高性能设计 topic</h3>
+        <h3 id="perf-design">3.2.7 高性能设计 topic</h3>
         <ul>
           <li>准入判断必须是进程内 O(1) 读本地状态，不能在普通 Put/Get/RemoteGet 关键路径上同步访问外部服务。</li>
           <li>失败后同一 worker/source 的 batch remote get 要按 worker 分组 fail fast，避免 batch 内每个对象重复等待超时。</li>
