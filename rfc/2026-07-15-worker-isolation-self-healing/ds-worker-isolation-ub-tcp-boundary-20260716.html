@@ -380,6 +380,60 @@ th { background: #f8fafc; font-size: 12px; }
             <p>可行边界是“每个 worker 只上报自己的 UB 摘要”，而不是在心跳里广播所有 peer 状态。Coordinator/etcd 侧维护 O(N) 的 worker -> health epoch 摘要；client/worker 只按当前连接、候选 data location、迁移 target 消费相关摘要，普通 Put/Get 仍走本地 O(1) admission。</p>
           </div>
         </div>
+        <div class="diagram">
+          <div class="diagram-title">图 3-0 UB 故障隔离关键设计总览</div>
+          <p>图 3-0 把 3.2 的关键设计压成一张图：URMA Write 发起端先做真实错误归因，Client/Worker 本地用 PeerUbAdmission 做 O(1) 准入，Provider Worker 用 LocalUbHealth 只表达“自己 UB 能力”，Coordinator/etcd 只传播 O(N) 的 Worker 级健康摘要，恢复必须通过 probe 或更新的 health epoch 逐步放开。</p>
+          <div class="mermaid">
+flowchart TB
+    subgraph Observe["局部观测：谁发起 URMA Write，谁先看到真实结果"]
+      ClientPut["Client Put/Set\nclient 本端 UB Write"]
+      ProviderGet["RemoteGet / Get 写回\nprovider worker UB Write"]
+      MigratePath["Migrate / Rebalance\nsource 写 target 或 target 承接"]
+      UrmaResult["URMA outcome\nERROR 4 = 本地 UB 链路明确异常\nERROR 9 = timeout 后 Jetty 重建"]
+      ClientPut --> UrmaResult
+      ProviderGet --> UrmaResult
+      MigratePath --> UrmaResult
+    end
+
+    subgraph LocalDecision["本地止血：普通业务路径只读本进程准入"]
+      Classifier["UbFailureClassifier\n显式 URMA status 分类"]
+      PeerAdmission["PeerUbAdmission\nsource / target / receiver 准入"]
+      LocalHealth["LocalUbHealth\nthis worker 自身 UB 能力"]
+      FailFast["Fail fast / 换源 / 拒绝迁移目标\n默认不透明 fallback TCP"]
+      UrmaResult --> Classifier
+      Classifier --> PeerAdmission
+      Classifier --> LocalHealth
+      PeerAdmission --> FailFast
+    end
+
+    subgraph GlobalFact["轻量全局事实：只传播 Worker 级 UB 能力摘要"]
+      Summary["UbHealthSummary\nworker, state, epoch, reason, backoff"]
+      Coord["Coordinator / etcd\nO(N) worker health fact"]
+      Consumers["相关 Client / Worker\n按候选 source 或 target 消费"]
+      LocalHealth --> Summary
+      Summary --> Coord
+      Coord --> Consumers
+      Consumers --> PeerAdmission
+    end
+
+    subgraph Recovery["恢复闭环：业务请求不负责试错恢复"]
+      Backoff["指数退避 cooldown"]
+      Probe["UbRecoveryProbe\nhandshake / warmup / small URMA probe"]
+      Reopen["PROBING -> AVAILABLE\nprobe 成功或新 epoch 触发本地复核"]
+      PeerAdmission --> Backoff
+      LocalHealth --> Backoff
+      Backoff --> Probe
+      Probe --> Reopen
+      Reopen --> PeerAdmission
+      Reopen --> LocalHealth
+    end
+
+    classDef added fill:#fff7d6,stroke:#f2b84b,stroke-width:1.4px,color:#1d2939;
+    classDef fact fill:#eaf4ff,stroke:#4a90d9,stroke-width:1.2px,color:#1d2939;
+    class Classifier,PeerAdmission,LocalHealth,FailFast,Backoff,Probe,Reopen added;
+    class Summary,Coord,Consumers fact;
+          </div>
+        </div>
         <div class="note warn">
           结论：第一层必须是 URMA Write 发起端局部感知和本地准入，保证 Put/Get/RemoteGet/migrate/rebalance 立即止血；第二层是数据接收端对显式 RPC 状态、peer feedback 和全局 UB 能力事件的消费；第三层才是轻量全局摘要和保活探测，用于恢复和减少其他节点继续撞同一故障 Worker。持续故障必须指数退避，避免 probe 或重试流量放大。
         </div>
