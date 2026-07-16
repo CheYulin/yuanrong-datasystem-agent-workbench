@@ -383,31 +383,61 @@ th { background: #f8fafc; font-size: 12px; }
 
       <section id="modules" class="section">
         <h3 id="state-machine-design">3.2.1 状态机设计</h3>
-        <p>状态机是 UB 故障隔离的第一层公共语义。无论错误来自 Client 本端写、Provider 写回、Worker 自身自检，最终都要落到 peer 或本 worker 的可写状态上；业务路径只消费状态，不在各自流程里重复推导。</p>
+        <p>状态机按角色拆成两类，避免开发实现时把“我访问某个 peer 不通”和“我这个 Worker 自己 UB 不可用”混在一起。数据访问者是发起 Put/Get/RemoteGet/Migrate 的 Client 或 Worker；数据提供者是持有对象数据、执行 provider->client/provider->worker UB Write，或作为迁移目标承接数据的 Worker。</p>
+        <div class="table-wrap">
+          <table>
+            <caption>状态机归属</caption>
+            <thead><tr><th>状态机</th><th>维护进程</th><th>描述对象</th><th>输入信号</th><th>输出用途</th><th>不能表达</th></tr></thead>
+            <tbody>
+              <tr><td><code>PeerUbAdmission</code></td><td>数据访问者 Client / Worker</td><td>“本进程访问某个目标 Worker 是否可走 UB”</td><td>本端 URMA Write 结果、Provider 显式 RPC status、GlobalFact 健康摘要、本地 probe 结果</td><td>本进程 Put/Get/RemoteGet/Migrate/Rebalance 的 source/target/receiver 准入</td><td>不能把 peer 改成全局 DOWN；不能代表其他进程也访问失败</td></tr>
+              <tr><td><code>LocalUbHealth</code></td><td>数据提供者 Worker</td><td>“本 Worker 自身 UB 数据面是否适合被写入/迁移/读回”</td><td>本地 ERROR 4、频繁 ERROR 9、Jetty 重建失败、self probe、peer feedback</td><td>生成本 Worker 的健康摘要，通过 heartbeat/response 让其他节点减少撞击</td><td>不能维护所有 peer matrix；不能替代 membership/ring/task</td></tr>
+            </tbody>
+          </table>
+        </div>
         <div class="diagram">
-          <div class="diagram-title">WorkerUbPathHealth 状态机</div>
+          <div class="diagram-title">数据访问者 Client/Worker：PeerUbAdmission 状态机</div>
           <div class="mermaid">
 stateDiagram-v2
     [*] --> AVAILABLE
-    AVAILABLE --> UNAVAILABLE: ERROR 4 port unavailable
-    AVAILABLE --> SUSPECT: RPC timeout / ERROR 9 / reconnect failure
-    SUSPECT --> PROBING: local recreate or heartbeat epoch changed
-    SUSPECT --> UNAVAILABLE: threshold exceeded
+    AVAILABLE --> UNAVAILABLE: local UB Write ERROR 4
+    AVAILABLE --> SUSPECT: RPC timeout / ERROR 9 / weak failure
+    SUSPECT --> PROBING: cooldown or newer health epoch
+    SUSPECT --> UNAVAILABLE: threshold exceeded / probe failed
     UNAVAILABLE --> PROBING: cooldown elapsed by exponential backoff
-    PROBING --> AVAILABLE: N probe success
+    PROBING --> AVAILABLE: local probe success and GlobalFact allows
     PROBING --> UNAVAILABLE: probe failed, increase backoff
-    AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
+    AVAILABLE --> PROBING: peer instance epoch changed
           </div>
         </div>
+        <p>访问者状态机的粒度是 <code>local process -> peer worker</code>。Client Put 的 ERROR 4、Worker RemoteGet requester 收到 Provider 显式 ERROR 4、迁移执行方发现 target 不可写，都会更新本地 <code>PeerUbAdmission</code>。RPC timeout 只能进入 <code>SUSPECT</code>，不能合成 ERROR 4。</p>
+        <div class="diagram">
+          <div class="diagram-title">数据提供者 Worker：LocalUbHealth 状态机</div>
+          <div class="mermaid">
+stateDiagram-v2
+    [*] --> SELF_AVAILABLE
+    SELF_AVAILABLE --> SELF_SUSPECT: frequent ERROR 9 / Jetty recreate / peer feedback
+    SELF_AVAILABLE --> SELF_UNAVAILABLE: local ERROR 4 / self probe failed
+    SELF_SUSPECT --> SELF_UNAVAILABLE: threshold exceeded
+    SELF_SUSPECT --> SELF_PROBING: local resource recreated
+    SELF_UNAVAILABLE --> SELF_PROBING: backoff elapsed
+    SELF_PROBING --> SELF_AVAILABLE: self probe success, bump epoch
+    SELF_PROBING --> SELF_UNAVAILABLE: self probe failed, increase backoff
+    SELF_AVAILABLE --> SELF_SUSPECT: multiple peers report write failure
+          </div>
+        </div>
+        <p>Provider 状态机的粒度是 <code>this worker</code>，只描述本 Worker 自身 UB 数据面。它产生 <code>UbHealthSummary(worker, state, epoch, reason, backoff_until)</code>，供 Master/元数据侧汇总，并被相关 Client/Worker 消费为 peer admission 的输入。</p>
         <div class="table-wrap">
           <table>
             <caption>状态迁移与业务准入</caption>
-            <thead><tr><th>状态</th><th>进入条件</th><th>Put / 写入</th><th>Get / RemoteGet</th><th>Migrate / Rebalance</th><th>恢复动作</th></tr></thead>
+            <thead><tr><th>角色</th><th>状态</th><th>进入条件</th><th>Put / 写入</th><th>Get / RemoteGet</th><th>Migrate / Rebalance</th><th>恢复动作</th></tr></thead>
             <tbody>
-              <tr><td><code>AVAILABLE</code></td><td>默认初始、probe 成功、健康摘要与本地 probe 均通过。</td><td>允许</td><td>允许作为 source/receiver</td><td>允许作为 target</td><td>持续记录 outcome，不主动 probe。</td></tr>
-              <tr><td><code>SUSPECT</code></td><td>RPC timeout、单次 ERROR 9、连接重建等弱信号。</td><td>可按策略短暂放行或降级为 probe 前检查</td><td>优先换源，无法换源时快速失败</td><td>不作为新迁移 target</td><td>触发轻量 probe；超过阈值转 <code>UNAVAILABLE</code>。</td></tr>
-              <tr><td><code>UNAVAILABLE</code></td><td>ERROR 4、连续 ERROR 9、probe 失败、较新健康摘要显示不可写。</td><td>直接 fail fast</td><td>换源；无源时返回 UB 数据面错误</td><td>拒绝 target，任务失败或重选</td><td>cooldown 后指数退避 probe。</td></tr>
-              <tr><td><code>PROBING</code></td><td>cooldown 到期、Jetty 重建、GlobalFact 出现较新 AVAILABLE epoch。</td><td>业务写仍拒绝</td><td>业务读不拿 probe 结果冒充成功</td><td>仍不承接迁移</td><td>N 次小探测成功后转 <code>AVAILABLE</code>。</td></tr>
+              <tr><td>访问者</td><td><code>AVAILABLE</code></td><td>默认初始、probe 成功、健康摘要与本地 probe 均通过。</td><td>允许</td><td>允许选择 source/receiver</td><td>允许选择 target</td><td>持续记录 outcome。</td></tr>
+              <tr><td>访问者</td><td><code>SUSPECT</code></td><td>RPC timeout、单次 ERROR 9、连接重建等弱信号。</td><td>可按策略短暂放行或降级为 probe 前检查</td><td>优先换源，无法换源时快速失败</td><td>不作为新迁移 target</td><td>触发轻量 probe；超过阈值转 <code>UNAVAILABLE</code>。</td></tr>
+              <tr><td>访问者</td><td><code>UNAVAILABLE</code></td><td>本端 ERROR 4、Provider 显式 ERROR 4、probe 失败、较新摘要显示不可写。</td><td>直接 fail fast</td><td>换源；无源时返回 UB 数据面错误</td><td>拒绝 target，任务失败或重选</td><td>cooldown 后指数退避 probe。</td></tr>
+              <tr><td>访问者</td><td><code>PROBING</code></td><td>cooldown 到期、peer epoch 变化、GlobalFact 出现较新 AVAILABLE epoch。</td><td>业务写仍拒绝</td><td>业务读不拿 probe 结果冒充成功</td><td>仍不承接迁移</td><td>N 次小探测成功后转 <code>AVAILABLE</code>。</td></tr>
+              <tr><td>Provider</td><td><code>SELF_AVAILABLE</code></td><td>self probe 成功，本地 UB 资源可用。</td><td>允许其他节点写入本 Worker</td><td>允许作为 data provider 写回 requester</td><td>允许作为 migration target</td><td>随 heartbeat 发布可用 epoch。</td></tr>
+              <tr><td>Provider</td><td><code>SELF_UNAVAILABLE</code></td><td>本地 ERROR 4、频繁 ERROR 9、self probe 失败。</td><td>通过摘要让其他节点拒绝写入</td><td>Get 命中本 Worker 时快速返回 UB unavailable 或换源</td><td>拒绝作为 target</td><td>backoff 后 self probe。</td></tr>
+              <tr><td>Provider</td><td><code>SELF_PROBING</code></td><td>本地资源重建或 backoff 到期。</td><td>不承接新写</td><td>不把 probe 成功当业务成功</td><td>不承接迁移</td><td>self probe 成功后 bump epoch。</td></tr>
             </tbody>
           </table>
         </div>
