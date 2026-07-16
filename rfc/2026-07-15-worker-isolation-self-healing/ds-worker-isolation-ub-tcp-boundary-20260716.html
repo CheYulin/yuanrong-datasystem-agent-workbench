@@ -272,19 +272,47 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <h3 id="flow-client-put">2.1 场景 1: Client -> Worker Put 本端发起 UB 写失败</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>开发关注点：Client 是 UB Write 发起端，能直接看到 ERROR 4/ERROR 9/timeout。测试关注点：第一次注入失败后，第二次同目标写入必须快速失败，且不能默认走 TCP fallback。
+          <span class="new-tag">新增</span>场景拆解
+          <ul>
+            <li><strong>最简单 case：</strong>Client Put/Set 写入 Worker A，Client 发起的 UB Write 返回 ERROR 4，或连续出现 ERROR 9/timeout。</li>
+            <li><strong>AS IS：</strong>本次写请求失败后，后续请求仍可能按元数据继续选择 Worker A；fallback、retry 或 batch 内部分失败会掩盖根因，业务侧只看到成功率下降。</li>
+            <li><strong>TO BE：</strong>Client 把 Worker A 记录为本地 UB 写入不可用，恢复前同目标写入快速失败；默认不透明切 TCP，只有显式开启且小于 1MB 的场景才允许走 TCP fallback。</li>
+            <li><strong>风险：</strong>继续写入同一故障 Worker 会制造更多失败对象或部分成功状态，调用方难以判断数据是否真正写入成功。</li>
+            <li><strong>最小判断：</strong>1 Client 是本次 UB Write 发起端；2 返回 ERROR 4 或达到连续失败阈值；3 目标 Worker 尚未恢复；4 后续同目标写入不再进入真实 UB Write。</li>
+          </ul>
         </div>
         <h3 id="flow-remote-get">2.2 场景 2: RemoteGet Provider 按 RPC 写回 requester/client</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>开发关注点：真正执行 UB Write 的是数据所在 Worker，Requester 只能从 RPC response 或 timeout 间接感知。测试关注点：显式 UB 失败和 RPC timeout 必须走不同错误分支。
+          <span class="new-tag">新增</span>场景拆解
+          <ul>
+            <li><strong>最简单 case：</strong>Client 或 Worker 发起 RemoteGet，请求数据所在 Worker B 把对象数据 UB 写回 requester/client，Worker B 侧 UB Write 返回 ERROR 4。</li>
+            <li><strong>AS IS：</strong>Requester 可能只看到 RPC timeout 或 RemoteGet 失败，无法稳定区分对象不存在、provider RPC 不通、provider 写回失败，或 requester 接收路径不可用。</li>
+            <li><strong>TO BE：</strong>Worker B 在 RPC response 中返回明确的 UB 写失败状态，带出失败端点、URMA 状态码和执行写回的一端；Requester 只基于显式状态更新本地判断，RPC timeout 仍按 RPC/对端可疑处理。</li>
+            <li><strong>风险：</strong>把 RPC timeout 直接等价成 UB ERROR 4 会误隔离；把 UB 写回失败当成对象不存在，会造成上层错误恢复或错误重试。</li>
+            <li><strong>最小判断：</strong>1 请求是 RemoteGet/direct read/batch direct read 写回；2 provider Worker 是 UB Write 发起端；3 有显式 URMA status 才按 UB 故障分支处理；4 RPC timeout 不合成 ERROR 4。</li>
+          </ul>
         </div>
         <h3 id="flow-migrate">2.3 场景 3: Migration / Rebalance 目标 Worker 准入</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>开发关注点：迁移目标不是只看元数据任务是否给出 target，还要看目标 Worker 当前能否接收 UB 写。测试关注点：目标不可写时 migrated bytes 应为 0，任务记录 target rejected。
+          <span class="new-tag">新增</span>场景拆解
+          <ul>
+            <li><strong>最简单 case：</strong>Migrate/Move/Rebalance 任务选择 Worker T 作为目标，但 Worker T 当前 UB 接收不可用，源 Worker 或迁移执行方写入 Worker T 失败。</li>
+            <li><strong>AS IS：</strong>迁移任务可能只依据任务分配和元数据目标继续执行，反复连接同一个不可写目标，最终表现为迁移超时、迁移失败或 rebalance 进度停滞。</li>
+            <li><strong>TO BE：</strong>迁移发送数据前检查目标 Worker 是否可接收 UB 写；不可写时拒绝目标，任务失败或重选目标，不向该 Worker 继续搬数据。</li>
+            <li><strong>风险：</strong>把数据迁到无法接收 UB 写的 Worker，会放大迁移失败并影响后续读取；持续重试还会占用 worker-worker RPC 和数据面资源。</li>
+            <li><strong>最小判断：</strong>1 迁移任务给出 target Worker；2 target 当前不可接收 UB 写、正在退出或尚未通过恢复验证；3 migrated bytes 保持为 0；4 任务记录 target rejected 或进入重选。</li>
+          </ul>
         </div>
         <h3 id="flow-recovery">2.4 场景 4: UB 恢复后重新开放写入</h3>
         <div class="note new-panel">
-          <span class="new-tag">新增</span>开发关注点：恢复不能由 fallback 成功触发，只能由探测成功或明确健康状态更新触发。测试关注点：故障、探测失败、探测成功三段状态必须可观测。
+          <span class="new-tag">新增</span>场景拆解
+          <ul>
+            <li><strong>最简单 case：</strong>Worker A 的 UB 端口从故障中恢复，Client/Worker 仍保留对 Worker A 的本地隔离记录，或者 Worker A 自身刚从 ERROR 4/频繁 ERROR 9 中恢复。</li>
+            <li><strong>AS IS：</strong>恢复可能依赖真实业务请求再次撞路径，或因为 TCP fallback 成功而被误认为 UB 已恢复；持续故障时，业务重试和恢复试探会叠加放大流量。</li>
+            <li><strong>TO BE：</strong>隔离状态进入 cooldown 后只做轻量探测；探测成功且服务状态允许时才恢复写入和迁移。Worker 自身发现本地 UB 故障或恢复后，通过轻量健康摘要让其他节点减少撞故障节点并在恢复后平稳放开。</li>
+            <li><strong>风险：</strong>过早恢复会让新写入和迁移继续失败；过晚恢复会浪费可用容量。千级节点下若全量广播 peer 状态，还会让心跳成本不可控。</li>
+            <li><strong>最小判断：</strong>1 当前 peer 或本地 worker 处于故障/探测状态；2 cooldown 到期后发起小探测；3 探测成功且 worker 未处于退出态；4 放开写入和迁移，否则按指数退避继续隔离。</li>
+          </ul>
         </div>
       </section>
 
