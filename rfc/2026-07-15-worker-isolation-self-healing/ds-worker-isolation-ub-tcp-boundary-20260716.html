@@ -267,7 +267,7 @@ th { background: #f8fafc; font-size: 12px; }
               <tr><td>UC-3 Client Direct Read / Batch Direct Read</td><td>Client、一个或多个数据 Worker</td><td>Batch 中部分对象位于同一个 UB 异常 Worker。</td><td>Batch 内每个对象都等待超时，放大延迟和重试流量。</td><td>按数据 Worker 分组后整组快速失败或换源，避免逐对象撞同一故障点。</td></tr>
               <tr><td>UC-4 Worker RemoteGet</td><td>请求 Worker、数据所在 Worker</td><td>请求 Worker 发 RPC，数据所在 Worker 负责 UB 写回请求 Worker。</td><td>请求 Worker 容易把 RPC timeout 误判成本端 UB ERROR 4 或对象不存在。</td><td>只有数据 Worker 显式返回 UB 写失败时才按 UB 故障处理；RPC timeout 仍按 RPC/对端可疑处理。</td></tr>
               <tr><td>UC-5 Migrate / Move / Rebalance</td><td>迁移执行方、源 Worker、目标 Worker</td><td>任务选择了 UB 接收不可用的目标 Worker。</td><td>迁移任务反复失败，甚至把数据迁移到无法接收 UB 写的节点。</td><td>目标 Worker 不可写时拒绝迁移，可失败或重选目标，不能继续发送数据。</td></tr>
-              <tr><td>UC-6 扩容 / 缩容 / 故障恢复</td><td>Client、Worker、Master/元数据侧</td><td>节点刚加入、正在退出，或 UB 端口从故障状态恢复。</td><td>节点服务状态和 UB 数据面恢复状态不同步，导致过早承接写入或迁移。</td><td>新节点先验证 UB 可写；退出节点拒绝写入/迁移；恢复后再平稳放开。</td></tr>
+              <tr><td>UC-6 扩容 / 缩容 / 故障恢复</td><td>Client、Worker、Coordinator/etcd</td><td>节点刚加入、正在退出，或 UB 端口从故障状态恢复。</td><td>节点服务状态和 UB 数据面恢复状态不同步，导致过早承接写入或迁移。</td><td>新节点先验证 UB 可写；退出节点拒绝写入/迁移；恢复后再平稳放开。</td></tr>
               <tr><td>UC-7 目的端 Worker 自身 UB 故障</td><td>故障 Worker、其他 Client/Worker</td><td>Worker 本地持续出现 ERROR 4/ERROR 9，或多端反馈写不进该 Worker。</td><td>其他节点继续向该 Worker 写入或迁移，故障持续放大。</td><td>故障 Worker 通过轻量健康摘要让其他节点减少写入和迁移流量。</td></tr>
             </tbody>
           </table>
@@ -346,7 +346,7 @@ th { background: #f8fafc; font-size: 12px; }
             <li><strong>AS IS：</strong>被单边写的一端不天然知道每次对端写失败；如果只靠各个发起端局部隔离，其他 Client/Worker 仍会继续向 Worker A 写入或迁移。</li>
             <li><strong>TO BE：</strong>Worker A 聚合本地 UB 异常和 peer feedback，生成只描述自身的健康摘要，通过 heartbeat/response 让相关节点更新本地准入，减少继续写入和迁移流量。</li>
             <li><strong>风险：</strong>千级节点下如果传播所有 peer matrix，会造成 O(N²) 心跳负担；如果完全不传播自身摘要，故障节点会被不同发起端反复撞击。</li>
-            <li><strong>最小判断：</strong>1 Worker A 只上报自身 UB health、epoch、reason、backoff；2 Master/元数据侧只保存 worker -> latest summary；3 消费方按相关候选 source/target 更新本地 admission；4 摘要不改写 membership。</li>
+            <li><strong>最小判断：</strong>1 Worker A 只上报自身 UB health、epoch、reason、backoff；2 Coordinator/etcd 只保存 worker -> latest summary；3 消费方按相关候选 source/target 更新本地 admission；4 摘要不改写 membership。</li>
           </ul>
         </div>
       </section>
@@ -428,7 +428,7 @@ stateDiagram-v2
     SELF_AVAILABLE --> SELF_SUSPECT: multiple peers report write failure
           </div>
         </div>
-        <p>Provider 状态机的粒度是 <code>this worker</code>，只描述本 Worker 自身 UB 数据面。它产生 <code>UbHealthSummary(worker, state, epoch, reason, backoff_until)</code>，供 Master/元数据侧汇总，并被相关 Client/Worker 消费为 peer admission 的输入。</p>
+        <p>Provider 状态机的粒度是 <code>this worker</code>，只描述本 Worker 自身 UB 数据面。它产生 <code>UbHealthSummary(worker, state, epoch, reason, backoff_until)</code>，供 Coordinator/etcd 汇总，并被相关 Client/Worker 消费为 peer admission 的输入。</p>
         <div class="table-wrap">
           <table>
             <caption>表 3-2 状态迁移与业务准入</caption>
@@ -499,8 +499,8 @@ sequenceDiagram
             <caption>表 3-4 GlobalFact 与局部信息维护边界</caption>
             <thead><tr><th>状态</th><th>维护者</th><th>产生方式</th><th>传播方式</th><th>消费者</th><th>冲突处理</th></tr></thead>
             <tbody>
-              <tr><td>membership / ring / del_node_info / migration task</td><td>Master / 元数据侧</td><td>已有集群管理、扩缩容、迁移任务流程</td><td>已有元数据查询、心跳或任务下发</td><td>Client、Worker、迁移执行方</td><td>仍是权威事实；UB 局部故障不能把 Worker 改成全局 DOWN</td></tr>
-              <tr><td>Worker 自身 UB 健康摘要</td><td>对应 Worker</td><td>本地 ERROR 4、频繁 ERROR 9、Jetty 重建失败、self probe 失败/成功</td><td>worker->master heartbeat extend，必要时 client-worker heartbeat response 携带</td><td>Master 汇总后按相关 peer 下发给 Client/Worker</td><td>epoch 单调递增；较新 epoch 覆盖旧摘要，过期摘要只能降级为 suspect</td></tr>
+              <tr><td>membership / ring / del_node_info / migration task</td><td>Coordinator / etcd</td><td>已有集群管理、扩缩容、迁移任务流程</td><td>已有元数据查询、心跳或任务下发</td><td>Client、Worker、迁移执行方</td><td>仍是权威事实；UB 局部故障不能把 Worker 改成全局 DOWN</td></tr>
+              <tr><td>Worker 自身 UB 健康摘要</td><td>对应 Worker</td><td>本地 ERROR 4、频繁 ERROR 9、Jetty 重建失败、self probe 失败/成功</td><td>worker->Coordinator heartbeat/metadata update，必要时 client-worker heartbeat response 携带</td><td>Coordinator/etcd 汇总后按相关 peer 下发给 Client/Worker</td><td>epoch 单调递增；较新 epoch 覆盖旧摘要，过期摘要只能降级为 suspect</td></tr>
               <tr><td>Peer 局部准入状态</td><td>每个 Client/Worker 本进程</td><td>本端 URMA Write 失败、provider 显式 URMA status、GlobalFact 摘要、probe 结果</td><td>进程内保存，不向全局广播 peer matrix</td><td>本进程 Put/Get/RemoteGet/Migrate/Rebalance 准入</td><td>本地 ERROR 4 可立即置不可写；GlobalFact 恢复只允许进入 probing，不能直接跳过本地 probe</td></tr>
               <tr><td>Recovery probe 结果</td><td>隔离该 peer 的 Client/Worker，或 Worker 自身 self probe</td><td>cooldown 后 small handshake / warmup / transfer probe</td><td>本地 probe 更新 Peer 状态；Worker 自身恢复通过下一轮摘要传播</td><td>本地准入；其他节点只消费 Worker 自身摘要</td><td>probe 成功 N 次才恢复；失败按指数退避，避免千级节点探测风暴</td></tr>
             </tbody>
@@ -533,15 +533,15 @@ sequenceDiagram
 sequenceDiagram
     participant Provider as Worker-Data Provider
     participant Self as Worker LocalUbHealth
-    participant Master as Master GlobalFact
+    participant Fact as Coordinator/etcd GlobalFact
     participant Consumer as Client/Worker Consumer
     participant Local as Local Peer Admission
 
     Provider->>Self: local ERROR 4 / frequent ERROR 9 / self probe failure
     Self->>Self: bump local_ub_epoch and set SELF_UNAVAILABLE
-    Self->>Master: heartbeat extend UbHealthSummary(worker, epoch, state, reason)
-    Master->>Master: keep latest worker -> UbHealthSummary
-    Master-->>Consumer: metadata / heartbeat response carries relevant summary
+    Self->>Fact: heartbeat/metadata update UbHealthSummary(worker, epoch, state, reason)
+    Fact->>Fact: keep latest worker -> UbHealthSummary
+    Fact-->>Consumer: metadata / heartbeat response carries relevant summary
     Consumer->>Local: ApplyHeartbeatSummary(peer, epoch, state)
     Local-->>Consumer: block write / migration, read may switch source
           </div>
@@ -555,7 +555,7 @@ sequenceDiagram
     participant Local as Local Peer Admission
     participant Probe as Recovery Probe
     participant Provider as Worker-Data Provider
-    participant Master as Master GlobalFact
+    participant Fact as Coordinator/etcd GlobalFact
 
     Local->>Probe: cooldown expired, schedule small probe
     Probe->>Provider: handshake / warmup / small URMA probe
@@ -564,8 +564,8 @@ sequenceDiagram
       Probe->>Local: keep UNAVAILABLE and increase backoff
       Local-->>Req: continue fail fast
     else probe success
-      Probe->>Master: check service/membership still allowed
-      Master-->>Probe: GlobalFact allows peer
+      Probe->>Fact: check service/membership still allowed
+      Fact-->>Probe: GlobalFact allows peer
       Probe->>Local: MarkAvailable(peer, epoch)
       Local-->>Req: resume business write/read/migration admission
     end
@@ -708,7 +708,7 @@ classDiagram
               <tr><td><code>WorkerUbPathHealth::ReportOutcome(outcome)</code></td><td>Client Put、worker provider writeback、migration direct read/write、probe</td><td>记录一次真实 operator outcome 或显式 RPC status。</td><td>必要时把 peer 状态置为 <code>UNAVAILABLE</code>，更新 epoch、reason、cooldown。</td></tr>
               <tr><td><code>LocalUbHealth::ReportLocalError(status)</code></td><td>URMA completion、async event、worker 自检 probe、peer feedback 聚合器</td><td>表达“本 worker 自己的 UB 数据面可能不可用”。频繁 ERROR 9 或 ERROR 4 后进入本地异常态。</td><td>生成本 worker 的 <code>UbHealthSummary</code>，阻止其他人继续把它当作写入/迁移目的端。</td></tr>
               <tr><td><code>PeerUbAdmission::MarkUnavailable(peer, reason)</code></td><td>client/worker 发起端、RPC response consumer、心跳摘要 consumer</td><td>发起端局部隔离某个目的端 worker 或 data source。</td><td>后续 Put/Get/RemoteGet/migrate/rebalance 对该 peer fail fast，直到 probe/epoch 恢复。</td></tr>
-              <tr><td><code>UbHealthGossip::BuildHeartbeatSummary()</code></td><td>worker->master heartbeat、worker->client heartbeat</td><td>把本 worker 的 local UB health、epoch、reason、backoff_until 放进心跳摘要。</td><td>其他节点通过 <code>ApplyHeartbeatSummary</code> 更新 peer admission；不改写 worker membership。</td></tr>
+              <tr><td><code>UbHealthGossip::BuildHeartbeatSummary()</code></td><td>worker->Coordinator/etcd metadata update、worker->client heartbeat</td><td>把本 worker 的 local UB health、epoch、reason、backoff_until 放进心跳摘要。</td><td>其他节点通过 <code>ApplyHeartbeatSummary</code> 更新 peer admission；不改写 worker membership。</td></tr>
               <tr><td><code>TransportPathAdmission::CheckWriteTarget(worker)</code></td><td>Client Put/Set、worker create/admission</td><td>判断目标 worker 是否可继续作为 UB 写入目的端。</td><td>失败返回 <code>K_URMA_WORKER_UNAVAILABLE</code>，不进入真实 UB write。</td></tr>
               <tr><td><code>TransportPathAdmission::CheckReadSource(worker)</code></td><td>Client Get / worker remote get source selection</td><td>过滤 UB path unavailable 的数据 location。</td><td>无健康 source 时返回 <code>K_URMA_DATA_WORKER_UNAVAILABLE</code>。</td></tr>
               <tr><td><code>TransportPathAdmission::CheckReceiverEndpoint(receiver)</code></td><td>Worker Provider 写回 client/worker 前</td><td>判断是否还能把 UB 数据写到 requester/receiver。</td><td>失败时 provider 显式返回 URMA 数据面异常，不默认 TCP fallback。</td></tr>
@@ -752,7 +752,7 @@ classDiagram
           </div>
           <div class="card">
             <div class="card-title">Global Fact 与 UB 摘要分层</div>
-            <p>Global Fact 仍由 master/etcd/hash ring 维护，解决 Worker 是否存在、是否 RUNNING、slot/primary/任务归属。UB 摘要只表示该 Worker 数据面是否适合作为写入或迁移目标，不替代 membership。</p>
+            <p>Global Fact 仍由 Coordinator/etcd/hash ring 维护，解决 Worker 是否存在、是否 RUNNING、slot/primary/任务归属。UB 摘要只表示该 Worker 数据面是否适合作为写入或迁移目标，不替代 membership。</p>
           </div>
           <div class="card">
             <div class="card-title">按需消费</div>
@@ -843,7 +843,7 @@ sequenceDiagram
         <h4 id="dryrun-flow-summary">DryRun 时序：Worker 自身 UB 故障摘要传播</h4>
         <div class="diagram">
           <div class="diagram-title">图 3-9 DryRun 流程 2：Worker 自身 UB 故障摘要传播</div>
-          <p>该流程验证千级节点场景下的传播边界：Worker 只上报自己的 UB health summary，Master/元数据侧保存每个 Worker 的摘要，Client/Worker 只按当前候选目标消费相关摘要，不广播所有 peer 的状态矩阵。</p>
+          <p>该流程验证千级节点场景下的传播边界：Worker 只上报自己的 UB health summary，Coordinator/etcd 保存每个 Worker 的摘要，Client/Worker 只按当前候选目标消费相关摘要，不广播所有 peer 的状态矩阵。</p>
           <div class="mermaid">
 sequenceDiagram
     participant D as Worker-Data
@@ -894,7 +894,7 @@ sequenceDiagram
             <caption>表 3-9 外部交互与上下游依赖</caption>
             <thead><tr><th>依赖方</th><th>交互内容</th><th>设计要求</th></tr></thead>
             <tbody>
-              <tr><td>Master / Worker-Meta</td><td>worker service、object location、migration task、UB health summary</td><td>Global Fact 仍是 membership 上界；UB 摘要只作为数据面准入输入。</td></tr>
+              <tr><td>Coordinator / Worker-Meta</td><td>worker service、object location、migration task、UB health summary</td><td>Global Fact 仍是 membership 上界；UB 摘要只作为数据面准入输入。</td></tr>
               <tr><td>Client / Worker-Data</td><td>Put/Get/RemoteGet/Migrate 的请求发起与结果消费</td><td>发起端本地准入；provider 显式返回 URMA 写失败，不让 requester 只靠 RPC timeout 猜测。</td></tr>
               <tr><td>URMA / TCP</td><td>UB write 失败、fallback 策略、probe 恢复</td><td>fallback 默认关闭；开启也只限小对象，且 fallback 成功不清除 UB health。</td></tr>
             </tbody>
@@ -1023,7 +1023,7 @@ urma_status=ERROR4</code></pre>
               <tr><td><code>UrmaConnection::ReCreateJetty</code><br><span class="src">urma_resource.cpp:418-460</span></td><td>失败 Jetty 会被 MarkInvalid 并重建，避免错误地 invalid 新 Jetty。</td><td>和 PR 1277 的发送端 Jetty 池化/隔离思路一致：恢复局部资源，但准入状态独立闭环。</td></tr>
               <tr><td><code>GetUrmaErrorHandlePolicy</code><br><span class="src">urma_manager.cpp:74-87</span></td><td>当前只把 CQE status 9 映射到 <code>RECREATE_JETTY</code>。</td><td>ERROR 9 默认按可恢复资源错误处理；窗口内频繁出现或 probe 失败才升级为 UB path unavailable。</td></tr>
               <tr><td><code>UrmaSuccessRateTracker</code><br><span class="src">urma_success_rate_tracker.cpp:34-112</span></td><td>client 侧已有成功率窗口和 1s/2s/4s/8s/10s backoff。</td><td>UB path probe/backoff 可以复用同类模型，但粒度从“切 worker 尝试”扩展为“peer worker admission”。</td></tr>
-              <tr><td><code>master_heartbeat.proto</code><br><span class="src">master_heartbeat.proto:32-47</span></td><td>worker->master heartbeat request/response 预留 <code>extend</code> 字段。</td><td>可承载 <code>UbHealthSummary</code> 的 worker、state、epoch、reason、backoff_until，避免引入同步 RPC。</td></tr>
+              <tr><td><code>master_heartbeat.proto</code><br><span class="src">master_heartbeat.proto:32-47</span></td><td>现有 worker heartbeat request/response 预留 <code>extend</code> 字段。</td><td>可作为 Worker 向 Coordinator/etcd 汇总 <code>UbHealthSummary</code> 的兼容承载点，避免引入同步 RPC。</td></tr>
               <tr><td><code>share_memory.proto::HeartbeatRspPb</code><br><span class="src">share_memory.proto:146-155</span></td><td>client-worker heartbeat response 已有 <code>available_workers</code>、<code>unhealthy</code> 等健康相关字段。</td><td>可扩展 UB health 摘要给 client；只更新 client 本地 admission，不改变 worker membership。</td></tr>
             </tbody>
           </table>
