@@ -116,13 +116,9 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub-2" href="#design-plan">3.2.4 核心模块与接口</a>
       <a class="nav-sub-2" href="#runtime-design">3.2.5 运行接入与约束</a>
       <a class="nav-sub" href="#dryrun-design">3.3 Use Case DryRun</a>
-      <a class="nav-sub-2" href="#dryrun-uc1">3.3.1 UC-1 Client 写 Worker</a>
-      <a class="nav-sub-2" href="#dryrun-uc2">3.3.2 UC-2 Client Get</a>
-      <a class="nav-sub-2" href="#dryrun-uc3">3.3.3 UC-3 Direct Read</a>
-      <a class="nav-sub-2" href="#dryrun-uc4">3.3.4 UC-4 Worker RemoteGet</a>
-      <a class="nav-sub-2" href="#dryrun-uc5">3.3.5 UC-5 迁移/Rebalance</a>
-      <a class="nav-sub-2" href="#dryrun-uc6">3.3.6 UC-6 扩缩容/恢复</a>
-      <a class="nav-sub-2" href="#dryrun-uc7">3.3.7 UC-7 Worker 自身故障</a>
+      <a class="nav-sub-2" href="#dryrun-flow-isolation">DryRun 时序：故障隔离</a>
+      <a class="nav-sub-2" href="#dryrun-flow-summary">DryRun 时序：摘要传播</a>
+      <a class="nav-sub-2" href="#dryrun-flow-recovery">DryRun 时序：恢复放开</a>
       <a class="nav-sub" href="#oss">3.4 开源软件选型</a>
       <a class="nav-sub" href="#external">3.5 外部交互分析&&上下游依赖需求</a>
       <a href="#external-interface">4. 对外接口</a>
@@ -794,36 +790,9 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h4 id="dryrun-uc1">3.3.1 UC-1 Client 写 Worker</h4>
-        <div class="note">
-          <strong>DryRun：</strong>在 client UB write 返回处注入 ERROR 4，不改 Global Fact。期望只隔离该 client 对目标 worker 的 UB 写入，不把 worker 标成 DOWN；下一次写同 target fail fast，日志包含 target、reason、epoch。
-        </div>
-        <h4 id="dryrun-uc2">3.3.2 UC-2 Client Get 由 Worker 写回</h4>
-        <div class="note">
-          <strong>DryRun：</strong>在 provider 写 client 的 fast transport 处注入 URMA error，并通过 RPC response 返回结构化状态。期望 Client 消费显式 status，RPC timeout 不合成 ERROR 4；response 区分 failed_endpoint、operator_worker、urma_status。
-        </div>
-        <h4 id="dryrun-uc3">3.3.3 UC-3 Client Direct Read / Batch Direct Read</h4>
-        <div class="note">
-          <strong>DryRun：</strong>构造 batch 中多个 object 均在同一 data worker，预置该 worker peer admission unavailable。期望按 data worker 分组后整组 fail fast 或换源，不逐对象等待；batch 日志只有一次 target rejected。
-        </div>
-        <h4 id="dryrun-uc4">3.3.4 UC-4 Worker RemoteGet</h4>
-        <div class="note">
-          <strong>DryRun：</strong>Worker requester 发 RemoteGet，provider 写 requester 时注入 URMA error。期望 requester 只消费显式 status，RPC timeout 不合成 ERROR 4；response 区分 failed_endpoint、operator_worker、urma_status。
-        </div>
-        <h4 id="dryrun-uc5">3.3.5 UC-5 Migrate / Move / Rebalance</h4>
-        <div class="note">
-          <strong>DryRun：</strong>Global Fact 里 target 仍来自 task，但本地 UB admission 为 unavailable。期望执行前拒绝该 target，可失败或触发重选，不发送数据；task 记录 target rejected，migrated bytes 为 0。
-        </div>
-        <h4 id="dryrun-uc6">3.3.6 UC-6 扩容 / 缩容 / 故障恢复</h4>
-        <div class="note">
-          <strong>DryRun：</strong>构造 worker membership 可见但 UB probe 未成功，或 service/ring 已不可写但 UB AVAILABLE。期望 GlobalFact 与 UB admission 必须同时允许；PROBING 不承接写入，probe 成功且服务态允许后才 AVAILABLE。
-        </div>
-        <h4 id="dryrun-uc7">3.3.7 UC-7 目的端 Worker 自身 UB 故障</h4>
-        <div class="note">
-          <strong>DryRun：</strong>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。期望 master 侧保持 O(N) 摘要，client/worker 按需消费候选相关状态；普通 Put/Get 不同步访问 master。
-        </div>
         <h4>DryRun 变化模块时序</h4>
         <p>以下时序图用于 DryRun 和联调，不要求场景分析章节提前理解方案类名。开发可用它确认模块插入点，测试可用它设计 mock、注入点和可观测断言。</p>
+        <h4 id="dryrun-flow-isolation">DryRun 时序：发现故障并进入局部隔离</h4>
         <div class="diagram">
           <div class="diagram-title">图 3-6 DryRun 流程 1：发现故障并进入局部隔离</div>
           <p>该流程验证“谁发起 UB Write，谁先得到真实错误”。Client 本端写失败时由 Client 记录目标不可写；RemoteGet 写回失败时由数据 Worker 把显式状态放回响应，Requester 只能消费这个显式结果，不能把普通 RPC timeout 合成 ERROR 4。</p>
@@ -850,6 +819,7 @@ sequenceDiagram
     O-->>C: next same-target request fail fast
           </div>
         </div>
+        <h4 id="dryrun-flow-summary">DryRun 时序：Worker 自身 UB 故障摘要传播</h4>
         <div class="diagram">
           <div class="diagram-title">图 3-7 DryRun 流程 2：Worker 自身 UB 故障摘要传播</div>
           <p>该流程验证千级节点场景下的传播边界：Worker 只上报自己的 UB health summary，Master/元数据侧保存每个 Worker 的摘要，Client/Worker 只按当前候选目标消费相关摘要，不广播所有 peer 的状态矩阵。</p>
@@ -870,6 +840,7 @@ sequenceDiagram
     Note over D,M: no all-to-all peer matrix in 1000-node scale
           </div>
         </div>
+        <h4 id="dryrun-flow-recovery">DryRun 时序：Probe 恢复后平稳放开写入和迁移</h4>
         <div class="diagram">
           <div class="diagram-title">图 3-8 DryRun 流程 3：Probe 恢复后平稳放开写入和迁移</div>
           <p>该流程验证恢复不是由业务请求试错或 fallback 成功触发，而是由 cooldown 后的 probe 成功和服务态仍允许写入共同决定。测试需要覆盖 probe 失败继续退避、probe 成功但服务态不可写仍拒绝两条分支。</p>
