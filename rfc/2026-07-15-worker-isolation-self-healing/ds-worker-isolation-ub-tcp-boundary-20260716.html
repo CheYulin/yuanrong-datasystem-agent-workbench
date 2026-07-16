@@ -32,6 +32,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.58; f
 .nav-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; }
 .nav a { display: block; color: var(--muted); text-decoration: none; border-radius: 6px; padding: 6px 8px; font-size: 13px; line-height: 1.35; }
 .nav a.nav-sub { padding-left: 18px; font-size: 12px; }
+.nav a.nav-sub-2 { padding-left: 32px; font-size: 11.5px; color: #7a8597; }
 .nav a:hover { background: #f8fafc; color: var(--blue); }
 .nav a.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
 .content { min-width: 0; }
@@ -82,7 +83,7 @@ th { background: #f8fafc; font-size: 12px; }
   .layout { display: block; margin-top: 10px; }
   .nav { position: sticky; top: 0; display: flex; flex-direction: row; flex-wrap: wrap; overflow: visible; max-height: none; margin-bottom: 12px; padding: 8px; }
   .nav-title { display: none; }
-  .nav a, .nav a.nav-sub { white-space: nowrap; font-size: 12px; background: #fff; border: 1px solid var(--line); padding-left: 8px; }
+  .nav a, .nav a.nav-sub, .nav a.nav-sub-2 { white-space: nowrap; font-size: 12px; background: #fff; border: 1px solid var(--line); padding-left: 8px; }
   .grid, .grid-2, .grid-3, .flow { grid-template-columns: 1fr; }
 }
 </style>
@@ -107,14 +108,14 @@ th { background: #f8fafc; font-size: 12px; }
       <a href="#evidence">3. 方案详细设计</a>
       <a class="nav-sub" href="#current">3.1 现状分析</a>
       <a class="nav-sub" href="#key-answers">3.2 方案设计</a>
-      <a class="nav-sub" href="#design-plan">3.2.1 核心模块</a>
-      <a class="nav-sub" href="#module-responsibility">3.2.2 职责拆分</a>
-      <a class="nav-sub" href="#interfaces">3.2.3 接口语义</a>
-      <a class="nav-sub" href="#deploy-design">3.2.4 最小改动点</a>
-      <a class="nav-sub" href="#runtime-design">3.2.5 运行接入点</a>
-      <a class="nav-sub" href="#usage-design">3.2.6 使用方式</a>
-      <a class="nav-sub" href="#code-view-design">3.2.7 关键时序</a>
-      <a class="nav-sub" href="#perf-design">3.2.8 高性能设计</a>
+      <a class="nav-sub-2" href="#design-plan">3.2.1 核心模块</a>
+      <a class="nav-sub-2" href="#module-responsibility">3.2.2 职责拆分</a>
+      <a class="nav-sub-2" href="#interfaces">3.2.3 接口语义</a>
+      <a class="nav-sub-2" href="#deploy-design">3.2.4 最小改动点</a>
+      <a class="nav-sub-2" href="#runtime-design">3.2.5 运行接入点</a>
+      <a class="nav-sub-2" href="#usage-design">3.2.6 使用方式</a>
+      <a class="nav-sub-2" href="#code-view-design">3.2.7 关键时序</a>
+      <a class="nav-sub-2" href="#perf-design">3.2.8 高性能设计</a>
       <a class="nav-sub" href="#dryrun-design">3.3 Use Case DryRun</a>
       <a class="nav-sub" href="#oss">3.4 开源软件选型</a>
       <a class="nav-sub" href="#external">3.5 外部交互分析&&上下游依赖需求</a>
@@ -326,6 +327,7 @@ th { background: #f8fafc; font-size: 12px; }
       <section id="modules" class="section">
         <h3 id="design-plan">3.2.1 核心模块</h3>
         <h4 id="class-diagram">设计类图</h4>
+        <p>下图用于说明新增抽象之间的职责边界：准入判断、错误分类、局部健康状态、心跳摘要和恢复探测彼此解耦。开发时优先按这些边界落小类，测试时可以按每个类的输入/输出独立注入错误。</p>
         <div class="diagram">
           <div class="diagram-title">最小新增抽象与现有模块协同</div>
           <div class="mermaid">
@@ -553,6 +555,7 @@ classDiagram
           <div class="diagram-title"><span class="new-tag">新增</span>关键时序摘要</div>
           <div class="table-wrap">
             <table>
+              <caption>关键生命周期与 DryRun 对应关系</caption>
               <thead><tr><th>生命周期</th><th>设计意图</th><th>详细验证位置</th></tr></thead>
               <tbody>
                 <tr><td>发现故障并局部隔离</td><td>发起 UB Write 的一端先止血，后续同目标写入/迁移快速失败。</td><td>3.3 Use Case DryRun - 流程 1</td></tr>
@@ -563,6 +566,7 @@ classDiagram
           </div>
         </div>
         <h4>WorkerUbPathHealth 状态机</h4>
+        <p>状态机描述单个 peer 的 UB 数据面准入生命周期。开发需要确保 ERROR 4、连续 ERROR 9、RPC timeout、probe success/failure 都能映射到明确状态迁移；测试需要覆盖每条边，尤其是 fallback 成功不能直接把状态改回 AVAILABLE。</p>
         <div class="diagram">
           <div class="diagram-title">WorkerUbPathHealth 状态机</div>
           <div class="mermaid">
@@ -602,8 +606,10 @@ stateDiagram-v2
           </table>
         </div>
         <h4><span class="new-tag">新增</span>DryRun 变化模块时序</h4>
+        <p>以下时序图用于 DryRun 和联调，不要求场景分析章节提前理解新增类名。开发可用它确认新增模块插入点，测试可用它设计 mock、注入点和可观测断言。</p>
         <div class="diagram">
           <div class="diagram-title">流程 1：发现故障并进入局部隔离</div>
+          <p>该流程验证“谁发起 UB Write，谁先得到真实错误”。Client 本端写失败时由 Client 记录目标不可写；RemoteGet 写回失败时由数据 Worker 把显式状态放回响应，Requester 只能消费这个显式结果，不能把普通 RPC timeout 合成 ERROR 4。</p>
           <div class="mermaid">
 sequenceDiagram
     participant C as Client/Requester
@@ -629,6 +635,7 @@ sequenceDiagram
         </div>
         <div class="diagram">
           <div class="diagram-title">流程 2：Worker 自身 UB 故障摘要传播</div>
+          <p>该流程验证千级节点场景下的传播边界：Worker 只上报自己的 UB health summary，Master/元数据侧保存每个 Worker 的摘要，Client/Worker 只按当前候选目标消费相关摘要，不广播所有 peer 的状态矩阵。</p>
           <div class="mermaid">
 sequenceDiagram
     participant D as Worker-Data
@@ -648,6 +655,7 @@ sequenceDiagram
         </div>
         <div class="diagram">
           <div class="diagram-title">流程 3：Probe 恢复后平稳放开写入和迁移</div>
+          <p>该流程验证恢复不是由业务请求试错或 fallback 成功触发，而是由 cooldown 后的 probe 成功和服务态仍允许写入共同决定。测试需要覆盖 probe 失败继续退避、probe 成功但服务态不可写仍拒绝两条分支。</p>
           <div class="mermaid">
 sequenceDiagram
     participant D as Worker-Data
@@ -674,6 +682,7 @@ sequenceDiagram
         <h3 id="external">3.5 外部交互分析&&上下游依赖需求</h3>
         <div class="table-wrap">
           <table>
+            <caption>外部交互与上下游依赖</caption>
             <thead><tr><th>依赖方</th><th>交互内容</th><th>设计要求</th></tr></thead>
             <tbody>
               <tr><td>Master / Worker-Meta</td><td>worker service、object location、migration task、UB health summary</td><td>Global Fact 仍是 membership 上界；UB 摘要只作为数据面准入输入。</td></tr>
@@ -814,6 +823,7 @@ urma_status=ERROR4</code></pre>
         </div>
         <div class="diagram-card wide">
           <div class="diagram-title">Client direct read 现有流程与 UB admission 接入点</div>
+          <p>该附录图只用于代码确认：它把当前 direct read 的 meta phase、data phase、provider 写回和结果消费串起来，帮助开发找到最小插入点，帮助测试区分显式 URMA ERROR 4 与普通 RPC timeout。</p>
           <div class="mermaid">
 sequenceDiagram
     participant C as Client
