@@ -101,36 +101,41 @@ th { background: #f8fafc; font-size: 12px; }
   <div class="layout">
     <nav class="nav">
       <div class="nav-title">专题目录</div>
-      <a href="#scope">1. 功能描述</a>
+      <a href="#scope">1. 总览</a>
       <a class="nav-sub" href="#scope-ground">1.1 代码校验输入</a>
       <a class="nav-sub" href="#scope-summary">1.2 功能目标与边界</a>
-      <a class="nav-sub" href="#concepts">1.3 关键概念定义</a>
-      <a href="#flows">2. Use Cases 与场景分析</a>
-      <a class="nav-sub" href="#flow-context">2.0 AS-IS / TO-BE</a>
-      <a class="nav-sub" href="#flow-client-put">2.1 Client 写入</a>
-      <a class="nav-sub" href="#flow-remote-get">2.2 RemoteGet 写回</a>
-      <a class="nav-sub" href="#flow-migrate">2.3 迁移与 Rebalance</a>
-      <a class="nav-sub" href="#flow-recovery">2.4 UB 恢复</a>
-      <a href="#evidence">3. 方案详细设计</a>
-      <a class="nav-sub" href="#key-answers">3.0 关键问题回答</a>
-      <a class="nav-sub" href="#current-analysis">3.1 现状分析</a>
-      <a class="nav-sub" href="#design-plan">3.2 方案设计</a>
-      <a class="nav-sub" href="#build-design">3.2.1 构建</a>
-      <a class="nav-sub" href="#deploy-design">3.2.2 部署</a>
-      <a class="nav-sub" href="#runtime-design">3.2.3 运行</a>
-      <a class="nav-sub" href="#usage-design">3.2.4 元戎整体如何使用</a>
-      <a class="nav-sub" href="#dryrun-design">3.2.5 DryRun Cases</a>
-      <a class="nav-sub" href="#code-view-design">3.2.6 核心模块与生命周期时序</a>
-      <a class="nav-sub" href="#perf-design">3.2.7 高性能设计 topic</a>
-      <a href="#stories">4. 自验证用例</a>
-      <a class="nav-sub" href="#verify-cases">4.1 验收用例</a>
-      <a class="nav-sub" href="#open">4.2 待确认策略</a>
-      <a href="#appendix-code">附录 A：代码确认</a>
+      <a href="#terms">2. 术语与状态边界</a>
+      <a class="nav-sub" href="#state-model">2.1 全局事实与局部观测</a>
+      <a class="nav-sub" href="#ownership">2.2 Meta/Layout 与 Data Local</a>
+      <a class="nav-sub" href="#failure-owner">2.3 故障归属</a>
+      <a href="#flows">3. Use Cases 与场景分析</a>
+      <a class="nav-sub" href="#flow-context">3.1 AS-IS / TO-BE</a>
+      <a class="nav-sub" href="#flow-client-put">3.2 Client 写入</a>
+      <a class="nav-sub" href="#flow-remote-get">3.3 RemoteGet 写回</a>
+      <a class="nav-sub" href="#flow-migrate">3.4 迁移与 Rebalance</a>
+      <a class="nav-sub" href="#flow-recovery">3.5 UB 恢复</a>
+      <a href="#evidence">4. 源码确认</a>
+      <a class="nav-sub" href="#key-answers">4.1 关键问题回答</a>
+      <a class="nav-sub" href="#current-analysis">4.2 CodeGraph 结论</a>
+      <a href="#modules">5. 机制设计</a>
+      <a class="nav-sub" href="#design-plan">5.1 核心模块</a>
+      <a class="nav-sub" href="#module-responsibility">5.2 职责拆分</a>
+      <a href="#implementation">6. 关键时序与准入矩阵</a>
+      <a class="nav-sub" href="#deploy-design">6.1 最小改动点</a>
+      <a class="nav-sub" href="#runtime-design">6.2 运行接入点</a>
+      <a class="nav-sub" href="#usage-design">6.3 元戎整体如何使用</a>
+      <a class="nav-sub" href="#dryrun-design">6.4 DryRun Cases</a>
+      <a class="nav-sub" href="#code-view-design">6.5 生命周期时序</a>
+      <a class="nav-sub" href="#perf-design">6.6 高性能设计 topic</a>
+      <a href="#stories">7. Cases 覆盖与自验证</a>
+      <a class="nav-sub" href="#verify-cases">7.1 验收用例</a>
+      <a href="#open">8. 风险与待确认策略</a>
+      <a href="#appendix-code">附录 A：详细代码锚点</a>
     </nav>
 
     <main class="content">
       <section id="scope" class="section">
-        <h2>1. 功能描述</h2>
+        <h2>1. 总览</h2>
         <p>UB 端口或路径故障后，业务可能表现为成功率下降、批量请求局部超时、迁移任务反复失败，而不是明确告诉调用方“数据所在 Worker 的 UB 数据面不可用”。本需求的核心目标是避免静默故障：故障 Worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 Worker 时快速返回可识别错误。</p>
         <div class="grid-2">
           <div class="card">
@@ -150,7 +155,8 @@ th { background: #f8fafc; font-size: 12px; }
             <p>UB 隔离只处理数据面 eligibility，不把局部 UB 故障直接升级成 Worker 全局 DOWN；membership、slot、primary、迁移任务仍由 Global Fact 维护。</p>
           </div>
         </div>
-        <div id="scope-ground" class="grid">
+        <h3 id="scope-ground">1.1 代码校验输入</h3>
+        <div class="grid">
           <div class="metric"><div class="n">69ec60b41</div><div class="l">datasystem 当前校验提交</div></div>
           <div class="metric"><div class="n">12,608</div><div class="l">CodeGraph 文件数</div></div>
           <div class="metric"><div class="n">299,132</div><div class="l">CodeGraph 节点数</div></div>
@@ -180,9 +186,9 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
       </section>
 
-      <section id="concepts" class="section">
-        <h2>1.3 关键概念定义</h2>
-        <h3 id="state-model">1.3.1 全局事实与局部观测</h3>
+      <section id="terms" class="section">
+        <h2>2. 术语与状态边界</h2>
+        <h3 id="state-model">2.1 全局事实与局部观测</h3>
         <div class="grid-3">
           <div class="card">
             <div class="card-title">Global Fact</div>
@@ -197,7 +203,7 @@ th { background: #f8fafc; font-size: 12px; }
             <p>请求入口对两类信息做组合判断，但局部观测不能直接改写全局事实；最多阻止本进程继续写入，并通过 RPC/错误码把对端 UB 故障传出去。</p>
           </div>
         </div>
-        <h3 id="ownership">1.3.2 Meta/Layout 与 Data Local</h3>
+        <h3 id="ownership">2.2 Meta/Layout 与 Data Local</h3>
         <div class="flow">
           <div><strong>Meta/Layout</strong>对象位置、primary、slot、迁移任务。</div>
           <div><strong>Data Local</strong>某 Worker 本地内存/共享内存/SSD 中真实数据。</div>
@@ -206,7 +212,7 @@ th { background: #f8fafc; font-size: 12px; }
           <div><strong>Transport</strong>URMA/UCP/TCP 的实际数据传输路径。</div>
         </div>
         <p>设计要避免把 transport 层“某一跳不通”误解释为对象不存在或元数据错误。新增错误语义建议为 <code>K_OC_DATA_PROVIDER_UB_UNAVAILABLE</code> 或同类 URMA data-plane code，表达“数据在该 Worker，但该 Worker 的 UB 路径暂不可用”。</p>
-        <h3 id="failure-owner">1.3.3 故障归属</h3>
+        <h3 id="failure-owner">2.3 故障归属</h3>
         <div class="table-wrap">
           <table>
             <caption>UB 故障隔离的两个主方向</caption>
@@ -232,8 +238,8 @@ th { background: #f8fafc; font-size: 12px; }
       </section>
 
       <section id="flows" class="section">
-        <h2>2. Use Cases 与场景分析</h2>
-        <h3 id="flow-context">2.0 问题上下文：AS-IS / TO-BE</h3>
+        <h2>3. Use Cases 与场景分析</h2>
+        <h3 id="flow-context">3.1 问题上下文：AS-IS / TO-BE</h3>
         <div class="table-wrap">
           <table>
             <caption>从静默失败到显式隔离</caption>
@@ -262,7 +268,7 @@ th { background: #f8fafc; font-size: 12px; }
             </tbody>
           </table>
         </div>
-        <h3 id="flow-client-put">2.1 Client -> Worker Put：本端发起 UB 写失败</h3>
+        <h3 id="flow-client-put">3.2 Client -> Worker Put：本端发起 UB 写失败</h3>
         <div class="diagram">
           <div class="diagram-title">Client Put 默认快速失败，不透明切 TCP</div>
           <div class="mermaid">
@@ -285,7 +291,7 @@ sequenceDiagram
     Note over C,W: fallback 默认关闭；开启时也只允许 <= 1MB 按策略切 TCP
           </div>
         </div>
-        <h3 id="flow-remote-get">2.2 RemoteGet：Provider 按 RPC 写回 requester/client</h3>
+        <h3 id="flow-remote-get">3.3 RemoteGet：Provider 按 RPC 写回 requester/client</h3>
         <div class="diagram">
           <div class="diagram-title">Provider 端发起 URMA write；Requester 只通过 RPC 结果间接感知</div>
           <div class="mermaid">
@@ -314,7 +320,7 @@ sequenceDiagram
     end
           </div>
         </div>
-        <h3 id="flow-migrate">2.3 Migration / Rebalance：目标 Worker 准入</h3>
+        <h3 id="flow-migrate">3.4 Migration / Rebalance：目标 Worker 准入</h3>
         <div class="diagram">
           <div class="diagram-title">迁移前检查目标服务态与 UB 接收态</div>
           <div class="mermaid">
@@ -340,7 +346,7 @@ sequenceDiagram
     end
           </div>
         </div>
-        <h3 id="flow-recovery">2.4 UB 恢复：探测成功后重新开放写入</h3>
+        <h3 id="flow-recovery">3.5 UB 恢复：探测成功后重新开放写入</h3>
         <div class="diagram">
           <div class="diagram-title">UB 恢复只恢复数据面准入</div>
           <div class="mermaid">
@@ -367,8 +373,9 @@ sequenceDiagram
       </section>
 
       <section id="evidence" class="section">
-        <h2>3. 方案详细设计</h2>
-        <h3 id="key-answers">3.0 关键问题回答</h3>
+        <h2>4. 源码确认</h2>
+        <p>本节回答设计中的关键归因问题，并把当前源码里可插入的观测点、准入点和恢复点收敛成实现约束。详细文件/函数锚点见附录 A。</p>
+        <h3 id="key-answers">4.1 关键问题回答</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">发起端如何感知目的端 Worker UB 故障</div>
@@ -394,13 +401,13 @@ sequenceDiagram
         <div class="note warn">
           结论：第一层必须是发起端局部感知和本地准入，保证 Put/Get/RemoteGet/migrate/rebalance 立即止血；第二层才是轻量全局摘要和保活探测，用于恢复和减少其他节点继续撞同一故障 Worker。持续故障必须指数退避，避免 probe 或重试流量放大。
         </div>
-        <h3 id="current-analysis">3.1 现状分析</h3>
+        <h3 id="current-analysis">4.2 CodeGraph 结论</h3>
         <p>当前代码已经有明确的 UB 失败观测点，但观测分散在 client 写、provider 写回、direct read transport、migration/rebalance 目标选择等路径。风险不是“完全没有错误码”，而是错误没有形成统一的下一次准入决策，导致 fallback、retry 或 batch 内重复请求继续撞同一条坏 UB 路径。</p>
       </section>
 
       <section id="modules" class="section">
-        <h3 id="design-plan">3.2 方案设计</h3>
-        <h3 id="build-design">3.2.1 构建</h3>
+        <h2>5. 机制设计</h2>
+        <h3 id="design-plan">5.1 核心模块</h3>
         <h4 id="class-diagram">代码关键类图</h4>
         <div class="diagram">
           <div class="diagram-title">最小新增抽象与现有模块协同</div>
@@ -559,12 +566,13 @@ classDiagram
       </section>
 
       <section id="implementation" class="section">
-        <h3 id="deploy-design">3.2.2 部署</h3>
+        <h2>6. 关键时序与准入矩阵</h2>
+        <h3 id="deploy-design">6.1 最小改动点</h3>
         <div class="grid-2">
-          <div class="card"><div class="card-title">部署形态</div><p>不新增进程，不改变 SDK 对外 API；新增逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
+          <div class="card"><div class="card-title">不新增进程</div><p>不改变 SDK 对外 API；新增逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
           <div class="card"><div class="card-title">默认策略</div><p>UB fallback 默认关闭；显式开启时仅允许 <= 1MB 的普通读写 fallback，不覆盖 migration / rebalance。</p></div>
         </div>
-        <h3 id="runtime-design">3.2.3 运行</h3>
+        <h3 id="runtime-design">6.2 运行接入点</h3>
         <h4>运行期最小修改点</h4>
         <div class="grid-2">
           <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
@@ -603,7 +611,7 @@ classDiagram
         </div>
         <div class="table-wrap">
           <table>
-            <caption>第 2 章场景到运行接入点映射</caption>
+            <caption>第 3 章场景到运行接入点映射</caption>
             <thead><tr><th>场景</th><th>运行接入点</th><th>说明</th></tr></thead>
             <tbody>
               <tr><td>Client Put/Set</td><td><code>ClientWorkerBaseApi::SendBufferViaUb*</code></td><td>写前查 Global Fact + PeerUbAdmission；ERROR 4 后本地隔离目标。</td></tr>
@@ -615,7 +623,7 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h3 id="usage-design">3.2.4 元戎整体如何使用</h3>
+        <h3 id="usage-design">6.3 元戎整体如何使用</h3>
         <ul>
           <li>业务使用方式不变；UB 故障隔离作为 client/worker 内部准入和错误返回能力生效。</li>
           <li>client->worker 写入失败后，恢复前同一 target worker 的写入快速失败。</li>
@@ -624,7 +632,7 @@ classDiagram
           <li>扩容 worker 在 UB probe 成功前不承接 UB 写入/迁移；缩容或故障 worker 在 service/ring 已不可写时直接拒绝作为 target。</li>
           <li>心跳摘要用于传播“本 worker UB 数据面是否可写”，但不把局部 UB 故障升级为 worker DOWN。</li>
         </ul>
-        <h3 id="dryrun-design">3.2.5 DryRun Cases</h3>
+        <h3 id="dryrun-design">6.4 DryRun Cases</h3>
         <div class="table-wrap">
           <table>
             <caption>上线前 DryRun 验证</caption>
@@ -639,7 +647,7 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h3 id="code-view-design">3.2.6 核心模块与生命周期时序</h3>
+        <h3 id="code-view-design">6.5 核心模块与生命周期时序</h3>
         <p>核心时序只画跨组件生命周期，便于开发和测试对齐故障发现、隔离传播、恢复放开的边界。具体函数调用和源码入口放在附录 A，避免把 sequence diagram 画成函数栈。</p>
         <div class="table-wrap">
           <table>
@@ -737,7 +745,7 @@ stateDiagram-v2
     AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
           </div>
         </div>
-        <h3 id="perf-design">3.2.7 高性能设计 topic</h3>
+        <h3 id="perf-design">6.6 高性能设计 topic</h3>
         <ul>
           <li>准入判断必须是进程内 O(1) 读本地状态，不能在普通 Put/Get/RemoteGet 关键路径上同步访问外部服务。</li>
           <li>失败后同一 worker/source 的 batch remote get 要按 worker 分组 fail fast，避免 batch 内每个对象重复等待超时。</li>
@@ -748,7 +756,7 @@ stateDiagram-v2
       </section>
 
       <section id="stories" class="section">
-        <h2>4. 自验证用例</h2>
+        <h2>7. Cases 覆盖与自验证</h2>
         <p>自验证用例按新增代码分支反推，要求每个分支都能通过可注入的错误、可断言的状态迁移和可观测日志/metric 覆盖。业务级验收用例用于串联端到端场景，分支覆盖矩阵用于指导 UT/ST 补点。</p>
         <div class="table-wrap">
           <table>
@@ -772,7 +780,7 @@ stateDiagram-v2
             </tbody>
           </table>
         </div>
-        <h3 id="verify-cases">4.1 验收用例</h3>
+        <h3 id="verify-cases">7.1 验收用例</h3>
         <div class="table-wrap">
           <table>
             <caption>验收用例</caption>
@@ -793,7 +801,7 @@ stateDiagram-v2
       </section>
 
       <section id="open" class="section">
-        <h2>4.2 待确认策略</h2>
+        <h2>8. 风险与待确认策略</h2>
         <ul>
           <li>错误码命名：建议放在 OC/URMA 交界处，保留 provider UB unavailable 与 requester UB unavailable 两类语义。</li>
           <li>恢复 probe 的实现：优先复用现有 handshake / warmup / small URMA write；心跳只传播摘要和 epoch，不承担数据面 probe。</li>
@@ -805,7 +813,7 @@ stateDiagram-v2
         </div>
       </section>
       <section id="appendix-code" class="section">
-        <h2>附录 A：代码确认与分析</h2>
+        <h2>附录 A：详细代码锚点</h2>
         <p>以下内容是方案设计的代码依据，用于评审时追溯当前 client-worker、worker-worker RemoteGet、direct read、migration/rebalance 与 URMA 资源恢复的接入点。</p>
         <div class="table-wrap">
           <table>
