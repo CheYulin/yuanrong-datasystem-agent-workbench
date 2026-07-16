@@ -129,19 +129,24 @@ th { background: #f8fafc; font-size: 12px; }
     <main class="content">
       <section id="scope" class="section">
         <h2>1. 功能描述</h2>
-        <div class="table-wrap">
-          <table>
-            <caption>Story 功能描述</caption>
-            <tbody>
-              <tr><th>Why</th><td>UB 端口或路径故障后，业务可能通过 TCP payload 或持续 retry 表现为成功率下降，而不是明确失败。目标是避免静默故障：故障 worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 worker 时快速返回可识别错误。</td></tr>
-              <tr><th>Who</th><td>使用 Object/KV Client 通过 UB/TCP 访问 worker 的业务；发起 worker-worker remote get、migration、rebalance 的 worker；定位 UB 成功率下降、worker 数据面抖动和迁移失败的开发/测试/运维人员。</td></tr>
-              <tr><th>When</th><td>client->worker Put/Set 写入失败、worker/client->worker RemoteGet 请求触发 provider UB Write 失败、migration/rebalance target UB 不可写、UB 恢复探测成功或失败时生效。</td></tr>
-              <tr><th>Where</th><td>Client 侧 <code>ObjectClientImpl</code>、<code>ClientWorkerBaseApi</code>、<code>ClientWorkerRemoteApi</code>、direct read transport；Worker 侧 Get/RemoteGet provider writeback、DataMigrator、NodeSelector、RebalanceExecutor；恢复侧复用 URMA handshake/warmup/small transfer。</td></tr>
-              <tr><th>How</th><td>新增轻量 <code>WorkerUbPathHealth</code> 和 <code>TransportPathAdmission</code>。发起 URMA Write 的一端用显式 ERROR 4/URMA status 上报，coordinator 在写入、RemoteGet source、migration target 前做准入；fallback 默认关闭，开启时只允许小对象并保留降级观测。</td></tr>
-              <tr><th>What happen</th><td>影响 client->worker 写入、传统 Client Get、Client direct read、worker-worker remote get、batch remote get、migration/rebalance 与 UB recovery probe；不改变现有 membership/rpc health 机制，不把局部 UB 故障直接升级为 worker 全局 DOWN。</td></tr>
-              <tr><th>Experience</th><td>UB 故障后用户得到明确错误和快速失败，写入/迁移不再持续撞坏 worker；UB 恢复后由 probe 平稳重新开放，切流过程不依赖真实业务请求反复试错。</td></tr>
-            </tbody>
-          </table>
+        <p>UB 端口或路径故障后，业务可能表现为成功率下降、批量请求局部超时、迁移任务反复失败，而不是明确告诉调用方“数据所在 Worker 的 UB 数据面不可用”。本需求的核心目标是避免静默故障：故障 Worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 Worker 时快速返回可识别错误。</p>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">触发对象</div>
+            <p>Client Put/Set、传统 Client Get、Client direct read、Worker remote get、BatchGetObjectRemote、migrate/move/rebalance 都要进入同一套 UB path admission。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">处理原则</div>
+            <p>发起 URMA Write 的一端记录真实 operator 结果；requester 只消费显式 RPC status；fallback 默认关闭，开启时也只允许小对象，并且 fallback 成功不恢复 UB health。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">用户体验</div>
+            <p>故障后返回明确错误并 fail fast，避免继续撞同一个坏 Worker；恢复由 probe 与健康 epoch 平稳放开，不靠真实业务请求反复试错。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">边界</div>
+            <p>UB 隔离只处理数据面 eligibility，不把局部 UB 故障直接升级成 Worker 全局 DOWN；membership、slot、primary、迁移任务仍由 Global Fact 维护。</p>
+          </div>
         </div>
         <div id="scope-ground" class="grid">
           <div class="metric"><div class="n">69ec60b41</div><div class="l">datasystem 当前校验提交</div></div>
@@ -226,17 +231,35 @@ th { background: #f8fafc; font-size: 12px; }
 
       <section id="flows" class="section">
         <h2>2. 场景分析</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>场景清单与接入点</caption>
+            <thead><tr><th>场景</th><th>Global Fact 输入</th><th>Local Observation 输入</th><th>准入动作</th></tr></thead>
+            <tbody>
+              <tr><td>Client -> Worker Put/Set</td><td>目标 Worker 仍在 ring / service RUNNING。</td><td>client 本端 <code>UrmaWritePayload</code> 返回 ERROR 4/ERROR 9/timeout。</td><td><code>CheckWriteTarget</code>，恢复前拒绝继续写该 Worker。</td></tr>
+              <tr><td>传统 Client Get provider 写回 client</td><td>meta 返回 object 位于 provider worker。</td><td>provider worker 发起 UB Write 到 client，只有 provider 看到真实 URMA status。</td><td>provider 返回结构化 status；client fail fast 或走明确 fallback 策略。</td></tr>
+              <tr><td>Client direct read / batch direct read</td><td>direct read meta phase 返回 data worker 列表和对象位置。</td><td>provider 写回 client 的显式 UB status；或 client 对 data worker 的 local peer admission。</td><td>按 data worker 分组后发 batch 前 <code>CheckReadSource</code>，整组 fail fast 或换源。</td></tr>
+              <tr><td>Worker remote get / BatchGetObjectRemote</td><td>请求 worker 根据 meta/primary 知道 provider worker。</td><td>provider 写 requester 的 URMA status；requester RPC timeout 只算 suspect。</td><td>requester 查 source admission；provider 查 receiver endpoint，并在 response 携带 failed endpoint。</td></tr>
+              <tr><td>Migrate / Move / Rebalance</td><td>master/rebalance/hash ring 给出 task、source、target、slot/ownership。</td><td>执行 worker 对 target 的 UB admission、历史失败和 probe 状态。</td><td>目标选择和执行前都 <code>CheckMigrationTarget</code>；stale task 不向 UB 不可写 target 迁移。</td></tr>
+              <tr><td>扩容 / 缩容 / 故障恢复</td><td>membership、scale-up/scale-down 状态、worker service mode。</td><td>新 worker probe、故障 worker backoff、peer feedback 摘要。</td><td>scale-up 新节点先 PROBING；scale-down/exiting 直接拒绝写入和迁移 target。</td></tr>
+              <tr><td>目的端 Worker 自身 UB 故障</td><td>该 Worker 仍可能是 Global Fact 里的合法数据持有者。</td><td>本地 ERROR 4、频繁 ERROR 9、Jetty 重建后 probe 失败、peer feedback。</td><td>更新 <code>LocalUbHealth</code>，用轻量心跳摘要传播，其他节点降低写入/迁移流量。</td></tr>
+            </tbody>
+          </table>
+        </div>
         <h3 id="flow-client-put">2.1 Client -> Worker Put：本端发起 UB 写失败</h3>
         <div class="diagram">
           <div class="diagram-title">Client Put 默认快速失败，不透明切 TCP</div>
           <div class="mermaid">
 sequenceDiagram
     participant C as Client
+    participant G as Global Fact
     participant A as TransportPathAdmission
     participant W as Worker(Data Owner)
     participant U as UrmaManager
-    C->>A: CheckWriteTarget(W)
-    A-->>C: RUNNING + AVAILABLE
+    C->>G: read worker service/ring fact
+    G-->>C: W is RUNNING and in ring
+    C->>A: CheckWriteTarget(W, GlobalFact)
+    A-->>C: GlobalFact ok + PeerUbAdmission AVAILABLE
     C->>W: Create/MultiCreate RPC, get URMA addr
     C->>U: UrmaWritePayload(W)
     U--xC: ERROR 4 port unavailable
@@ -252,11 +275,14 @@ sequenceDiagram
           <div class="mermaid">
 sequenceDiagram
     participant R as Requester Worker
+    participant G as Global Fact
     participant A as TransportPathAdmission
     participant P as Provider Worker
     participant U as Provider UrmaManager
-    R->>A: CheckReadSource(P)
-    A-->>R: source allowed
+    R->>G: read object location / provider fact
+    G-->>R: P owns readable data
+    R->>A: CheckReadSource(P, GlobalFact)
+    A-->>R: source allowed by GlobalFact + local admission
     R->>P: GetObjectRemote(URMA info of R)
     P->>A: CheckWriteTarget(R)
     A-->>P: R path AVAILABLE
@@ -278,11 +304,14 @@ sequenceDiagram
           <div class="mermaid">
 sequenceDiagram
     participant B as RebalanceExecutor
+    participant G as Global Fact
     participant A as TransportPathAdmission
     participant M as DataMigrator
     participant S as Source Worker
     participant T as Target Worker
-    B->>A: CheckMigrationTarget(T)
+    B->>G: read task/source/target/slot fact
+    G-->>B: target T from rebalance/move plan
+    B->>A: CheckMigrationTarget(T, GlobalFact)
     alt T not RUNNING or UB unavailable
       A-->>B: reject target
       B-->>B: fail task / ask selector re-pick
@@ -301,6 +330,7 @@ sequenceDiagram
           <div class="mermaid">
 sequenceDiagram
     participant O as WorkerUbPathHealth
+    participant G as Global Fact
     participant U as UrmaManager
     participant P as Probe
     participant A as TransportPathAdmission
@@ -308,9 +338,10 @@ sequenceDiagram
     O->>P: enter PROBING
     P->>U: handshake / small URMA probe
     alt probe ok
-      U-->>O: MarkAvailable(peer, epoch)
-      O-->>A: AVAILABLE
-      A-->>A: writes/migration allowed if WorkerServiceMode RUNNING
+      U-->>O: MarkAvailable(peer, health epoch)
+      O->>G: consume latest membership/service fact
+      O-->>A: AVAILABLE if GlobalFact still allows writes
+      A-->>A: writes/migration allowed only with GlobalFact RUNNING
     else probe failed
       U-->>O: keep UNAVAILABLE, backoff
       A-->>A: continue fail fast
@@ -339,6 +370,10 @@ sequenceDiagram
             <div class="card-title">目的端 Worker 如何知道自己故障并通知别人</div>
             <p>被单边写的一端不能天然看到对端写失败，所以目的端 worker 需要两类输入：本地自检看到 ERROR 4/频繁 ERROR 9/Jetty 重建后 probe 失败；以及其他 client/worker 通过 RPC 上报“写不进该 worker”。worker 聚合这些信号更新 <code>LocalUbHealth</code>，再通过 master heartbeat 的 <code>extend</code> 或 client-worker heartbeat response 带出 <code>UbHealthSummary</code>，让其他节点减少向它写入和迁移。</p>
           </div>
+          <div class="card">
+            <div class="card-title">千级节点下心跳是否可行</div>
+            <p>可行边界是“每个 worker 只上报自己的 UB 摘要”，而不是在心跳里广播所有 peer 状态。master 侧维护 O(N) 的 worker -> health epoch 摘要；client/worker 只按当前连接、候选 data location、迁移 target 消费相关摘要，普通 Put/Get 仍走本地 O(1) admission。</p>
+          </div>
         </div>
         <div class="note warn">
           结论：第一层必须是发起端局部感知和本地准入，保证 Put/Get/RemoteGet/migrate/rebalance 立即止血；第二层才是轻量全局摘要和保活探测，用于恢复和减少其他节点继续撞同一故障 Worker。持续故障必须指数退避，避免 probe 或重试流量放大。
@@ -360,6 +395,12 @@ classDiagram
       +LOCAL_ISOLATED
       +RECOVERING
       +DRAINING
+    }
+    class GlobalFactProvider {
+      +GetWorkerServiceMode(worker)
+      +GetObjectLocations(object)
+      +GetMigrationTask(task)
+      +GetHashRing()
     }
     class WorkerUbPathHealth {
       +CheckUbReachable(peer, op)
@@ -419,6 +460,7 @@ classDiagram
       +RegisterJetty()
     }
     TransportPathAdmission --> WorkerServiceMode
+    TransportPathAdmission --> GlobalFactProvider
     TransportPathAdmission --> PeerUbAdmission
     PeerUbAdmission --> WorkerUbPathHealth
     LocalUbHealth --> WorkerUbPathHealth
@@ -524,17 +566,36 @@ classDiagram
           <li><span class="badge b-blue">Heartbeat</span>worker 把本地 UB health epoch/reason/backoff 放进 master heartbeat <code>extend</code> 或 client-worker heartbeat response；接收方只更新 peer admission，不修改 membership。</li>
           <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
         </ul>
+        <h4>千级节点下的心跳可行性</h4>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">不做全量 all-to-all 心跳</div>
+            <p>千级节点下不能让每个 client/worker 在心跳中携带所有 peer 的 UB 状态，否则会变成 O(N²) 数据和广播放大。UB health 的全局通道只传播“本 worker 自己”的摘要：state、epoch、reason、backoff_until。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Global Fact 与 UB 摘要分层</div>
+            <p>Global Fact 仍由 master/etcd/hash ring 维护，解决 Worker 是否存在、是否 RUNNING、slot/primary/任务归属。UB 摘要只表示该 Worker 数据面是否适合作为写入或迁移目标，不替代 membership。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">按需消费</div>
+            <p>普通 Put/Get 不同步访问 master；它只读本进程 O(1) 的 <code>PeerUbAdmission</code>。心跳摘要用于刷新本地缓存，RPC response 用于本次请求的精确归因，probe 用于恢复确认。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">流量控制</div>
+            <p>持续故障时，probe 和重新开放按指数退避；master 侧只保存每个 worker 最新 epoch 摘要，client/worker 可只接收与当前连接、候选 location、迁移 target 相关的摘要。</p>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
-            <caption>补充覆盖场景</caption>
-            <thead><tr><th>场景</th><th>风险</th><th>补充处理</th></tr></thead>
+            <caption>第 2 章场景到运行接入点映射</caption>
+            <thead><tr><th>场景</th><th>运行接入点</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td>Client direct read batch</td><td>按 data worker 分组后，一个坏 data worker 可能让 batch 内多个对象重复等待。</td><td>分组后发 batch 前调用 <code>CheckReadSource</code>，整组 fail fast 或换副本。</td></tr>
-              <tr><td>传统 Client Get provider 写回 client</td><td>UB Write 失败只在 worker provider 看到，client 只看到 RPC 结果。</td><td>provider 返回结构化 URMA status，client 只消费显式状态；RPC timeout 不合成 ERROR 4。</td></tr>
-              <tr><td>Worker remote get / BatchGetObjectRemote</td><td>requester 可能持续读同一个 provider，provider 也可能持续写不进 requester。</td><td>requester 对 provider 做 source admission；provider 对 receiver 做 endpoint admission，并在 response 携带 failed endpoint。</td></tr>
-              <tr><td>Migrate / Move / Rebalance</td><td>扩缩容或故障期间 stale task 仍把数据迁移到 UB 不可写 worker。</td><td>目标选择和执行前都查 <code>CheckMigrationTarget</code>；scale-up 新 worker 初始为 <code>PROBING</code>，scale-down/exiting worker 直接拒绝。</td></tr>
-              <tr><td>持续 ERROR 9</td><td>Jetty 重建可恢复，但频繁重建会把真实业务流量变成 probe。</td><td>ERROR 9 先触发 <code>ReCreateJetty</code> 和 <code>SUSPECT</code>，窗口内超过阈值后进入 <code>UNAVAILABLE</code> 并指数退避 probe。</td></tr>
-              <tr><td>全局恢复</td><td>只有本地隔离会导致不同 client/worker 恢复时间不一致。</td><td>心跳摘要携带 <code>epoch</code>，新 epoch + probe success 才恢复本地 admission；摘要只能加速恢复，不能替代本地 probe。</td></tr>
+              <tr><td>Client Put/Set</td><td><code>ClientWorkerBaseApi::SendBufferViaUb*</code></td><td>写前查 Global Fact + PeerUbAdmission；ERROR 4 后本地隔离目标。</td></tr>
+              <tr><td>传统 Client Get / Direct read</td><td><code>GetRequest::UbWriteHelper</code>、direct read data transport</td><td>provider 返回显式 UB status；batch 按 data worker 分组 fail fast。</td></tr>
+              <tr><td>Worker remote get / BatchGetObjectRemote</td><td><code>PullObjectDataFromRemoteWorker</code>、<code>WriteViaFastTransport</code></td><td>requester 查 source；provider 查 receiver；RPC timeout 只标记 suspect。</td></tr>
+              <tr><td>Migrate / Move / Rebalance</td><td><code>DataMigrator</code>、<code>RebalanceExecutor</code>、NodeSelector</td><td>target 从 Global Fact 来，但执行前叠加 UB target admission。</td></tr>
+              <tr><td>扩缩容与恢复</td><td>worker heartbeat summary、probe、service mode</td><td>scale-up 先 PROBING；scale-down/exiting 直接拒绝；恢复要 probe 成功且 Global Fact 允许。</td></tr>
+              <tr><td>目的端自身 UB 故障</td><td><code>LocalUbHealth</code> + <code>UbHealthGossip</code></td><td>只传播本 worker 自身摘要，避免千级节点全量矩阵心跳。</td></tr>
             </tbody>
           </table>
         </div>
