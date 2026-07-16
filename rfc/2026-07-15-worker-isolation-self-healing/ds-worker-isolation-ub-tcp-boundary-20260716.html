@@ -116,6 +116,13 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub-2" href="#design-plan">3.2.4 核心模块与接口</a>
       <a class="nav-sub-2" href="#runtime-design">3.2.5 运行接入与约束</a>
       <a class="nav-sub" href="#dryrun-design">3.3 Use Case DryRun</a>
+      <a class="nav-sub-2" href="#dryrun-uc1">3.3.1 UC-1 Client 写 Worker</a>
+      <a class="nav-sub-2" href="#dryrun-uc2">3.3.2 UC-2 Client Get</a>
+      <a class="nav-sub-2" href="#dryrun-uc3">3.3.3 UC-3 Direct Read</a>
+      <a class="nav-sub-2" href="#dryrun-uc4">3.3.4 UC-4 Worker RemoteGet</a>
+      <a class="nav-sub-2" href="#dryrun-uc5">3.3.5 UC-5 迁移/Rebalance</a>
+      <a class="nav-sub-2" href="#dryrun-uc6">3.3.6 UC-6 扩缩容/恢复</a>
+      <a class="nav-sub-2" href="#dryrun-uc7">3.3.7 UC-7 Worker 自身故障</a>
       <a class="nav-sub" href="#oss">3.4 开源软件选型</a>
       <a class="nav-sub" href="#external">3.5 外部交互分析&&上下游依赖需求</a>
       <a href="#external-interface">4. 对外接口</a>
@@ -216,7 +223,7 @@ th { background: #f8fafc; font-size: 12px; }
         <h4 id="failure-owner">故障归属</h4>
         <div class="table-wrap">
           <table>
-            <caption>UB 故障隔离的两个主方向</caption>
+            <caption>表 1-1 UB 故障隔离的两个主方向</caption>
             <thead><tr><th>主方向</th><th>覆盖路径</th><th>URMA Write 发起端</th><th>核心处理</th></tr></thead>
             <tbody>
               <tr><td><code>client -> worker</code> 写入数据</td><td>Client Put/Set/Create 后写目标 worker，随后 Publish/MultiPublish</td><td>client</td><td>client 写前检查 target worker；ERROR 4/路径失败后隔离 target；默认不透明切 TCP，worker create/admission 也要拒绝 UB 异常下的新写。</td></tr>
@@ -226,7 +233,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <div class="table-wrap">
           <table>
-            <caption>故障归属与处理边界</caption>
+            <caption>表 1-2 故障归属与处理边界</caption>
             <thead><tr><th>场景</th><th>知道故障的一端</th><th>应该阻断什么</th><th>不应该做什么</th></tr></thead>
             <tbody>
               <tr><td>Client -> Worker Put UB 写失败</td><td>Client 发起 URMA write，能拿到错误</td><td>本 client 对该 Worker 的后续 UB 写入；返回明确失败</td><td>默认透明切 TCP；直接下结论 Worker 全局 DOWN</td></tr>
@@ -243,7 +250,7 @@ th { background: #f8fafc; font-size: 12px; }
         <h3 id="flow-context">2.0 问题上下文：AS-IS / TO-BE</h3>
         <div class="table-wrap">
           <table>
-            <caption>从静默失败到显式隔离</caption>
+            <caption>表 2-1 从静默失败到显式隔离</caption>
             <thead><tr><th>维度</th><th>AS-IS</th><th>TO-BE</th></tr></thead>
             <tbody>
               <tr><td>失败呈现</td><td>UB 写失败可能被 fallback、retry、batch 内部分失败掩盖，外部只看到成功率下降或延迟升高。</td><td>返回明确的 UB 数据面错误，调用方能区分对象不存在、RPC 不通、数据所在 Worker UB 不可用。</td></tr>
@@ -256,7 +263,7 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
         <div class="table-wrap">
           <table>
-            <caption>场景清单</caption>
+            <caption>表 2-2 Use Cases 场景清单</caption>
             <thead><tr><th>场景</th><th>参与方</th><th>触发条件</th><th>当前风险</th><th>期望行为</th></tr></thead>
             <tbody>
               <tr><td>UC-1 Client 写 Worker</td><td>Client、目标 Worker</td><td>Client 通过 UB 写入目标 Worker 时返回 ERROR 4/ERROR 9/timeout。</td><td>Client 持续写同一故障 Worker，业务只看到成功率下降。</td><td>后续写同一目标 Worker 快速失败；默认不透明切 TCP。</td></tr>
@@ -386,7 +393,7 @@ th { background: #f8fafc; font-size: 12px; }
         <p>状态机按角色拆成两类，避免开发实现时把“我访问某个 peer 不通”和“我这个 Worker 自己 UB 不可用”混在一起。数据访问者是发起 Put/Get/RemoteGet/Migrate 的 Client 或 Worker；数据提供者是持有对象数据、执行 provider->client/provider->worker UB Write，或作为迁移目标承接数据的 Worker。</p>
         <div class="table-wrap">
           <table>
-            <caption>状态机归属</caption>
+            <caption>表 3-1 状态机归属</caption>
             <thead><tr><th>状态机</th><th>维护进程</th><th>描述对象</th><th>输入信号</th><th>输出用途</th><th>不能表达</th></tr></thead>
             <tbody>
               <tr><td><code>PeerUbAdmission</code></td><td>数据访问者 Client / Worker</td><td>“本进程访问某个目标 Worker 是否可走 UB”</td><td>本端 URMA Write 结果、Provider 显式 RPC status、GlobalFact 健康摘要、本地 probe 结果</td><td>本进程 Put/Get/RemoteGet/Migrate/Rebalance 的 source/target/receiver 准入</td><td>不能把 peer 改成全局 DOWN；不能代表其他进程也访问失败</td></tr>
@@ -395,7 +402,7 @@ th { background: #f8fafc; font-size: 12px; }
           </table>
         </div>
         <div class="diagram">
-          <div class="diagram-title">数据访问者 Client/Worker：PeerUbAdmission 状态机</div>
+          <div class="diagram-title">图 3-1 数据访问者 Client/Worker：PeerUbAdmission 状态机</div>
           <div class="mermaid">
 stateDiagram-v2
     [*] --> AVAILABLE
@@ -411,7 +418,7 @@ stateDiagram-v2
         </div>
         <p>访问者状态机的粒度是 <code>local process -> peer worker</code>。Client Put 的 ERROR 4、Worker RemoteGet requester 收到 Provider 显式 ERROR 4、迁移执行方发现 target 不可写，都会更新本地 <code>PeerUbAdmission</code>。RPC timeout 只能进入 <code>SUSPECT</code>，不能合成 ERROR 4。</p>
         <div class="diagram">
-          <div class="diagram-title">数据提供者 Worker：LocalUbHealth 状态机</div>
+          <div class="diagram-title">图 3-2 数据提供者 Worker：LocalUbHealth 状态机</div>
           <div class="mermaid">
 stateDiagram-v2
     [*] --> SELF_AVAILABLE
@@ -428,7 +435,7 @@ stateDiagram-v2
         <p>Provider 状态机的粒度是 <code>this worker</code>，只描述本 Worker 自身 UB 数据面。它产生 <code>UbHealthSummary(worker, state, epoch, reason, backoff_until)</code>，供 Master/元数据侧汇总，并被相关 Client/Worker 消费为 peer admission 的输入。</p>
         <div class="table-wrap">
           <table>
-            <caption>状态迁移与业务准入</caption>
+            <caption>表 3-2 状态迁移与业务准入</caption>
             <thead><tr><th>角色</th><th>状态</th><th>进入条件</th><th>Put / 写入</th><th>Get / RemoteGet</th><th>Migrate / Rebalance</th><th>恢复动作</th></tr></thead>
             <tbody>
               <tr><td>访问者</td><td><code>AVAILABLE</code></td><td>默认初始、probe 成功、健康摘要与本地 probe 均通过。</td><td>允许</td><td>允许选择 source/receiver</td><td>允许选择 target</td><td>持续记录 outcome。</td></tr>
@@ -445,7 +452,7 @@ stateDiagram-v2
         <p>关键路径只保留跨组件生命周期：Client、Worker-Meta、Worker-Data、Coordinator 和 URMA Operator。函数级调用放到附录，避免主设计被实现细节淹没。</p>
         <div class="table-wrap">
           <table>
-            <caption>关键组件在读写路径中的职责</caption>
+            <caption>表 3-3 关键组件在读写路径中的职责</caption>
             <thead><tr><th>组件</th><th>职责</th><th>关键输入</th><th>关键输出</th></tr></thead>
             <tbody>
               <tr><td>Client</td><td>发起 Put/Set/Get/direct read；维护本进程对候选 worker 的局部 UB admission；消费 RPC response 中的显式 URMA status。</td><td>Global Fact、RPC response、client 本端 URMA operator 结果。</td><td>fail fast、fallback 决策、peer failure report、用户可见错误码。</td></tr>
@@ -457,7 +464,7 @@ stateDiagram-v2
           </table>
         </div>
         <div class="diagram">
-          <div class="diagram-title">关键读写和迁移准入时序</div>
+          <div class="diagram-title">图 3-3 关键读写和迁移准入时序</div>
           <div class="mermaid">
 sequenceDiagram
     participant C as Client/Requester
@@ -493,7 +500,7 @@ sequenceDiagram
         <p>GlobalFact 和局部信息不是同一类状态：GlobalFact 只表达已有元数据事实和 Worker 自身上报的 UB 健康摘要，适合被多节点消费；局部信息表达“本进程亲眼看到某个 peer 不通”，用于立即止血。准入判断必须组合两者，但不能让局部观测直接改写全局 membership。</p>
         <div class="table-wrap">
           <table>
-            <caption>GlobalFact 与局部信息维护边界</caption>
+            <caption>表 3-4 GlobalFact 与局部信息维护边界</caption>
             <thead><tr><th>状态</th><th>维护者</th><th>产生方式</th><th>传播方式</th><th>消费者</th><th>冲突处理</th></tr></thead>
             <tbody>
               <tr><td>membership / ring / del_node_info / migration task</td><td>Master / 元数据侧</td><td>已有集群管理、扩缩容、迁移任务流程</td><td>已有元数据查询、心跳或任务下发</td><td>Client、Worker、迁移执行方</td><td>仍是权威事实；UB 局部故障不能把 Worker 改成全局 DOWN</td></tr>
@@ -504,7 +511,7 @@ sequenceDiagram
           </table>
         </div>
         <div class="diagram">
-          <div class="diagram-title">GlobalFact 与局部信息维护时序</div>
+          <div class="diagram-title">图 3-4 GlobalFact 与局部信息维护时序</div>
           <div class="mermaid">
 sequenceDiagram
     participant Req as Client/Worker Initiator
@@ -555,7 +562,7 @@ sequenceDiagram
         <h4 id="class-diagram">设计类图</h4>
         <p>下图用于说明核心抽象之间的职责边界：准入判断、错误分类、局部健康状态、心跳摘要和恢复探测彼此解耦。开发时优先按这些边界落小类，测试时可以按每个类的输入/输出独立注入错误。</p>
         <div class="diagram">
-          <div class="diagram-title">最小抽象与现有模块协同</div>
+          <div class="diagram-title">图 3-5 最小抽象与现有模块协同</div>
           <div class="mermaid">
 classDiagram
     class WorkerServiceMode {
@@ -666,7 +673,7 @@ classDiagram
         </div>
         <div class="table-wrap">
           <table>
-            <caption>Client / Worker 双端职责矩阵</caption>
+            <caption>表 3-5 Client / Worker 双端职责矩阵</caption>
             <thead><tr><th>进程</th><th>Coordinator 场景</th><th>URMA Operator 场景</th><th>数据 Provider</th><th>必做事项</th></tr></thead>
             <tbody>
               <tr><td>Client</td><td>Put/Set/Get 业务请求；消费 worker 返回的 Get/写回状态</td><td>Client -> Worker Put/Set 的 UB write</td><td>否</td><td>写前检查 target，读前消费显式 worker URMA status；本端 Put ERROR 4 直接标记 target；RPC timeout/failure 只按 RPC/peer suspect 处理</td></tr>
@@ -677,7 +684,7 @@ classDiagram
         <h4 id="interfaces">接口语义</h4>
         <div class="table-wrap">
           <table>
-            <caption>关键接口和语义</caption>
+            <caption>表 3-6 关键接口和语义</caption>
             <thead><tr><th>接口</th><th>调用方</th><th>语义</th><th>返回/副作用</th></tr></thead>
             <tbody>
               <tr><td><code>UbFailureClassifier::Classify(outcome)</code></td><td>URMA operator wrapper、RPC response consumer</td><td>把显式 URMA status 分类。<code>ERROR 4</code> 必须来自 provider/CQE/operator status，不能由 RPC timeout 合成。</td><td><code>PORT_UNAVAILABLE_ERROR4</code>、<code>TIMEOUT_THRESHOLD</code>、<code>NON_UB_FAILURE</code> 等。</td></tr>
@@ -741,7 +748,7 @@ classDiagram
         </div>
         <div class="table-wrap">
           <table>
-            <caption>第 3 章场景到运行接入点映射</caption>
+            <caption>表 3-7 Use Cases 到运行接入点映射</caption>
             <thead><tr><th>场景</th><th>运行入口</th><th>说明</th></tr></thead>
             <tbody>
               <tr><td>UC-1 Client 写 Worker</td><td>client 本端 UB writer</td><td>写前查 Global Fact + PeerUbAdmission；ERROR 4 后本地隔离目标。</td></tr>
@@ -774,7 +781,7 @@ classDiagram
         <h3 id="dryrun-design">3.3 Use Case DryRun</h3>
         <div class="table-wrap">
           <table>
-            <caption>上线前 DryRun 验证</caption>
+            <caption>表 3-8 上线前 DryRun 验证总览</caption>
             <thead><tr><th>对应场景</th><th>DryRun Case</th><th>DryRun 注入/观察</th><th>期望决策</th><th>验收信号</th></tr></thead>
             <tbody>
               <tr><td>2.1 UC-1 Client 写 Worker</td><td>Client Put 目标 Worker ERROR 4</td><td>在 client UB write 返回处注入 ERROR 4，不改 Global Fact。</td><td>只隔离该 client 对目标 worker 的 UB 写入；不把 worker 标成 DOWN。</td><td>下一次写同 target fail fast，日志包含 target、reason、epoch。</td></tr>
@@ -787,10 +794,38 @@ classDiagram
             </tbody>
           </table>
         </div>
+        <h4 id="dryrun-uc1">3.3.1 UC-1 Client 写 Worker</h4>
+        <div class="note">
+          <strong>DryRun：</strong>在 client UB write 返回处注入 ERROR 4，不改 Global Fact。期望只隔离该 client 对目标 worker 的 UB 写入，不把 worker 标成 DOWN；下一次写同 target fail fast，日志包含 target、reason、epoch。
+        </div>
+        <h4 id="dryrun-uc2">3.3.2 UC-2 Client Get 由 Worker 写回</h4>
+        <div class="note">
+          <strong>DryRun：</strong>在 provider 写 client 的 fast transport 处注入 URMA error，并通过 RPC response 返回结构化状态。期望 Client 消费显式 status，RPC timeout 不合成 ERROR 4；response 区分 failed_endpoint、operator_worker、urma_status。
+        </div>
+        <h4 id="dryrun-uc3">3.3.3 UC-3 Client Direct Read / Batch Direct Read</h4>
+        <div class="note">
+          <strong>DryRun：</strong>构造 batch 中多个 object 均在同一 data worker，预置该 worker peer admission unavailable。期望按 data worker 分组后整组 fail fast 或换源，不逐对象等待；batch 日志只有一次 target rejected。
+        </div>
+        <h4 id="dryrun-uc4">3.3.4 UC-4 Worker RemoteGet</h4>
+        <div class="note">
+          <strong>DryRun：</strong>Worker requester 发 RemoteGet，provider 写 requester 时注入 URMA error。期望 requester 只消费显式 status，RPC timeout 不合成 ERROR 4；response 区分 failed_endpoint、operator_worker、urma_status。
+        </div>
+        <h4 id="dryrun-uc5">3.3.5 UC-5 Migrate / Move / Rebalance</h4>
+        <div class="note">
+          <strong>DryRun：</strong>Global Fact 里 target 仍来自 task，但本地 UB admission 为 unavailable。期望执行前拒绝该 target，可失败或触发重选，不发送数据；task 记录 target rejected，migrated bytes 为 0。
+        </div>
+        <h4 id="dryrun-uc6">3.3.6 UC-6 扩容 / 缩容 / 故障恢复</h4>
+        <div class="note">
+          <strong>DryRun：</strong>构造 worker membership 可见但 UB probe 未成功，或 service/ring 已不可写但 UB AVAILABLE。期望 GlobalFact 与 UB admission 必须同时允许；PROBING 不承接写入，probe 成功且服务态允许后才 AVAILABLE。
+        </div>
+        <h4 id="dryrun-uc7">3.3.7 UC-7 目的端 Worker 自身 UB 故障</h4>
+        <div class="note">
+          <strong>DryRun：</strong>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。期望 master 侧保持 O(N) 摘要，client/worker 按需消费候选相关状态；普通 Put/Get 不同步访问 master。
+        </div>
         <h4>DryRun 变化模块时序</h4>
         <p>以下时序图用于 DryRun 和联调，不要求场景分析章节提前理解方案类名。开发可用它确认模块插入点，测试可用它设计 mock、注入点和可观测断言。</p>
         <div class="diagram">
-          <div class="diagram-title">流程 1：发现故障并进入局部隔离</div>
+          <div class="diagram-title">图 3-6 DryRun 流程 1：发现故障并进入局部隔离</div>
           <p>该流程验证“谁发起 UB Write，谁先得到真实错误”。Client 本端写失败时由 Client 记录目标不可写；RemoteGet 写回失败时由数据 Worker 把显式状态放回响应，Requester 只能消费这个显式结果，不能把普通 RPC timeout 合成 ERROR 4。</p>
           <div class="mermaid">
 sequenceDiagram
@@ -816,7 +851,7 @@ sequenceDiagram
           </div>
         </div>
         <div class="diagram">
-          <div class="diagram-title">流程 2：Worker 自身 UB 故障摘要传播</div>
+          <div class="diagram-title">图 3-7 DryRun 流程 2：Worker 自身 UB 故障摘要传播</div>
           <p>该流程验证千级节点场景下的传播边界：Worker 只上报自己的 UB health summary，Master/元数据侧保存每个 Worker 的摘要，Client/Worker 只按当前候选目标消费相关摘要，不广播所有 peer 的状态矩阵。</p>
           <div class="mermaid">
 sequenceDiagram
@@ -836,7 +871,7 @@ sequenceDiagram
           </div>
         </div>
         <div class="diagram">
-          <div class="diagram-title">流程 3：Probe 恢复后平稳放开写入和迁移</div>
+          <div class="diagram-title">图 3-8 DryRun 流程 3：Probe 恢复后平稳放开写入和迁移</div>
           <p>该流程验证恢复不是由业务请求试错或 fallback 成功触发，而是由 cooldown 后的 probe 成功和服务态仍允许写入共同决定。测试需要覆盖 probe 失败继续退避、probe 成功但服务态不可写仍拒绝两条分支。</p>
           <div class="mermaid">
 sequenceDiagram
@@ -864,7 +899,7 @@ sequenceDiagram
         <h3 id="external">3.5 外部交互分析&&上下游依赖需求</h3>
         <div class="table-wrap">
           <table>
-            <caption>外部交互与上下游依赖</caption>
+            <caption>表 3-9 外部交互与上下游依赖</caption>
             <thead><tr><th>依赖方</th><th>交互内容</th><th>设计要求</th></tr></thead>
             <tbody>
               <tr><td>Master / Worker-Meta</td><td>worker service、object location、migration task、UB health summary</td><td>Global Fact 仍是 membership 上界；UB 摘要只作为数据面准入输入。</td></tr>
@@ -933,7 +968,7 @@ urma_status=ERROR4</code></pre>
         <p>自验证用例按代码分支反推，要求每个分支都能通过可注入的错误、可断言的状态迁移和可观测日志/metric 覆盖。业务级验收用例用于串联端到端场景，分支覆盖矩阵用于指导 UT/ST 补点。</p>
         <div class="table-wrap">
           <table>
-            <caption>代码分支覆盖矩阵</caption>
+            <caption>表 8-1 代码分支覆盖矩阵</caption>
             <thead><tr><th>代码分支</th><th>建议覆盖层级</th><th>注入点</th><th>断言</th><th>关联 Use Case</th></tr></thead>
             <tbody>
               <tr><td><code>CheckWriteTarget</code> 命中本地 <code>UNAVAILABLE</code></td><td>UT + ST</td><td>预置 <code>PeerUbAdmission(target)=UNAVAILABLE</code>，发起 Put/Set 或 migrate target 选择。</td><td>不调用 <code>UrmaWritePayload</code>，直接返回 UB unavailable；日志带 target、reason、epoch。</td><td>UC-1 Client 写 Worker；UC-5 Migrate / Move / Rebalance</td></tr>
@@ -956,7 +991,7 @@ urma_status=ERROR4</code></pre>
         <h3 id="verify-cases">8.1 验收用例</h3>
         <div class="table-wrap">
           <table>
-            <caption>验收用例</caption>
+            <caption>表 8-2 验收用例</caption>
             <thead><tr><th>Use Case</th><th>注入或步骤</th><th>期望行为</th><th>可观测证据</th></tr></thead>
             <tbody>
               <tr><td>UC-1 Client 写 Worker</td><td>Client Put/Set 第一次写目标 worker 时注入 ERROR 4，再连续写同一个 target。</td><td>首次失败后本 client 对该 Worker 写入准入拒绝，恢复前不继续写。</td><td>后续请求 fail fast；无透明 TCP fallback。</td></tr>
@@ -976,7 +1011,7 @@ urma_status=ERROR4</code></pre>
         <p>以下内容是方案设计的代码依据。CodeGraph v0.9.7 在 main/master <code>69ec60b41</code> 上同步 12,608 files / 299,132 nodes / 867,672 edges；用于追溯当前 client-worker、worker-worker RemoteGet、direct read、migration/rebalance 与 URMA 资源恢复的接入点。</p>
         <div class="table-wrap">
           <table>
-            <caption>CodeGraph 与源码证据</caption>
+            <caption>表 A-1 CodeGraph 与源码证据</caption>
             <thead><tr><th>路径</th><th>当前实现事实</th><th>设计 hook</th></tr></thead>
             <tbody>
               <tr><td><code>ClientWorkerBaseApi::SendBufferViaUb</code><br><span class="src">client_worker_base_api.cpp:289-324</span></td><td>Client 端准备 UB handle，单次或 pipeline 写入后调用 <code>RecordUrmaDataPlaneResult(rc.IsOk())</code>。</td><td>在返回错误前分类 URMA 错误并 <code>MarkFailure(targetWorker)</code>；下一次 put 先走准入。</td></tr>
@@ -1002,7 +1037,7 @@ urma_status=ERROR4</code></pre>
           </table>
         </div>
         <div class="diagram-card wide">
-          <div class="diagram-title">Client direct read 现有流程与 UB admission 接入点</div>
+          <div class="diagram-title">图 A-1 Client direct read 现有流程与 UB admission 接入点</div>
           <p>该附录图只用于代码确认：它把当前 direct read 的 meta phase、data phase、provider 写回和结果消费串起来，帮助开发找到最小插入点，帮助测试区分显式 URMA ERROR 4 与普通 RPC timeout。</p>
           <div class="mermaid">
 sequenceDiagram
