@@ -184,6 +184,16 @@ th { background: #f8fafc; font-size: 12px; }
         <h3 id="failure-owner">2.3 故障归属</h3>
         <div class="table-wrap">
           <table>
+            <caption>UB 故障隔离的两个主方向</caption>
+            <thead><tr><th>主方向</th><th>覆盖路径</th><th>URMA Write 发起端</th><th>核心处理</th></tr></thead>
+            <tbody>
+              <tr><td><code>client -> worker</code> 写入数据</td><td>Client Put/Set/Create 后写目标 worker，随后 Publish/MultiPublish</td><td>client</td><td>client 写前检查 target worker；ERROR 4/路径失败后隔离 target；默认不透明切 TCP，worker create/admission 也要拒绝 UB 异常下的新写。</td></tr>
+              <tr><td><code>worker/client -> worker RemoteGet</code> 请求</td><td>传统 Client Get、Client direct read、Worker remote get、Batch remote get</td><td>数据 provider worker</td><td>requester/coordinator 先过滤 data source；provider 在处理 RemoteGet 时 UB Write 到 requester/client receive buffer，失败后显式返回 URMA status，默认不把 TCP payload 当透明成功。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
             <caption>故障归属与处理边界</caption>
             <thead><tr><th>场景</th><th>知道故障的一端</th><th>应该阻断什么</th><th>不应该做什么</th></tr></thead>
             <tbody>

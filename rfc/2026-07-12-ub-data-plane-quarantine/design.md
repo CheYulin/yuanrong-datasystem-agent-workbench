@@ -228,14 +228,26 @@ The key signal flow is **sender reports, peer gates**:
 
 Important flow ownership:
 
+- First-cut isolation has two primary directions:
+  1. `client -> worker` data write: the client issues the one-sided UB write to
+     the target worker. The client can classify local `ERROR 4`/path failure,
+     mark the target worker unavailable, and block later writes without hidden
+     TCP fallback.
+  2. `worker/client -> worker RemoteGet`: the client or requester worker sends a
+     RemoteGet-like RPC to a data worker. The data provider worker handles that
+     request and performs the UB Write into the requester/client receive buffer.
+     The requester filters data sources before issuing the RPC, and consumes only
+     explicit provider URMA status as a strong UB signal.
 - Client-worker write: client is both coordinator and URMA operator for the
   client-to-worker UB write.
 - Worker-client Get: client is coordinator, but worker is the URMA operator
-  because the worker writes into client memory.
+  because the worker handles the RemoteGet/Get request and writes into client
+  memory.
 - Client direct read: client skips the local worker data gateway and calls the
   data worker through `DirectReadFlow` / `ClientRemoteDataTransport`, but the
-  data worker is still the provider and URMA operator. Admission must therefore
-  run before the direct-read data phase selects/calls a data worker, and explicit
+  data worker is still the provider and URMA operator. It is part of the
+  RemoteGet direction, not a third isolation model. Admission must therefore run
+  before the direct-read data phase selects/calls a data worker, and explicit
   provider URMA status must be consumed by the client transport.
 - Worker-worker remote get: requester worker is coordinator, source worker is
   URMA operator/provider because it writes into requester memory. There is only

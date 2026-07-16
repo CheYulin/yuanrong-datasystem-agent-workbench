@@ -125,6 +125,16 @@ completion、lane release/retire/recreate。PR1277 引入发送端 Jetty 池化�
 但不能单独把远端 worker 标成 UB unavailable；ERROR 4、握手失败、reconnect 失败、
 连续 timeout 这类 path/port 失败才进入 `WorkerUbPathHealth` 的 `UNAVAILABLE`。
 
+UB 故障隔离第一版按两个主方向收敛:
+
+| 主方向 | 典型路径 | URMA Write 发起端 | 隔离主动作 |
+| ---- | ---- | ---- | ---- |
+| `client -> worker` 写入数据 | Client Put/Set/Create 后写目标 worker，随后 Publish/MultiPublish | client | client 写前检查 target worker；ERROR 4/路径失败后标记 target worker，不默认 TCP 写 fallback，worker create/admission 也要拒绝 UB 异常下的新写 |
+| `worker/client -> worker RemoteGet` 请求触发 provider 写回 | 传统 Client Get、Client direct read、Worker remote get、Batch remote get | 数据 provider worker | requester/coordinator 先过滤 data source；provider worker 在处理 RemoteGet 时执行 UB Write 到 requester/client receive buffer，失败后显式返回 URMA status，默认不把 TCP payload 当透明成功 |
+
+后续 migration/rebalance 复用这两个方向的判断：选择 target 时按“能不能继续作为写入目的
+worker”，读取 source 时按“RemoteGet provider 写回链路是否可用”。
+
 | 场景 | Coordinator | URMA Operator | Endpoint / 后续 gate |
 | ---- | ---- | ---- | ---- |
 | Client Put/Set | client | client | target worker 学到/自检 UB unavailable 后拒绝新写 |
@@ -662,9 +672,9 @@ fallback 成功，后续写入/迁移仍继续选择同一个坏 worker，形成
 | ---- | ---- | ---- |
 | Client 连接 worker | `ObjectClientImpl::InitClientWorkerConnectAt` 根据本地/远端创建 `ClientWorkerLocalApi` 或 `ClientWorkerRemoteApi`，并注册 `ConfigureUrmaDataPlaneFailureCallback`。direct read 分支在 `ObjectClientImpl::AcquireDirectReadSession` 复用 `DirectReadRpcAdapter`、`ClientHashRingSource`、`ClientUbTransportRegistry`。 | health key 必须按真实 worker address，而不是 `LOCAL_WORKER` slot；现有 data-plane switch/cutback 只负责切 local gateway，不能替代 UB path admission。 |
 | Client -> Worker Put/Set | `ClientWorkerBaseApi::SendBufferViaUb` / `SendBufferViaUbFromPool` 是 client 本端调用 `UrmaWritePayload` 的位置；`ClientWorkerRemoteApi::Publish/MultiPublish` 会在未完成 UB memory copy 时追加 TCP payload。 | client 是 coordinator + URMA operator，ERROR 4 可直接标记 target worker；Publish 前后要加 fallback policy，默认不通过 TCP payload 静默成功。 |
-| 传统 Client Get | `ClientWorkerRemoteApi::Get` 在 client 侧准备 UB receive buffer 并发 RPC，worker provider 写回；`ClientWorkerLocalApi::Get` 走 embedded worker service。 | client 不是 data provider；worker 才是 URMA operator。client 只能消费 `rsp.last_rc()` 的显式 URMA status 或 RPC failure，不能把 RPC timeout 推导成 ERROR 4。 |
-| 新 Client direct read | `DirectReadFlow::Get` 先走 `ClientHashRingSource` + `ClientQueryMetaTransport` 查 meta，再通过 `ObjectReadDataFlow` + `ClientRemoteDataTransport` 直接对 data worker 调 `GetObjectRemote/BatchGetObjectRemote`。`ClientUbTransportRegistry` 复用 worker-worker transport handshake。 | direct read 绕过本地 worker 代理数据面，但没有绕过 worker provider。client 在 data phase 前要 `CheckReadSource(dataWorker)`；provider 返回显式 UB 错误后 client 将该 data worker 标成当前 client 视角不可用。 |
-| Worker -> Worker remote get | `WorkerOcServiceGetImpl::PullObjectDataFromRemoteWorker` 构造 `GetObjectRemoteReqPb`，source worker 的 `WorkerWorkerOCServiceImpl::WriteViaFastTransport` 调 `UrmaWritePayload(req.urma_info())` 写回 requester。 | requester 是 coordinator，source worker 是 provider/operator。requester 发 RPC 前过滤 source，source 失败后必须显式返回 URMA status；RPC timeout 只算 RPC/peer suspect。 |
+| 传统 Client Get | `ClientWorkerRemoteApi::Get` 在 client 侧准备 UB receive buffer 并发 RPC，worker provider 写回；`ClientWorkerLocalApi::Get` 走 embedded worker service。 | 属于 `worker/client -> worker RemoteGet` 方向：client 发起 RemoteGet 类请求，worker provider 在处理逻辑中做 UB Write。client 只能消费 `rsp.last_rc()` 的显式 URMA status 或 RPC failure，不能把 RPC timeout 推导成 ERROR 4。 |
+| 新 Client direct read | `DirectReadFlow::Get` 先走 `ClientHashRingSource` + `ClientQueryMetaTransport` 查 meta，再通过 `ObjectReadDataFlow` + `ClientRemoteDataTransport` 直接对 data worker 调 `GetObjectRemote/BatchGetObjectRemote`。`ClientUbTransportRegistry` 复用 worker-worker transport handshake。 | 仍属于 RemoteGet 方向：direct read 绕过本地 worker 代理数据面，但没有绕过 worker provider。client 在 data phase 前要 `CheckReadSource(dataWorker)`；provider 返回显式 UB 错误后 client 将该 data worker 标成当前 client 视角不可用。 |
+| Worker -> Worker remote get | `WorkerOcServiceGetImpl::PullObjectDataFromRemoteWorker` 构造 `GetObjectRemoteReqPb`，source worker 的 `WorkerWorkerOCServiceImpl::WriteViaFastTransport` 调 `UrmaWritePayload(req.urma_info())` 写回 requester。 | 属于 RemoteGet 方向：requester 是 coordinator，source worker 是 provider/operator。requester 发 RPC 前过滤 source，source 失败后必须显式返回 URMA status；RPC timeout 只算 RPC/peer suspect。 |
 | Shared read data flow | direct read 分支新增 `ObjectReadRemoteDataClient` / `ObjectReadDataFlow`，通过 transport 注入远端取数能力，`ClientRemoteDataTransport` 实现 queue/commit/fetch。 | 最小改动可在 `ObjectReadRemoteDataClient` 的 transport 实现中接入 admission/ReportOutcome，避免为 direct read 另起一套读流程。 |
 
 ### 方案设计
