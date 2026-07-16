@@ -107,6 +107,14 @@ th { background: #f8fafc; font-size: 12px; }
       <a href="#evidence">3. 方案详细设计</a>
       <a class="nav-sub" href="#current">3.1 现状分析</a>
       <a class="nav-sub" href="#key-answers">3.2 方案设计</a>
+      <a class="nav-sub" href="#design-plan">3.2.1 核心模块</a>
+      <a class="nav-sub" href="#module-responsibility">3.2.2 职责拆分</a>
+      <a class="nav-sub" href="#interfaces">3.2.3 接口语义</a>
+      <a class="nav-sub" href="#deploy-design">3.2.4 最小改动点</a>
+      <a class="nav-sub" href="#runtime-design">3.2.5 运行接入点</a>
+      <a class="nav-sub" href="#usage-design">3.2.6 使用方式</a>
+      <a class="nav-sub" href="#code-view-design">3.2.7 关键时序</a>
+      <a class="nav-sub" href="#perf-design">3.2.8 高性能设计</a>
       <a class="nav-sub" href="#dryrun-design">3.3 Use Case DryRun</a>
       <a class="nav-sub" href="#oss">3.4 开源软件选型</a>
       <a class="nav-sub" href="#external">3.5 外部交互分析&&上下游依赖需求</a>
@@ -406,7 +414,7 @@ classDiagram
     UrmaManager --> UrmaResource : Jetty/JFC/Event
           </div>
         </div>
-        <h3 id="module-responsibility">3.2.2 构建单元与职责拆分</h3>
+        <h3 id="module-responsibility">3.2.2 职责拆分</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">发起端：Requester / URMA Writer</div>
@@ -517,7 +525,7 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h3 id="usage-design">3.2.6 元戎整体如何使用</h3>
+        <h3 id="usage-design">3.2.6 使用方式</h3>
         <ul>
           <li>业务使用方式不变；UB 故障隔离作为 client/worker 内部准入和错误返回能力生效。</li>
           <li>client->worker 写入失败后，恢复前同一 target worker 的写入快速失败。</li>
@@ -570,7 +578,7 @@ stateDiagram-v2
     AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
           </div>
         </div>
-        <h3 id="perf-design">3.2.8 高性能设计 topic</h3>
+        <h3 id="perf-design">3.2.8 高性能设计</h3>
         <ul>
           <li>准入判断必须是进程内 O(1) 读本地状态，不能在普通 Put/Get/RemoteGet 关键路径上同步访问外部服务。</li>
           <li>失败后同一 worker/source 的 batch remote get 要按 worker 分组 fail fast，避免 batch 内每个对象重复等待超时。</li>
