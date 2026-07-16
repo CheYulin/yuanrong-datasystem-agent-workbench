@@ -1154,7 +1154,7 @@ sequenceDiagram
     autonumber
     participant C as Client
     participant F as DirectReadFlow
-    participant M as Meta Worker/Master
+    participant M as "Meta Worker/Master"
     participant A as TransportPathAdmission
     participant T as ClientRemoteDataTransport
     participant W as Data Worker Provider
@@ -1198,6 +1198,7 @@ sequenceDiagram
       deactivate W
       deactivate T
       end
+    end
     end
     deactivate A
     deactivate F
