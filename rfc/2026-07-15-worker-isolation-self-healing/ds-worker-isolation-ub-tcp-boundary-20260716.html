@@ -89,7 +89,7 @@ th { background: #f8fafc; font-size: 12px; }
 <div class="page">
   <header class="top">
     <h1>DataSystem UB 故障隔离设计</h1>
-    <p>Ground Truth：main/master <code>69ec60b41</code> · CodeGraph v0.9.7 已同步：12,608 files / 299,132 nodes / 867,672 edges；输入：UB 数据面隔离 RFC、当前 client-worker / worker-worker RemoteGet / migrate / rebalance / rdma 代码。</p>
+    <p>面向开发与测试的正式 Story 设计：定义 UB 数据面故障的隔离、恢复、准入和自验证边界，避免单边写失败演化为持续静默成功率下降。</p>
     <div class="meta-line">
       <span class="pill">目标：避免静默 UB 故障持续降低成功率</span>
       <span class="pill">默认：故障 Worker 不再写入或迁移</span>
@@ -101,9 +101,8 @@ th { background: #f8fafc; font-size: 12px; }
   <div class="layout">
     <nav class="nav">
       <div class="nav-title">专题目录</div>
-      <a href="#scope">1. 总览</a>
-      <a class="nav-sub" href="#scope-ground">1.1 代码校验输入</a>
-      <a class="nav-sub" href="#scope-summary">1.2 功能目标与边界</a>
+      <a href="#scope">1. 上下文与问题</a>
+      <a class="nav-sub" href="#scope-summary">1.1 功能目标与边界</a>
       <a href="#terms">2. 术语与状态边界</a>
       <a class="nav-sub" href="#state-model">2.1 全局事实与局部观测</a>
       <a class="nav-sub" href="#ownership">2.2 Meta/Layout 与 Data Local</a>
@@ -114,28 +113,26 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub" href="#flow-remote-get">3.3 RemoteGet 写回</a>
       <a class="nav-sub" href="#flow-migrate">3.4 迁移与 Rebalance</a>
       <a class="nav-sub" href="#flow-recovery">3.5 UB 恢复</a>
-      <a href="#evidence">4. 源码确认</a>
-      <a class="nav-sub" href="#key-answers">4.1 关键问题回答</a>
-      <a class="nav-sub" href="#current-analysis">4.2 CodeGraph 结论</a>
-      <a href="#modules">5. 机制设计</a>
-      <a class="nav-sub" href="#design-plan">5.1 核心模块</a>
-      <a class="nav-sub" href="#module-responsibility">5.2 职责拆分</a>
-      <a href="#implementation">6. 关键时序与准入矩阵</a>
-      <a class="nav-sub" href="#deploy-design">6.1 最小改动点</a>
-      <a class="nav-sub" href="#runtime-design">6.2 运行接入点</a>
-      <a class="nav-sub" href="#usage-design">6.3 元戎整体如何使用</a>
-      <a class="nav-sub" href="#dryrun-design">6.4 DryRun Cases</a>
-      <a class="nav-sub" href="#code-view-design">6.5 生命周期时序</a>
-      <a class="nav-sub" href="#perf-design">6.6 高性能设计 topic</a>
-      <a href="#stories">7. Cases 覆盖与自验证</a>
-      <a class="nav-sub" href="#verify-cases">7.1 验收用例</a>
-      <a href="#open">8. 风险与待确认策略</a>
-      <a href="#appendix-code">附录 A：详细代码锚点</a>
+      <a href="#evidence">4. 方案设计</a>
+      <a class="nav-sub" href="#key-answers">4.1 关键设计点</a>
+      <a class="nav-sub" href="#design-plan">4.2 核心模块</a>
+      <a class="nav-sub" href="#module-responsibility">4.3 职责拆分</a>
+      <a class="nav-sub" href="#interfaces">4.4 接口语义</a>
+      <a class="nav-sub" href="#deploy-design">4.5 最小改动点</a>
+      <a class="nav-sub" href="#runtime-design">4.6 运行接入点</a>
+      <a class="nav-sub" href="#usage-design">4.7 元戎整体如何使用</a>
+      <a class="nav-sub" href="#code-view-design">4.8 关键时序</a>
+      <a class="nav-sub" href="#perf-design">4.9 高性能设计 topic</a>
+      <a class="nav-sub" href="#dryrun-design">4.10 DryRun Cases</a>
+      <a href="#stories">5. Cases 覆盖与自验证</a>
+      <a class="nav-sub" href="#verify-cases">5.1 验收用例</a>
+      <a href="#open">6. 风险与待确认策略</a>
+      <a href="#appendix-code">附录 A：源码确认与详细代码锚点</a>
     </nav>
 
     <main class="content">
       <section id="scope" class="section">
-        <h2>1. 总览</h2>
+        <h2>1. 上下文与问题</h2>
         <p>UB 端口或路径故障后，业务可能表现为成功率下降、批量请求局部超时、迁移任务反复失败，而不是明确告诉调用方“数据所在 Worker 的 UB 数据面不可用”。本需求的核心目标是避免静默故障：故障 Worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 Worker 时快速返回可识别错误。</p>
         <div class="grid-2">
           <div class="card">
@@ -155,17 +152,7 @@ th { background: #f8fafc; font-size: 12px; }
             <p>UB 隔离只处理数据面 eligibility，不把局部 UB 故障直接升级成 Worker 全局 DOWN；membership、slot、primary、迁移任务仍由 Global Fact 维护。</p>
           </div>
         </div>
-        <h3 id="scope-ground">1.1 代码校验输入</h3>
-        <div class="grid">
-          <div class="metric"><div class="n">69ec60b41</div><div class="l">datasystem 当前校验提交</div></div>
-          <div class="metric"><div class="n">12,608</div><div class="l">CodeGraph 文件数</div></div>
-          <div class="metric"><div class="n">299,132</div><div class="l">CodeGraph 节点数</div></div>
-          <div class="metric"><div class="n">867,672</div><div class="l">CodeGraph 边数</div></div>
-        </div>
-        <div class="note">
-          本页的结论以 CodeGraph 命中的当前源码为准：Client Put 的 UB write 在 client 发起；Worker/Client RemoteGet 请求里的 UB write 在数据 provider worker 端发起；Rebalance/Migrate 是 worker-worker RPC 后的数据迁移。本文只聚焦 UB 故障隔离，不展开 worker 故障自愈。
-        </div>
-        <h3 id="scope-summary">1.2 功能目标与边界</h3>
+        <h3 id="scope-summary">1.1 功能目标与边界</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">成功标准</div>
@@ -373,9 +360,9 @@ sequenceDiagram
       </section>
 
       <section id="evidence" class="section">
-        <h2>4. 源码确认</h2>
-        <p>本节回答设计中的关键归因问题，并把当前源码里可插入的观测点、准入点和恢复点收敛成实现约束。详细文件/函数锚点见附录 A。</p>
-        <h3 id="key-answers">4.1 关键问题回答</h3>
+        <h2>4. 方案设计</h2>
+        <p>方案的核心不是把 UB 故障升级成 worker 全局故障，而是在每个发起请求的 client/worker 本地建立数据面准入：不通就快速失败，恢复前不继续写入或迁移；恢复必须由 probe 或健康 epoch 证据确认，不能靠业务请求反复试错。</p>
+        <h3 id="key-answers">4.1 关键设计点</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">发起端如何感知目的端 Worker UB 故障</div>
@@ -401,14 +388,11 @@ sequenceDiagram
         <div class="note warn">
           结论：第一层必须是发起端局部感知和本地准入，保证 Put/Get/RemoteGet/migrate/rebalance 立即止血；第二层才是轻量全局摘要和保活探测，用于恢复和减少其他节点继续撞同一故障 Worker。持续故障必须指数退避，避免 probe 或重试流量放大。
         </div>
-        <h3 id="current-analysis">4.2 CodeGraph 结论</h3>
-        <p>当前代码已经有明确的 UB 失败观测点，但观测分散在 client 写、provider 写回、direct read transport、migration/rebalance 目标选择等路径。风险不是“完全没有错误码”，而是错误没有形成统一的下一次准入决策，导致 fallback、retry 或 batch 内重复请求继续撞同一条坏 UB 路径。</p>
       </section>
 
       <section id="modules" class="section">
-        <h2>5. 机制设计</h2>
-        <h3 id="design-plan">5.1 核心模块</h3>
-        <h4 id="class-diagram">代码关键类图</h4>
+        <h3 id="design-plan">4.2 核心模块</h3>
+        <h4 id="class-diagram">设计类图</h4>
         <div class="diagram">
           <div class="diagram-title">最小新增抽象与现有模块协同</div>
           <div class="mermaid">
@@ -497,7 +481,7 @@ classDiagram
     UrmaManager --> UrmaResource : Jetty/JFC/Event
           </div>
         </div>
-        <h4 id="module-responsibility">构建单元与职责拆分</h4>
+        <h3 id="module-responsibility">4.3 构建单元与职责拆分</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">发起端：Requester / URMA Writer</div>
@@ -529,7 +513,7 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h4 id="interfaces">接口草案</h4>
+        <h3 id="interfaces">4.4 接口语义</h3>
         <div class="table-wrap">
           <table>
             <caption>关键接口和语义</caption>
@@ -549,30 +533,15 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <div class="table-wrap">
-          <table>
-            <caption>现有代码接入点</caption>
-            <thead><tr><th>路径</th><th>新增调用</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr><td><code>ClientWorkerBaseApi::SendBufferViaUb*</code></td><td><code>CheckWriteTarget</code> + <code>ReportOutcome</code></td><td>Client 自己发起 URMA write，ERROR 4 直接标记 target worker。</td></tr>
-              <tr><td><code>GetRequest::UbWriteHelper</code></td><td><code>CheckReceiverEndpoint</code> + <code>ReportOutcome</code></td><td>Worker Provider 写回 client；client 只消费显式 response/status。</td></tr>
-              <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code></td><td><code>CheckReceiverEndpoint</code> + <code>UbFallbackPolicy</code></td><td>Worker Provider 写回 requester worker；RPC timeout 不能合成 ERROR 4。</td></tr>
-              <tr><td><code>PullObjectDataFromRemoteWorker</code></td><td><code>CheckReadSource</code></td><td>Requester worker 构造 remote get 前过滤 source。</td></tr>
-              <tr><td><code>DataMigrator::ConnectAndCreateRemoteApi</code></td><td><code>CheckMigrationTarget</code></td><td>迁移目标二次准入，避免任务撞坏 target。</td></tr>
-              <tr><td><code>RebalanceExecutor::MigrateToTarget</code></td><td><code>CheckMigrationTarget</code></td><td>处理 stale task：执行前再查一次 target UB path。</td></tr>
-            </tbody>
-          </table>
-        </div>
       </section>
 
       <section id="implementation" class="section">
-        <h2>6. 关键时序与准入矩阵</h2>
-        <h3 id="deploy-design">6.1 最小改动点</h3>
+        <h3 id="deploy-design">4.5 最小改动点</h3>
         <div class="grid-2">
           <div class="card"><div class="card-title">不新增进程</div><p>不改变 SDK 对外 API；新增逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
           <div class="card"><div class="card-title">默认策略</div><p>UB fallback 默认关闭；显式开启时仅允许 <= 1MB 的普通读写 fallback，不覆盖 migration / rebalance。</p></div>
         </div>
-        <h3 id="runtime-design">6.2 运行接入点</h3>
+        <h3 id="runtime-design">4.6 运行接入点</h3>
         <h4>运行期最小修改点</h4>
         <div class="grid-2">
           <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
@@ -583,10 +552,10 @@ classDiagram
         </div>
         <h4>运行路径接入点</h4>
         <ul>
-          <li><span class="badge b-blue">Client</span>在 <code>SendBufferViaUb*</code> 前检查目标；失败后标记目标 UB path unavailable，并返回显式错误。</li>
-          <li><span class="badge b-green">Provider Worker</span>在 <code>WriteViaFastTransport</code> 失败后标记 requester UB path，并把显式 URMA operator status 放进 response。</li>
-          <li><span class="badge b-violet">Requester Worker</span>在 <code>PullObjectDataFromRemoteWorker</code> 收到显式 UB unavailable 时快速失败或换副本；若只是 RPC timeout/failure，则按 provider/RPC suspect 处理，不当成对象缺失或本端 ERROR 4。</li>
-          <li><span class="badge b-amber">Migration</span>在 <code>ConnectAndCreateRemoteApi</code> 或更上层目标选择前检查 migration target。</li>
+          <li><span class="badge b-blue">Client</span>在本端 UB 写入前检查目标；失败后标记目标 UB path unavailable，并返回显式错误。</li>
+          <li><span class="badge b-green">Provider Worker</span>在写回 requester/client 失败后标记对端 UB path，并把显式 URMA operator status 放进 response。</li>
+          <li><span class="badge b-violet">Requester Worker</span>在收到显式 UB unavailable 时快速失败或换副本；若只是 RPC timeout/failure，则按 provider/RPC suspect 处理，不当成对象缺失或本端 ERROR 4。</li>
+          <li><span class="badge b-amber">Migration</span>在目标选择和执行前检查 migration target，避免 stale task 继续向 UB 不可写 Worker 迁移。</li>
           <li><span class="badge b-blue">Heartbeat</span>worker 把本地 UB health epoch/reason/backoff 放进 master heartbeat <code>extend</code> 或 client-worker heartbeat response；接收方只更新 peer admission，不修改 membership。</li>
           <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
         </ul>
@@ -612,18 +581,18 @@ classDiagram
         <div class="table-wrap">
           <table>
             <caption>第 3 章场景到运行接入点映射</caption>
-            <thead><tr><th>场景</th><th>运行接入点</th><th>说明</th></tr></thead>
+            <thead><tr><th>场景</th><th>运行入口</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td>Client Put/Set</td><td><code>ClientWorkerBaseApi::SendBufferViaUb*</code></td><td>写前查 Global Fact + PeerUbAdmission；ERROR 4 后本地隔离目标。</td></tr>
-              <tr><td>传统 Client Get / Direct read</td><td><code>GetRequest::UbWriteHelper</code>、direct read data transport</td><td>provider 返回显式 UB status；batch 按 data worker 分组 fail fast。</td></tr>
-              <tr><td>Worker remote get / BatchGetObjectRemote</td><td><code>PullObjectDataFromRemoteWorker</code>、<code>WriteViaFastTransport</code></td><td>requester 查 source；provider 查 receiver；RPC timeout 只标记 suspect。</td></tr>
-              <tr><td>Migrate / Move / Rebalance</td><td><code>DataMigrator</code>、<code>RebalanceExecutor</code>、NodeSelector</td><td>target 从 Global Fact 来，但执行前叠加 UB target admission。</td></tr>
+              <tr><td>Client Put/Set</td><td>client 本端 UB writer</td><td>写前查 Global Fact + PeerUbAdmission；ERROR 4 后本地隔离目标。</td></tr>
+              <tr><td>传统 Client Get / Direct read</td><td>provider worker 写回 client</td><td>provider 返回显式 UB status；batch 按 data worker 分组 fail fast。</td></tr>
+              <tr><td>Worker remote get / BatchGetObjectRemote</td><td>requester worker 发 RPC，provider worker 写回</td><td>requester 查 source；provider 查 receiver；RPC timeout 只标记 suspect。</td></tr>
+              <tr><td>Migrate / Move / Rebalance</td><td>迁移目标选择与执行入口</td><td>target 从 Global Fact 来，但执行前叠加 UB target admission。</td></tr>
               <tr><td>扩缩容与恢复</td><td>worker heartbeat summary、probe、service mode</td><td>scale-up 先 PROBING；scale-down/exiting 直接拒绝；恢复要 probe 成功且 Global Fact 允许。</td></tr>
               <tr><td>目的端自身 UB 故障</td><td><code>LocalUbHealth</code> + <code>UbHealthGossip</code></td><td>只传播本 worker 自身摘要，避免千级节点全量矩阵心跳。</td></tr>
             </tbody>
           </table>
         </div>
-        <h3 id="usage-design">6.3 元戎整体如何使用</h3>
+        <h3 id="usage-design">4.7 元戎整体如何使用</h3>
         <ul>
           <li>业务使用方式不变；UB 故障隔离作为 client/worker 内部准入和错误返回能力生效。</li>
           <li>client->worker 写入失败后，恢复前同一 target worker 的写入快速失败。</li>
@@ -632,22 +601,7 @@ classDiagram
           <li>扩容 worker 在 UB probe 成功前不承接 UB 写入/迁移；缩容或故障 worker 在 service/ring 已不可写时直接拒绝作为 target。</li>
           <li>心跳摘要用于传播“本 worker UB 数据面是否可写”，但不把局部 UB 故障升级为 worker DOWN。</li>
         </ul>
-        <h3 id="dryrun-design">6.4 DryRun Cases</h3>
-        <div class="table-wrap">
-          <table>
-            <caption>上线前 DryRun 验证</caption>
-            <thead><tr><th>Case</th><th>DryRun 注入/观察</th><th>期望决策</th><th>验收信号</th></tr></thead>
-            <tbody>
-              <tr><td>Client Put 目标 Worker ERROR 4</td><td>在 client UB write 返回处注入 ERROR 4，不改 Global Fact。</td><td>只隔离该 client 对目标 worker 的 UB 写入；不把 worker 标成 DOWN。</td><td>下一次写同 target fail fast，日志包含 target、reason、epoch。</td></tr>
-              <tr><td>RemoteGet provider 写 requester 失败</td><td>在 provider <code>WriteViaFastTransport</code> 注入 URMA error，并通过 RPC response 返回结构化状态。</td><td>requester 消费显式 status；RPC timeout 不合成 ERROR 4。</td><td>response 区分 failed_endpoint、operator_worker、urma_status。</td></tr>
-              <tr><td>Direct read batch 命中故障 data worker</td><td>构造 batch 中多个 object 均在同一 data worker，预置该 worker peer admission unavailable。</td><td>按 data worker 分组后整组 fail fast 或换源，不逐对象等待。</td><td>batch 日志只有一次 target rejected；无 N 次 timeout。</td></tr>
-              <tr><td>Migrate/Rebalance stale target</td><td>Global Fact 里 target 仍来自 task，但本地 UB admission 为 unavailable。</td><td>执行前拒绝该 target，可失败或触发重选；不发送数据。</td><td>task 记录 target rejected，migrated bytes 为 0。</td></tr>
-              <tr><td>千级节点心跳摘要</td><td>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。</td><td>master 侧保持 O(N) 摘要；client/worker 按需消费候选相关状态。</td><td>heartbeat payload 与 worker 数线性相关，普通 Put/Get 不同步访问 master。</td></tr>
-              <tr><td>持续 ERROR 9</td><td>连续注入 CQE status 9，观察 Jetty recreate 与 probe backoff。</td><td>先 SUSPECT/PROBING，超过阈值后 UNAVAILABLE，probe 指数退避。</td><td>backoff level 增长，故障 target 业务流量下降。</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <h3 id="code-view-design">6.5 核心模块与生命周期时序</h3>
+        <h3 id="code-view-design">4.8 关键时序</h3>
         <p>核心时序只画跨组件生命周期，便于开发和测试对齐故障发现、隔离传播、恢复放开的边界。具体函数调用和源码入口放在附录 A，避免把 sequence diagram 画成函数栈。</p>
         <div class="table-wrap">
           <table>
@@ -745,7 +699,7 @@ stateDiagram-v2
     AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
           </div>
         </div>
-        <h3 id="perf-design">6.6 高性能设计 topic</h3>
+        <h3 id="perf-design">4.9 高性能设计 topic</h3>
         <ul>
           <li>准入判断必须是进程内 O(1) 读本地状态，不能在普通 Put/Get/RemoteGet 关键路径上同步访问外部服务。</li>
           <li>失败后同一 worker/source 的 batch remote get 要按 worker 分组 fail fast，避免 batch 内每个对象重复等待超时。</li>
@@ -753,10 +707,25 @@ stateDiagram-v2
           <li>持续故障按指数退避控制 probe 和重试频率，避免所有 client/worker 同时把故障 worker 打满。</li>
           <li>fallback 默认关闭；即使开启，也只对小对象生效，并且 fallback 成功不清除 UB health。</li>
         </ul>
+        <h3 id="dryrun-design">4.10 DryRun Cases</h3>
+        <div class="table-wrap">
+          <table>
+            <caption>上线前 DryRun 验证</caption>
+            <thead><tr><th>Case</th><th>DryRun 注入/观察</th><th>期望决策</th><th>验收信号</th></tr></thead>
+            <tbody>
+              <tr><td>Client Put 目标 Worker ERROR 4</td><td>在 client UB write 返回处注入 ERROR 4，不改 Global Fact。</td><td>只隔离该 client 对目标 worker 的 UB 写入；不把 worker 标成 DOWN。</td><td>下一次写同 target fail fast，日志包含 target、reason、epoch。</td></tr>
+              <tr><td>RemoteGet provider 写 requester 失败</td><td>在 provider <code>WriteViaFastTransport</code> 注入 URMA error，并通过 RPC response 返回结构化状态。</td><td>requester 消费显式 status；RPC timeout 不合成 ERROR 4。</td><td>response 区分 failed_endpoint、operator_worker、urma_status。</td></tr>
+              <tr><td>Direct read batch 命中故障 data worker</td><td>构造 batch 中多个 object 均在同一 data worker，预置该 worker peer admission unavailable。</td><td>按 data worker 分组后整组 fail fast 或换源，不逐对象等待。</td><td>batch 日志只有一次 target rejected；无 N 次 timeout。</td></tr>
+              <tr><td>Migrate/Rebalance stale target</td><td>Global Fact 里 target 仍来自 task，但本地 UB admission 为 unavailable。</td><td>执行前拒绝该 target，可失败或触发重选；不发送数据。</td><td>task 记录 target rejected，migrated bytes 为 0。</td></tr>
+              <tr><td>千级节点心跳摘要</td><td>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。</td><td>master 侧保持 O(N) 摘要；client/worker 按需消费候选相关状态。</td><td>heartbeat payload 与 worker 数线性相关，普通 Put/Get 不同步访问 master。</td></tr>
+              <tr><td>持续 ERROR 9</td><td>连续注入 CQE status 9，观察 Jetty recreate 与 probe backoff。</td><td>先 SUSPECT/PROBING，超过阈值后 UNAVAILABLE，probe 指数退避。</td><td>backoff level 增长，故障 target 业务流量下降。</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section id="stories" class="section">
-        <h2>7. Cases 覆盖与自验证</h2>
+        <h2>5. Cases 覆盖与自验证</h2>
         <p>自验证用例按新增代码分支反推，要求每个分支都能通过可注入的错误、可断言的状态迁移和可观测日志/metric 覆盖。业务级验收用例用于串联端到端场景，分支覆盖矩阵用于指导 UT/ST 补点。</p>
         <div class="table-wrap">
           <table>
@@ -780,7 +749,7 @@ stateDiagram-v2
             </tbody>
           </table>
         </div>
-        <h3 id="verify-cases">7.1 验收用例</h3>
+        <h3 id="verify-cases">5.1 验收用例</h3>
         <div class="table-wrap">
           <table>
             <caption>验收用例</caption>
@@ -801,7 +770,7 @@ stateDiagram-v2
       </section>
 
       <section id="open" class="section">
-        <h2>8. 风险与待确认策略</h2>
+        <h2>6. 风险与待确认策略</h2>
         <ul>
           <li>错误码命名：建议放在 OC/URMA 交界处，保留 provider UB unavailable 与 requester UB unavailable 两类语义。</li>
           <li>恢复 probe 的实现：优先复用现有 handshake / warmup / small URMA write；心跳只传播摘要和 epoch，不承担数据面 probe。</li>
@@ -813,8 +782,8 @@ stateDiagram-v2
         </div>
       </section>
       <section id="appendix-code" class="section">
-        <h2>附录 A：详细代码锚点</h2>
-        <p>以下内容是方案设计的代码依据，用于评审时追溯当前 client-worker、worker-worker RemoteGet、direct read、migration/rebalance 与 URMA 资源恢复的接入点。</p>
+        <h2>附录 A：源码确认与详细代码锚点</h2>
+        <p>以下内容是方案设计的代码依据。CodeGraph v0.9.7 在 main/master <code>69ec60b41</code> 上同步 12,608 files / 299,132 nodes / 867,672 edges；用于追溯当前 client-worker、worker-worker RemoteGet、direct read、migration/rebalance 与 URMA 资源恢复的接入点。</p>
         <div class="table-wrap">
           <table>
             <caption>CodeGraph 与源码证据</caption>
