@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DataSystem UB 数据面隔离与 TCP 自愈边界设计</title>
+<title>DataSystem UB 故障隔离设计</title>
 <link rel="stylesheet" href="/assets/css/site.css">
 <script src="/design/mermaid.min.js" defer></script>
 <style>
@@ -86,8 +86,8 @@ th { background: #f8fafc; font-size: 12px; }
 <body>
 <div class="page">
   <header class="top">
-    <h1>DataSystem UB 数据面隔离与 TCP 自愈边界设计</h1>
-    <p>Ground Truth：main/master <code>69ec60b41</code> · CodeGraph v0.9.7 已同步：12,608 files / 299,132 nodes / 867,672 edges；输入：UB 数据面隔离 RFC、Worker 自愈 RFC、当前 client-worker / worker-worker / migrate / rebalance / rdma 代码。</p>
+    <h1>DataSystem UB 故障隔离设计</h1>
+    <p>Ground Truth：main/master <code>69ec60b41</code> · CodeGraph v0.9.7 已同步：12,608 files / 299,132 nodes / 867,672 edges；输入：UB 数据面隔离 RFC、当前 client-worker / worker-worker RemoteGet / migrate / rebalance / rdma 代码。</p>
     <div class="meta-line">
       <span class="pill">目标：避免静默 UB 故障持续降低成功率</span>
       <span class="pill">默认：故障 Worker 不再写入或迁移</span>
@@ -107,8 +107,7 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub" href="#flow-client-put">2.1 Client 写入</a>
       <a class="nav-sub" href="#flow-remote-get">2.2 RemoteGet 写回</a>
       <a class="nav-sub" href="#flow-migrate">2.3 迁移与 Rebalance</a>
-      <a class="nav-sub" href="#flow-tcp">2.4 TCP 自愈边界</a>
-      <a class="nav-sub" href="#flow-recovery">2.5 UB 恢复</a>
+      <a class="nav-sub" href="#flow-recovery">2.4 UB 恢复</a>
       <a href="#modules">3. 方案详细设计</a>
       <a class="nav-sub" href="#class-diagram">3.1 类图</a>
       <a class="nav-sub" href="#module-responsibility">3.2 职责拆分</a>
@@ -132,7 +131,7 @@ th { background: #f8fafc; font-size: 12px; }
               <tr><th>When</th><td>client->worker Put/Set 写入失败、worker/client->worker RemoteGet 请求触发 provider UB Write 失败、migration/rebalance target UB 不可写、UB 恢复探测成功或失败时生效。</td></tr>
               <tr><th>Where</th><td>Client 侧 <code>ObjectClientImpl</code>、<code>ClientWorkerBaseApi</code>、<code>ClientWorkerRemoteApi</code>、direct read transport；Worker 侧 Get/RemoteGet provider writeback、DataMigrator、NodeSelector、RebalanceExecutor；恢复侧复用 URMA handshake/warmup/small transfer。</td></tr>
               <tr><th>How</th><td>新增轻量 <code>WorkerUbPathHealth</code> 和 <code>TransportPathAdmission</code>。发起 URMA Write 的一端用显式 ERROR 4/URMA status 上报，coordinator 在写入、RemoteGet source、migration target 前做准入；fallback 默认关闭，开启时只允许小对象并保留降级观测。</td></tr>
-              <tr><th>What happen</th><td>影响 client->worker 写入、传统 Client Get、Client direct read、worker-worker remote get、batch remote get、migration/rebalance 与 UB recovery probe；不改变 TCP/etcd membership 自愈边界，不把局部 UB 故障直接升级为 worker 全局 DOWN。</td></tr>
+              <tr><th>What happen</th><td>影响 client->worker 写入、传统 Client Get、Client direct read、worker-worker remote get、batch remote get、migration/rebalance 与 UB recovery probe；不改变现有 membership/rpc health 机制，不把局部 UB 故障直接升级为 worker 全局 DOWN。</td></tr>
               <tr><th>Experience</th><td>UB 故障后用户得到明确错误和快速失败，写入/迁移不再持续撞坏 worker；UB 恢复后由 probe 平稳重新开放，切流过程不依赖真实业务请求反复试错。</td></tr>
             </tbody>
           </table>
@@ -144,7 +143,7 @@ th { background: #f8fafc; font-size: 12px; }
           <div class="metric"><div class="n">867,672</div><div class="l">CodeGraph 边数</div></div>
         </div>
         <div class="note">
-          本页的结论以 CodeGraph 命中的当前源码为准：Client Put 的 UB write 在 client 发起；Worker remote get 的 UB write 在数据 provider 端发起；Rebalance/Migrate 是 worker-worker RPC 后的数据迁移；TCP 故障隔离/恢复已有 etcd keepalive、HashRing、ClusterManager 的局部自愈链路。
+          本页的结论以 CodeGraph 命中的当前源码为准：Client Put 的 UB write 在 client 发起；Worker/Client RemoteGet 请求里的 UB write 在数据 provider worker 端发起；Rebalance/Migrate 是 worker-worker RPC 后的数据迁移。本文只聚焦 UB 故障隔离，不展开 worker 故障自愈。
         </div>
         <h3 id="scope-summary">1.2 功能目标与边界</h3>
         <div class="grid-2">
@@ -161,8 +160,8 @@ th { background: #f8fafc; font-size: 12px; }
             <p>这里的隔离不是把节点从集群摘除，而是对“向某 Worker 发生 UB 写入/迁移”的数据面准入关闸。读请求命中故障数据所在 Worker 时快速返回可识别错误。</p>
           </div>
           <div class="card">
-            <div class="card-title">TCP 边界</div>
-            <p>TCP/etcd 继续负责服务级网络断链、节点自愈、元数据/slot/ownership 恢复；UB 隔离只处理数据面路径，不能把局部 UB 观测直接提升成全局 DOWN。</p>
+            <div class="card-title">非目标边界</div>
+            <p>UB 隔离只处理数据面路径 eligibility；服务级网络断链、节点自愈、元数据/slot/ownership 恢复仍由现有机制处理，不在本文展开。</p>
           </div>
         </div>
       </section>
@@ -213,7 +212,6 @@ th { background: #f8fafc; font-size: 12px; }
               <tr><td>Worker Provider -> Client 写回失败</td><td>Provider worker 发起 URMA write，只有 Provider 直接看到 completion/error</td><td>Provider 通过 RPC response/status 返回显式 URMA 错误；Client 快速失败或换源</td><td>把 RPC timeout 直接伪装成 Client 本端收到 ERROR 4；把对象当作不存在</td></tr>
               <tr><td>Worker Provider -> Worker 写回失败</td><td>Provider worker 发起 URMA write，Requester 只通过自己发起的 RPC 结果间接感知</td><td>显式 ERROR 4 返回时，Requester 才标记自身 receive path 不可用；RPC timeout/failure 只按 provider/RPC suspect 处理</td><td>继续向同一不可达 Worker 迁移或写入；把弱 RPC 信号升级成 UB port 硬故障</td></tr>
               <tr><td>Migration/Rebalance 目标 UB 故障</td><td>源 Worker 或迁移执行端</td><td>目标准入拒绝，任务失败或重选目标</td><td>把数据迁移到无法接收 UB 写的 Worker</td></tr>
-              <tr><td>TCP/etcd 断链</td><td>Worker 本地 keepalive 与集群事件</td><td>服务级隔离、自愈、metadata reconciliation</td><td>由 UB 局部观测直接驱动 ring 变更</td></tr>
             </tbody>
           </table>
         </div>
@@ -290,28 +288,9 @@ sequenceDiagram
     end
           </div>
         </div>
-        <h3 id="flow-tcp">2.4 TCP / etcd 自愈边界</h3>
+        <h3 id="flow-recovery">2.4 UB 恢复：探测成功后重新开放写入</h3>
         <div class="diagram">
-          <div class="diagram-title">TCP 自愈继续负责服务级隔离与恢复</div>
-          <div class="mermaid">
-sequenceDiagram
-    participant E as Etcd KeepAlive
-    participant C as ClusterManager
-    participant H as HashRing
-    participant S as WorkerServiceMode
-    participant R as Recovery Orchestrator
-    E--xC: keepalive timeout confirmed
-    C->>H: fake delete / ring event
-    H->>S: LOCAL_ISOLATED or FAIL path
-    S-->>R: block normal writes/migration
-    C->>R: ProcessNetworkRecovery
-    R->>H: RecoverMigrationTask
-    R->>S: RECOVERING -> RUNNING after reconciliation
-          </div>
-        </div>
-        <h3 id="flow-recovery">2.5 UB 恢复：探测成功后重新开放写入</h3>
-        <div class="diagram">
-          <div class="diagram-title">UB 恢复只恢复数据面准入，不替代 TCP membership</div>
+          <div class="diagram-title">UB 恢复只恢复数据面准入</div>
           <div class="mermaid">
 sequenceDiagram
     participant O as WorkerUbPathHealth
@@ -386,14 +365,6 @@ classDiagram
       +ReCreateJetty()
       +RegisterJetty()
     }
-    class ClusterManager {
-      +ProcessNetworkRecovery()
-      +CheckConnection()
-    }
-    class HashRing {
-      +UpdateLocalState()
-      +NeedToTryRemoveWorker()
-    }
     TransportPathAdmission --> WorkerServiceMode
     TransportPathAdmission --> WorkerUbPathHealth
     TransportPathAdmission --> UbFallbackPolicy
@@ -402,8 +373,6 @@ classDiagram
     UbRecoveryProbe --> WorkerUbPathHealth
     UrmaManager ..> UbOpOutcome : explicit operator status
     UrmaManager --> UrmaResource : Jetty/JFC/Event
-    TransportPathAdmission ..> ClusterManager : service/rpc state
-    ClusterManager --> HashRing : membership/recovery
           </div>
         </div>
         <h3 id="module-responsibility">3.2 职责拆分</h3>
@@ -418,7 +387,7 @@ classDiagram
           </div>
           <div class="card">
             <div class="card-title">服务级状态</div>
-            <p><code>WorkerServiceMode</code> 只表达服务是否能参加集群读写、迁移和元数据恢复，复用 TCP/etcd 自愈链路，不和 UB 路径状态混在一起。</p>
+            <p><code>WorkerServiceMode</code> 只作为已有服务态输入。本文不设计 worker 自愈，只要求 UB admission 不把局部 UB 观测改写为全局 worker DOWN。</p>
           </div>
           <div class="card">
             <div class="card-title">数据面准入</div>
@@ -490,8 +459,6 @@ classDiagram
               <tr><td><code>WorkerWorkerOCServiceImpl::WriteViaFastTransport</code><br><span class="src">worker_worker_oc_service_impl.cpp:590-638</span></td><td>Provider 端调用 <code>UrmaWritePayload(req.urma_info())</code>，失败时目前受 <code>FLAGS_enable_transport_fallback</code> 控制。</td><td>Provider 作为 URMA Operator 要把 requester 的 UB 写失败显式返回；fallback 默认关闭，小对象 opt-in。</td></tr>
               <tr><td><code>DataMigrator::ConnectAndCreateRemoteApi</code><br><span class="src">data_migrator.cpp:394-408</span></td><td>迁移前只检查 worker 连接并创建 remote API。</td><td>在 <code>CheckConnection</code> 后叠加 <code>CheckMigrationTarget</code>，拒绝 UB 不可写目标。</td></tr>
               <tr><td><code>RebalanceExecutor::MigrateToTarget</code><br><span class="src">rebalance_executor.cpp:160-172</span></td><td>Rebalance 最终调用 <code>MigrateToTargetNode(...).get()</code>。</td><td>目标选择或执行前统一复用迁移准入，避免 task 把数据派到隔离目标。</td></tr>
-              <tr><td><code>EtcdStore::LaunchKeepAliveThreads</code><br><span class="src">etcd_store.cpp:531-610</span></td><td>etcd keepalive 失败后会确认网络故障、生成 fake delete，超时可触发 kill。</td><td>这是 TCP 服务级自愈边界；UB 隔离不替代它。</td></tr>
-              <tr><td><code>ClusterManager::ProcessNetworkRecovery</code><br><span class="src">cluster_manager.cpp:752-773</span></td><td>网络恢复后触发 worker recovery event、恢复迁移任务或请求 metadata。</td><td>TCP recovery 结束后仍需与 UB path health 对账，二者都满足才开放写/迁移。</td></tr>
               <tr><td><code>UrmaManager::TryRecoverFailedJettyFromCompletion</code><br><span class="src">urma_manager.cpp:954-981</span></td><td>完成队列错误可按策略触发 <code>ReCreateJetty</code>。</td><td>复用该观测点同步标记 peer path PROBING/UNAVAILABLE。</td></tr>
               <tr><td><code>UrmaAsyncEventHandler</code><br><span class="src">urma_async_event_handler.cpp:93-200</span></td><td>async fd epoll 到 <code>URMA_EVENT_JETTY_ERR</code> 后触发 <code>ReCreateJetty</code>。</td><td>Jetty 自恢复成功不等于 peer 可写；需要 probe 成功后再 MarkAvailable。</td></tr>
               <tr><td><code>UrmaConnection::ReCreateJetty</code><br><span class="src">urma_resource.cpp:418-460</span></td><td>失败 Jetty 会被 MarkInvalid 并重建，避免错误地 invalid 新 Jetty。</td><td>和 PR 1277 的发送端 Jetty 池化/隔离思路一致：恢复局部资源，但准入状态独立闭环。</td></tr>
@@ -581,8 +548,7 @@ stateDiagram-v2
               <tr><td>Client Get 接收 Worker Provider 写回</td><td>Client 消费 worker 显式 URMA status；RPC timeout/failure 只按 RPC/peer suspect 处理。</td><td>Client 侧日志区分 explicit ERROR 4 和 RPC timeout。</td></tr>
               <tr><td>Worker remote get provider 写 requester 失败</td><td>Provider 明确返回 UB unavailable；Requester 不长时间 retry。</td><td>RPC response error 可区分 transport/data-not-found。</td></tr>
               <tr><td>Rebalance 目标 Worker UB 故障</td><td>任务不向该目标迁移；可失败或重选目标。</td><td>rebalance task 记录 target rejected。</td></tr>
-              <tr><td>UB 恢复</td><td>probe 成功后重新开放写入/迁移；TCP membership 不被 UB 单独修改。</td><td>状态 UNAVAILABLE -> PROBING -> AVAILABLE，后续写成功。</td></tr>
-              <tr><td>TCP 闪断恢复</td><td>走原有 keepalive/hash ring/cluster recovery；服务态恢复后再看 UB path。</td><td>ClusterManager recovery 日志与 UB admission 状态均满足。</td></tr>
+              <tr><td>UB 恢复</td><td>probe 成功后重新开放写入/迁移；现有 membership 不被 UB 单独修改。</td><td>状态 UNAVAILABLE -> PROBING -> AVAILABLE，后续写成功。</td></tr>
             </tbody>
           </table>
         </div>
@@ -597,7 +563,7 @@ stateDiagram-v2
           <li>局部观测是否需要广播：第一阶段不做全局传播，只通过 RPC response 传给本次 requester；后续如需要再加 coordinator 汇聚。</li>
         </ul>
         <div class="note">
-          一句话版本：TCP 负责“这个 Worker 是否还能作为集群成员服务”，UB admission 负责“现在能不能往这个 Worker 的数据面写”。二者独立建模，在入口处组合判断。
+          一句话版本：本文只回答“现在能不能往这个 Worker 的 UB 数据面写”。已有 worker membership/rpc health 可以作为输入，但不是本文设计对象。
         </div>
       </section>
     </main>
