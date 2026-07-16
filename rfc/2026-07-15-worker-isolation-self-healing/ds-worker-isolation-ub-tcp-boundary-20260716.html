@@ -99,32 +99,44 @@ th { background: #f8fafc; font-size: 12px; }
   <div class="layout">
     <nav class="nav">
       <div class="nav-title">专题目录</div>
-      <a href="#scope">1. 设计边界与总览</a>
-      <a class="nav-sub" href="#scope-ground">1.1 CodeGraph 校验</a>
-      <a class="nav-sub" href="#scope-summary">1.2 最小结论</a>
-      <a href="#concepts">2. 关键概念</a>
-      <a class="nav-sub" href="#state-model">2.1 全局事实与局部观测</a>
-      <a class="nav-sub" href="#ownership">2.2 Meta/Layout 与 Data Local</a>
-      <a class="nav-sub" href="#failure-owner">2.3 故障归属</a>
-      <a href="#modules">3. 模块与抽象</a>
+      <a href="#scope">1. 功能描述</a>
+      <a class="nav-sub" href="#scope-ground">1.1 代码校验输入</a>
+      <a class="nav-sub" href="#scope-summary">1.2 功能目标与边界</a>
+      <a class="nav-sub" href="#concepts">1.3 关键概念定义</a>
+      <a href="#flows">2. 场景分析</a>
+      <a class="nav-sub" href="#flow-client-put">2.1 Client 写入</a>
+      <a class="nav-sub" href="#flow-remote-get">2.2 RemoteGet 写回</a>
+      <a class="nav-sub" href="#flow-migrate">2.3 迁移与 Rebalance</a>
+      <a class="nav-sub" href="#flow-tcp">2.4 TCP 自愈边界</a>
+      <a class="nav-sub" href="#flow-recovery">2.5 UB 恢复</a>
+      <a href="#modules">3. 方案详细设计</a>
       <a class="nav-sub" href="#class-diagram">3.1 类图</a>
       <a class="nav-sub" href="#module-responsibility">3.2 职责拆分</a>
       <a class="nav-sub" href="#interfaces">3.3 接口草案</a>
-      <a href="#flows">4. 时序图</a>
-      <a class="nav-sub" href="#flow-client-put">4.1 Client 写入</a>
-      <a class="nav-sub" href="#flow-remote-get">4.2 Worker remote get</a>
-      <a class="nav-sub" href="#flow-migrate">4.3 迁移与 Rebalance</a>
-      <a class="nav-sub" href="#flow-tcp">4.4 TCP 自愈</a>
-      <a class="nav-sub" href="#flow-recovery">4.5 UB 恢复</a>
-      <a href="#evidence">5. 代码确认</a>
-      <a href="#implementation">6. 落地策略</a>
-      <a href="#stories">7. Story 与验收</a>
-      <a href="#open">8. 待确认点</a>
+      <a class="nav-sub" href="#evidence">3.4 代码确认</a>
+      <a class="nav-sub" href="#implementation">3.5 落地策略</a>
+      <a href="#stories">4. 自验证用例</a>
+      <a class="nav-sub" href="#verify-cases">4.1 验收用例</a>
+      <a class="nav-sub" href="#open">4.2 待确认策略</a>
     </nav>
 
     <main class="content">
       <section id="scope" class="section">
-        <h2>1. 设计边界与总览</h2>
+        <h2>1. 功能描述</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>Story 功能描述</caption>
+            <tbody>
+              <tr><th>Why</th><td>UB 端口或路径故障后，业务可能通过 TCP payload 或持续 retry 表现为成功率下降，而不是明确失败。目标是避免静默故障：故障 worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 worker 时快速返回可识别错误。</td></tr>
+              <tr><th>Who</th><td>使用 Object/KV Client 通过 UB/TCP 访问 worker 的业务；发起 worker-worker remote get、migration、rebalance 的 worker；定位 UB 成功率下降、worker 数据面抖动和迁移失败的开发/测试/运维人员。</td></tr>
+              <tr><th>When</th><td>client->worker Put/Set 写入失败、worker/client->worker RemoteGet 请求触发 provider UB Write 失败、migration/rebalance target UB 不可写、UB 恢复探测成功或失败时生效。</td></tr>
+              <tr><th>Where</th><td>Client 侧 <code>ObjectClientImpl</code>、<code>ClientWorkerBaseApi</code>、<code>ClientWorkerRemoteApi</code>、direct read transport；Worker 侧 Get/RemoteGet provider writeback、DataMigrator、NodeSelector、RebalanceExecutor；恢复侧复用 URMA handshake/warmup/small transfer。</td></tr>
+              <tr><th>How</th><td>新增轻量 <code>WorkerUbPathHealth</code> 和 <code>TransportPathAdmission</code>。发起 URMA Write 的一端用显式 ERROR 4/URMA status 上报，coordinator 在写入、RemoteGet source、migration target 前做准入；fallback 默认关闭，开启时只允许小对象并保留降级观测。</td></tr>
+              <tr><th>What happen</th><td>影响 client->worker 写入、传统 Client Get、Client direct read、worker-worker remote get、batch remote get、migration/rebalance 与 UB recovery probe；不改变 TCP/etcd membership 自愈边界，不把局部 UB 故障直接升级为 worker 全局 DOWN。</td></tr>
+              <tr><th>Experience</th><td>UB 故障后用户得到明确错误和快速失败，写入/迁移不再持续撞坏 worker；UB 恢复后由 probe 平稳重新开放，切流过程不依赖真实业务请求反复试错。</td></tr>
+            </tbody>
+          </table>
+        </div>
         <div id="scope-ground" class="grid">
           <div class="metric"><div class="n">69ec60b41</div><div class="l">datasystem 当前校验提交</div></div>
           <div class="metric"><div class="n">12,608</div><div class="l">CodeGraph 文件数</div></div>
@@ -134,7 +146,7 @@ th { background: #f8fafc; font-size: 12px; }
         <div class="note">
           本页的结论以 CodeGraph 命中的当前源码为准：Client Put 的 UB write 在 client 发起；Worker remote get 的 UB write 在数据 provider 端发起；Rebalance/Migrate 是 worker-worker RPC 后的数据迁移；TCP 故障隔离/恢复已有 etcd keepalive、HashRing、ClusterManager 的局部自愈链路。
         </div>
-        <h3 id="scope-summary">1.2 最小结论</h3>
+        <h3 id="scope-summary">1.2 功能目标与边界</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">准入条件</div>
@@ -156,8 +168,8 @@ th { background: #f8fafc; font-size: 12px; }
       </section>
 
       <section id="concepts" class="section">
-        <h2>2. 关键概念</h2>
-        <h3 id="state-model">2.1 全局事实与局部观测</h3>
+        <h2>1.3 关键概念定义</h2>
+        <h3 id="state-model">1.3.1 全局事实与局部观测</h3>
         <div class="grid-3">
           <div class="card">
             <div class="card-title">Global Fact</div>
@@ -172,7 +184,7 @@ th { background: #f8fafc; font-size: 12px; }
             <p>请求入口对两类信息做组合判断，但局部观测不能直接改写全局事实；最多阻止本进程继续写入，并通过 RPC/错误码把对端 UB 故障传出去。</p>
           </div>
         </div>
-        <h3 id="ownership">2.2 Meta/Layout 与 Data Local</h3>
+        <h3 id="ownership">1.3.2 Meta/Layout 与 Data Local</h3>
         <div class="flow">
           <div><strong>Meta/Layout</strong>对象位置、primary、slot、迁移任务。</div>
           <div><strong>Data Local</strong>某 Worker 本地内存/共享内存/SSD 中真实数据。</div>
@@ -181,7 +193,7 @@ th { background: #f8fafc; font-size: 12px; }
           <div><strong>Transport</strong>URMA/UCP/TCP 的实际数据传输路径。</div>
         </div>
         <p>设计要避免把 transport 层“某一跳不通”误解释为对象不存在或元数据错误。新增错误语义建议为 <code>K_OC_DATA_PROVIDER_UB_UNAVAILABLE</code> 或同类 URMA data-plane code，表达“数据在该 Worker，但该 Worker 的 UB 路径暂不可用”。</p>
-        <h3 id="failure-owner">2.3 故障归属</h3>
+        <h3 id="failure-owner">1.3.3 故障归属</h3>
         <div class="table-wrap">
           <table>
             <caption>UB 故障隔离的两个主方向</caption>
@@ -207,8 +219,122 @@ th { background: #f8fafc; font-size: 12px; }
         </div>
       </section>
 
+      <section id="flows" class="section">
+        <h2>2. 场景分析</h2>
+        <h3 id="flow-client-put">2.1 Client -> Worker Put：本端发起 UB 写失败</h3>
+        <div class="diagram">
+          <div class="diagram-title">Client Put 默认快速失败，不透明切 TCP</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant A as TransportPathAdmission
+    participant W as Worker(Data Owner)
+    participant U as UrmaManager
+    C->>A: CheckWriteTarget(W)
+    A-->>C: RUNNING + AVAILABLE
+    C->>W: Create/MultiCreate RPC, get URMA addr
+    C->>U: UrmaWritePayload(W)
+    U--xC: ERROR 4 port unavailable
+    C->>A: MarkFailure(W, reason, epoch)
+    A-->>C: Write blocked
+    C-->>C: return K_OC_DATA_PROVIDER_UB_UNAVAILABLE
+    Note over C,W: fallback 默认关闭；开启时也只允许 <= 1MB 按策略切 TCP
+          </div>
+        </div>
+        <h3 id="flow-remote-get">2.2 RemoteGet：Provider 按 RPC 写回 requester/client</h3>
+        <div class="diagram">
+          <div class="diagram-title">Provider 端发起 URMA write；Requester 只通过 RPC 结果间接感知</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant R as Requester Worker
+    participant A as TransportPathAdmission
+    participant P as Provider Worker
+    participant U as Provider UrmaManager
+    R->>A: CheckReadSource(P)
+    A-->>R: source allowed
+    R->>P: GetObjectRemote(URMA info of R)
+    P->>A: CheckWriteTarget(R)
+    A-->>P: R path AVAILABLE
+    P->>U: UrmaWritePayload(to R)
+    alt Provider observes ERROR 4
+      U--xP: ERROR 4 port unavailable
+      P->>A: MarkFailure(R, ERROR 4)
+      P-->>R: explicit K_OC_DATA_PROVIDER_UB_UNAVAILABLE
+      R-->>R: mark receive path unavailable, fail fast or choose replica
+    else RPC timeout/failure before explicit status
+      R-->>R: mark provider/RPC suspect, fail fast or choose replica
+      Note over R,P: Do not infer local ERROR 4 from RPC timeout alone
+    end
+          </div>
+        </div>
+        <h3 id="flow-migrate">2.3 Migration / Rebalance：目标 Worker 准入</h3>
+        <div class="diagram">
+          <div class="diagram-title">迁移前检查目标服务态与 UB 接收态</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant B as RebalanceExecutor
+    participant A as TransportPathAdmission
+    participant M as DataMigrator
+    participant S as Source Worker
+    participant T as Target Worker
+    B->>A: CheckMigrationTarget(T)
+    alt T not RUNNING or UB unavailable
+      A-->>B: reject target
+      B-->>B: fail task / ask selector re-pick
+    else target allowed
+      A-->>B: ok
+      B->>M: MigrateToTargetNode(T)
+      M->>S: read local object
+      M->>T: worker-worker RPC + data transfer
+      T-->>M: success
+    end
+          </div>
+        </div>
+        <h3 id="flow-tcp">2.4 TCP / etcd 自愈边界</h3>
+        <div class="diagram">
+          <div class="diagram-title">TCP 自愈继续负责服务级隔离与恢复</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant E as Etcd KeepAlive
+    participant C as ClusterManager
+    participant H as HashRing
+    participant S as WorkerServiceMode
+    participant R as Recovery Orchestrator
+    E--xC: keepalive timeout confirmed
+    C->>H: fake delete / ring event
+    H->>S: LOCAL_ISOLATED or FAIL path
+    S-->>R: block normal writes/migration
+    C->>R: ProcessNetworkRecovery
+    R->>H: RecoverMigrationTask
+    R->>S: RECOVERING -> RUNNING after reconciliation
+          </div>
+        </div>
+        <h3 id="flow-recovery">2.5 UB 恢复：探测成功后重新开放写入</h3>
+        <div class="diagram">
+          <div class="diagram-title">UB 恢复只恢复数据面准入，不替代 TCP membership</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant O as WorkerUbPathHealth
+    participant U as UrmaManager
+    participant P as Probe
+    participant A as TransportPathAdmission
+    O->>O: UNAVAILABLE with cool-down
+    O->>P: enter PROBING
+    P->>U: handshake / small URMA probe
+    alt probe ok
+      U-->>O: MarkAvailable(peer, epoch)
+      O-->>A: AVAILABLE
+      A-->>A: writes/migration allowed if WorkerServiceMode RUNNING
+    else probe failed
+      U-->>O: keep UNAVAILABLE, backoff
+      A-->>A: continue fail fast
+    end
+          </div>
+        </div>
+      </section>
+
       <section id="modules" class="section">
-        <h2>3. 模块与抽象</h2>
+        <h2>3. 方案详细设计</h2>
         <h3 id="class-diagram">3.1 类图</h3>
         <div class="diagram">
           <div class="diagram-title">最小新增抽象与现有模块协同</div>
@@ -345,122 +471,8 @@ classDiagram
         </div>
       </section>
 
-      <section id="flows" class="section">
-        <h2>4. 关键流程时序图</h2>
-        <h3 id="flow-client-put">4.1 Client -> Worker Put：本端发起 UB 写失败</h3>
-        <div class="diagram">
-          <div class="diagram-title">Client Put 默认快速失败，不透明切 TCP</div>
-          <div class="mermaid">
-sequenceDiagram
-    participant C as Client
-    participant A as TransportPathAdmission
-    participant W as Worker(Data Owner)
-    participant U as UrmaManager
-    C->>A: CheckWriteTarget(W)
-    A-->>C: RUNNING + AVAILABLE
-    C->>W: Create/MultiCreate RPC, get URMA addr
-    C->>U: UrmaWritePayload(W)
-    U--xC: ERROR 4 port unavailable
-    C->>A: MarkFailure(W, reason, epoch)
-    A-->>C: Write blocked
-    C-->>C: return K_OC_DATA_PROVIDER_UB_UNAVAILABLE
-    Note over C,W: fallback 默认关闭；开启时也只允许 <= 1MB 按策略切 TCP
-          </div>
-        </div>
-        <h3 id="flow-remote-get">4.2 Worker remote get：Provider 按 RPC 写回 requester</h3>
-        <div class="diagram">
-          <div class="diagram-title">Provider 端发起 URMA write；Requester 只通过 RPC 结果间接感知</div>
-          <div class="mermaid">
-sequenceDiagram
-    participant R as Requester Worker
-    participant A as TransportPathAdmission
-    participant P as Provider Worker
-    participant U as Provider UrmaManager
-    R->>A: CheckReadSource(P)
-    A-->>R: source allowed
-    R->>P: GetObjectRemote(URMA info of R)
-    P->>A: CheckWriteTarget(R)
-    A-->>P: R path AVAILABLE
-    P->>U: UrmaWritePayload(to R)
-    alt Provider observes ERROR 4
-      U--xP: ERROR 4 port unavailable
-      P->>A: MarkFailure(R, ERROR 4)
-      P-->>R: explicit K_OC_DATA_PROVIDER_UB_UNAVAILABLE
-      R-->>R: mark receive path unavailable, fail fast or choose replica
-    else RPC timeout/failure before explicit status
-      R-->>R: mark provider/RPC suspect, fail fast or choose replica
-      Note over R,P: Do not infer local ERROR 4 from RPC timeout alone
-    end
-          </div>
-        </div>
-        <h3 id="flow-migrate">4.3 Migration / Rebalance：目标 Worker 准入</h3>
-        <div class="diagram">
-          <div class="diagram-title">迁移前检查目标服务态与 UB 接收态</div>
-          <div class="mermaid">
-sequenceDiagram
-    participant B as RebalanceExecutor
-    participant A as TransportPathAdmission
-    participant M as DataMigrator
-    participant S as Source Worker
-    participant T as Target Worker
-    B->>A: CheckMigrationTarget(T)
-    alt T not RUNNING or UB unavailable
-      A-->>B: reject target
-      B-->>B: fail task / ask selector re-pick
-    else target allowed
-      A-->>B: ok
-      B->>M: MigrateToTargetNode(T)
-      M->>S: read local object
-      M->>T: worker-worker RPC + data transfer
-      T-->>M: success
-    end
-          </div>
-        </div>
-        <h3 id="flow-tcp">4.4 TCP / etcd 自愈边界</h3>
-        <div class="diagram">
-          <div class="diagram-title">TCP 自愈继续负责服务级隔离与恢复</div>
-          <div class="mermaid">
-sequenceDiagram
-    participant E as Etcd KeepAlive
-    participant C as ClusterManager
-    participant H as HashRing
-    participant S as WorkerServiceMode
-    participant R as Recovery Orchestrator
-    E--xC: keepalive timeout confirmed
-    C->>H: fake delete / ring event
-    H->>S: LOCAL_ISOLATED or FAIL path
-    S-->>R: block normal writes/migration
-    C->>R: ProcessNetworkRecovery
-    R->>H: RecoverMigrationTask
-    R->>S: RECOVERING -> RUNNING after reconciliation
-          </div>
-        </div>
-        <h3 id="flow-recovery">4.5 UB 恢复：探测成功后重新开放写入</h3>
-        <div class="diagram">
-          <div class="diagram-title">UB 恢复只恢复数据面准入，不替代 TCP membership</div>
-          <div class="mermaid">
-sequenceDiagram
-    participant O as WorkerUbPathHealth
-    participant U as UrmaManager
-    participant P as Probe
-    participant A as TransportPathAdmission
-    O->>O: UNAVAILABLE with cool-down
-    O->>P: enter PROBING
-    P->>U: handshake / small URMA probe
-    alt probe ok
-      U-->>O: MarkAvailable(peer, epoch)
-      O-->>A: AVAILABLE
-      A-->>A: writes/migration allowed if WorkerServiceMode RUNNING
-    else probe failed
-      U-->>O: keep UNAVAILABLE, backoff
-      A-->>A: continue fail fast
-    end
-          </div>
-        </div>
-      </section>
-
       <section id="evidence" class="section">
-        <h2>5. 代码确认与分析</h2>
+        <h2>3.4 代码确认与分析</h2>
         <div class="table-wrap">
           <table>
             <caption>CodeGraph 与源码证据</caption>
@@ -524,15 +536,15 @@ sequenceDiagram
       </section>
 
       <section id="implementation" class="section">
-        <h2>6. 落地策略</h2>
-        <h3>6.1 最小修改点</h3>
+        <h2>3.5 落地策略</h2>
+        <h3>3.5.1 最小修改点</h3>
         <div class="grid-2">
           <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
           <div class="card"><div class="card-title">新增准入接口</div><p><code>TransportPathAdmission</code>：给 put/get/migrate/rebalance 调用，组合服务态、UB 观测、fallback 策略。</p></div>
           <div class="card"><div class="card-title">新增错误码</div><p>新增或复用 URMA error 家族，表达“数据所在 Worker UB 不可用”与“目标 Worker UB 接收不可用”。</p></div>
           <div class="card"><div class="card-title">新增恢复 probe</div><p>先 cool-down，再 small probe。probe 成功只恢复该 peer 的 UB path，不改全局 membership。</p></div>
         </div>
-        <h3>6.2 修改路径</h3>
+        <h3>3.5.2 修改路径</h3>
         <ul>
           <li><span class="badge b-blue">Client</span>在 <code>SendBufferViaUb*</code> 前检查目标；失败后标记目标 UB path unavailable，并返回显式错误。</li>
           <li><span class="badge b-green">Provider Worker</span>在 <code>WriteViaFastTransport</code> 失败后标记 requester UB path，并把显式 URMA operator status 放进 response。</li>
@@ -540,7 +552,7 @@ sequenceDiagram
           <li><span class="badge b-amber">Migration</span>在 <code>ConnectAndCreateRemoteApi</code> 或更上层目标选择前检查 migration target。</li>
           <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
         </ul>
-        <h3>6.3 状态机</h3>
+        <h3>3.5.3 状态机</h3>
         <div class="diagram">
           <div class="diagram-title">WorkerUbPathHealth 状态机</div>
           <div class="mermaid">
@@ -557,7 +569,8 @@ stateDiagram-v2
       </section>
 
       <section id="stories" class="section">
-        <h2>7. Story 与验收</h2>
+        <h2>4. 自验证用例</h2>
+        <h3 id="verify-cases">4.1 验收用例</h3>
         <div class="table-wrap">
           <table>
             <caption>验收用例</caption>
@@ -576,7 +589,7 @@ stateDiagram-v2
       </section>
 
       <section id="open" class="section">
-        <h2>8. 待确认点</h2>
+        <h2>4.2 待确认策略</h2>
         <ul>
           <li>错误码命名：建议放在 OC/URMA 交界处，保留 provider UB unavailable 与 requester UB unavailable 两类语义。</li>
           <li>恢复 probe 的实现：优先复用现有 handshake / small URMA write，不引入持续心跳。</li>
