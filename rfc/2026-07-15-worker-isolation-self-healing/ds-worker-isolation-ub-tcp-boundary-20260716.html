@@ -109,13 +109,14 @@ th { background: #f8fafc; font-size: 12px; }
       <a class="nav-sub" href="#current">3.1 现状分析</a>
       <a class="nav-sub" href="#key-answers">3.2 方案设计</a>
       <a class="nav-sub-2" href="#design-plan">3.2.1 核心模块</a>
-      <a class="nav-sub-2" href="#module-responsibility">3.2.2 职责拆分</a>
-      <a class="nav-sub-2" href="#interfaces">3.2.3 接口语义</a>
-      <a class="nav-sub-2" href="#deploy-design">3.2.4 最小改动点</a>
-      <a class="nav-sub-2" href="#runtime-design">3.2.5 运行接入点</a>
-      <a class="nav-sub-2" href="#usage-design">3.2.6 使用方式</a>
-      <a class="nav-sub-2" href="#code-view-design">3.2.7 关键时序</a>
-      <a class="nav-sub-2" href="#perf-design">3.2.8 高性能设计</a>
+      <a class="nav-sub-2" href="#global-local-state">3.2.2 GlobalFact 与局部信息</a>
+      <a class="nav-sub-2" href="#module-responsibility">3.2.3 职责拆分</a>
+      <a class="nav-sub-2" href="#interfaces">3.2.4 接口语义</a>
+      <a class="nav-sub-2" href="#deploy-design">3.2.5 最小改动点</a>
+      <a class="nav-sub-2" href="#runtime-design">3.2.6 运行接入点</a>
+      <a class="nav-sub-2" href="#usage-design">3.2.7 使用方式</a>
+      <a class="nav-sub-2" href="#code-view-design">3.2.8 关键时序</a>
+      <a class="nav-sub-2" href="#perf-design">3.2.9 高性能设计</a>
       <a class="nav-sub" href="#dryrun-design">3.3 Use Case DryRun</a>
       <a class="nav-sub" href="#oss">3.4 开源软件选型</a>
       <a class="nav-sub" href="#external">3.5 外部交互分析&&上下游依赖需求</a>
@@ -441,7 +442,69 @@ classDiagram
     UrmaManager --> UrmaResource : Jetty/JFC/Event
           </div>
         </div>
-        <h3 id="module-responsibility">3.2.2 职责拆分</h3>
+        <h3 id="global-local-state">3.2.2 GlobalFact 与局部信息维护</h3>
+        <p>GlobalFact 和局部信息不是同一类状态：GlobalFact 只表达已有元数据事实和 Worker 自身上报的 UB 健康摘要，适合被多节点消费；局部信息表达“本进程亲眼看到某个 peer 不通”，用于立即止血。准入判断必须组合两者，但不能让局部观测直接改写全局 membership。</p>
+        <div class="table-wrap">
+          <table>
+            <caption><span class="new-tag">新增</span>GlobalFact 与局部信息维护边界</caption>
+            <thead><tr><th>状态</th><th>维护者</th><th>产生方式</th><th>传播方式</th><th>消费者</th><th>冲突处理</th></tr></thead>
+            <tbody>
+              <tr><td>membership / ring / del_node_info / migration task</td><td>Master / 元数据侧</td><td>已有集群管理、扩缩容、迁移任务流程</td><td>已有元数据查询、心跳或任务下发</td><td>Client、Worker、迁移执行方</td><td>仍是权威事实；UB 局部故障不能把 Worker 改成全局 DOWN</td></tr>
+              <tr><td>Worker 自身 UB 健康摘要</td><td>对应 Worker</td><td>本地 ERROR 4、频繁 ERROR 9、Jetty 重建失败、self probe 失败/成功</td><td>worker->master heartbeat extend，必要时 client-worker heartbeat response 携带</td><td>Master 汇总后按相关 peer 下发给 Client/Worker</td><td>epoch 单调递增；较新 epoch 覆盖旧摘要，过期摘要只能降级为 suspect</td></tr>
+              <tr><td>Peer 局部准入状态</td><td>每个 Client/Worker 本进程</td><td>本端 URMA Write 失败、provider 显式 URMA status、GlobalFact 摘要、probe 结果</td><td>进程内保存，不向全局广播 peer matrix</td><td>本进程 Put/Get/RemoteGet/Migrate/Rebalance 准入</td><td>本地 ERROR 4 可立即置不可写；GlobalFact 恢复只允许进入 probing，不能直接跳过本地 probe</td></tr>
+              <tr><td>Recovery probe 结果</td><td>隔离该 peer 的 Client/Worker，或 Worker 自身 self probe</td><td>cooldown 后 small handshake / warmup / transfer probe</td><td>本地 probe 更新 Peer 状态；Worker 自身恢复通过下一轮摘要传播</td><td>本地准入；其他节点只消费 Worker 自身摘要</td><td>probe 成功 N 次才恢复；失败按指数退避，避免千级节点探测风暴</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="diagram">
+          <div class="diagram-title">GlobalFact 与局部信息维护时序</div>
+          <div class="mermaid">
+sequenceDiagram
+    participant Req as Client/Worker Initiator
+    participant Provider as Worker-Data Provider
+    participant Local as Local Peer Admission
+    participant Self as Worker LocalUbHealth
+    participant Master as Master GlobalFact
+    participant Probe as Recovery Probe
+
+    rect rgb(239,246,255)
+    Req->>Provider: Put / RemoteGet / Migrate data phase
+    Provider-->>Req: explicit URMA status or RPC result
+    Req->>Local: ReportOutcome(peer, status, op, epoch?)
+    Local-->>Req: fail fast for same peer before recovery
+    end
+
+    rect rgb(240,253,244)
+    Provider->>Self: local ERROR 4 / frequent ERROR 9 / self probe failure
+    Self->>Self: bump local_ub_epoch and set UNAVAILABLE
+    Self->>Master: heartbeat extend: UbHealthSummary(worker, epoch, state, reason, backoff_until)
+    Master->>Master: keep worker -> latest UbHealthSummary as GlobalFact
+    Master-->>Req: metadata / heartbeat response includes relevant peer summary
+    Req->>Local: ApplyHeartbeatSummary(peer, epoch, state)
+    Local-->>Req: block write / migration, read returns explicit UB unavailable
+    end
+
+    rect rgb(255,251,235)
+    Local->>Probe: cooldown expired, schedule small probe
+    Probe->>Provider: handshake / warmup / small URMA probe
+    Provider-->>Probe: success or explicit failure
+    Probe->>Local: MarkProbing or keep Unavailable with backoff
+    alt provider self recovered
+      Self->>Self: self probe success, bump epoch to AVAILABLE
+      Self->>Master: heartbeat extend: AVAILABLE epoch
+      Master-->>Req: publish newer summary for relevant peer
+      Req->>Local: newer AVAILABLE summary enters PROBING
+      Local-->>Req: resume only after local probe success
+    else probe failed
+      Local-->>Req: keep fail fast and exponential backoff
+    end
+    end
+          </div>
+        </div>
+        <div class="note new-panel">
+          <span class="new-tag">新增</span>合并规则：<strong>GlobalFact 决定“是否应该尝试”</strong>，局部观测决定“本进程现在是否放行”。写入和迁移只要任一侧判定不可写就 fail fast；读取可以换源，但所有候选 source 都不可用时返回明确 UB 数据面错误。GlobalFact 的 AVAILABLE 摘要不能直接清除本地 ERROR 4 隔离，只能触发本地 probe，probe 成功后才开放业务流量。
+        </div>
+        <h3 id="module-responsibility">3.2.3 职责拆分</h3>
         <div class="grid-2">
           <div class="card">
             <div class="card-title">发起端：Requester / URMA Writer</div>
@@ -473,7 +536,7 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h3 id="interfaces">3.2.3 接口语义</h3>
+        <h3 id="interfaces">3.2.4 接口语义</h3>
         <div class="table-wrap">
           <table>
             <caption>关键接口和语义</caption>
@@ -496,12 +559,12 @@ classDiagram
       </section>
 
       <section id="implementation" class="section">
-        <h3 id="deploy-design">3.2.4 最小改动点</h3>
+        <h3 id="deploy-design">3.2.5 最小改动点</h3>
         <div class="grid-2">
           <div class="card"><div class="card-title">不新增进程</div><p>不改变 SDK 对外 API；新增逻辑随 client/worker 进程内 object-cache transport adapter 加载。</p></div>
           <div class="card"><div class="card-title">默认策略</div><p>UB fallback 默认关闭；显式开启时仅允许 <= 1MB 的普通读写 fallback，不覆盖 migration / rebalance。</p></div>
         </div>
-        <h3 id="runtime-design">3.2.5 运行接入点</h3>
+        <h3 id="runtime-design">3.2.6 运行接入点</h3>
         <h4>运行期最小修改点</h4>
         <div class="grid-2">
           <div class="card"><div class="card-title">新增轻量模块</div><p><code>WorkerUbPathHealth</code>：进程内 peer -> health 状态，保存原因、时间、epoch、cooldown、probe 状态。</p></div>
@@ -552,7 +615,7 @@ classDiagram
             </tbody>
           </table>
         </div>
-        <h3 id="usage-design">3.2.6 使用方式</h3>
+        <h3 id="usage-design">3.2.7 使用方式</h3>
         <ul>
           <li>业务使用方式不变；UB 故障隔离作为 client/worker 内部准入和错误返回能力生效。</li>
           <li>client->worker 写入失败后，恢复前同一 target worker 的写入快速失败。</li>
@@ -561,7 +624,7 @@ classDiagram
           <li>扩容 worker 在 UB probe 成功前不承接 UB 写入/迁移；缩容或故障 worker 在 service/ring 已不可写时直接拒绝作为 target。</li>
           <li>心跳摘要用于传播“本 worker UB 数据面是否可写”，但不把局部 UB 故障升级为 worker DOWN。</li>
         </ul>
-        <h3 id="code-view-design">3.2.7 关键时序</h3>
+        <h3 id="code-view-design">3.2.8 关键时序</h3>
         <p>核心时序只画跨组件生命周期，便于开发和测试对齐故障发现、隔离传播、恢复放开的边界。具体函数调用和源码入口放在附录 A，避免把 sequence diagram 画成函数栈。</p>
         <div class="table-wrap">
           <table>
@@ -607,7 +670,7 @@ stateDiagram-v2
     AVAILABLE --> PROBING: Jetty recreated or instance epoch changed
           </div>
         </div>
-        <h3 id="perf-design">3.2.8 高性能设计</h3>
+        <h3 id="perf-design">3.2.9 高性能设计</h3>
         <ul>
           <li>准入判断必须是进程内 O(1) 读本地状态，不能在普通 Put/Get/RemoteGet 关键路径上同步访问外部服务。</li>
           <li>失败后同一 worker/source 的 batch remote get 要按 worker 分组 fail fast，避免 batch 内每个对象重复等待超时。</li>
