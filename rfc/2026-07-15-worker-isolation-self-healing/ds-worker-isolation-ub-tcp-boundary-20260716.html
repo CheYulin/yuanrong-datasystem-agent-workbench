@@ -138,19 +138,16 @@ th { background: #f8fafc; font-size: 12px; }
         <h2>1. Story 整体设计</h2>
         <h3 id="feature-desc">1.1 功能描述</h3>
         <p>UB 端口或路径故障后，业务可能表现为成功率下降、批量请求局部超时、迁移任务反复失败，而不是明确告诉调用方“数据所在 Worker 的 UB 数据面不可用”。本需求的核心目标是避免静默故障：故障 Worker 恢复前不再继续写入数据或迁移数据，读取命中故障数据 Worker 时快速返回可识别错误。</p>
-        <div class="table-wrap new-panel">
-          <table>
-            <caption><span class="new-tag">新增</span>5W1H 说明</caption>
-            <thead><tr><th>维度</th><th>说明</th><th>开发/测试关注点</th></tr></thead>
-            <tbody>
-              <tr><td>Who</td><td>Client、发起 RemoteGet 的 Worker、提供数据的 Worker、迁移/Rebalance 执行方。</td><td>区分“请求发起端”和“真正发起 UB Write 的一端”，避免错误归因。</td></tr>
-              <tr><td>What</td><td>UB 写入目的端不可达或端口异常时，停止继续向该 Worker 写入/迁移；读命中该 Worker 时快速失败。</td><td>新增分支要覆盖写入拒绝、读取快速失败、迁移目标拒绝、恢复后放开。</td></tr>
-              <tr><td>When</td><td>URMA 返回 ERROR 4、连续 ERROR 9、provider 显式返回 UB 写失败、probe 未恢复或健康摘要显示不可写时。</td><td>测试要分别注入 ERROR 4、ERROR 9、RPC timeout、probe success/failure。</td></tr>
-              <tr><td>Where</td><td>Client 写入路径、Client/Worker RemoteGet 路径、Direct Read data phase、Migrate/Rebalance target 选择与执行前。</td><td>场景分析只描述真实运行路径；具体代码锚点放附录 A。</td></tr>
-              <tr><td>Why</td><td>避免 UB 故障被 retry、fallback 或 batch 局部失败掩盖，造成持续静默成功率下降。</td><td>验证重点是“下一次请求不再撞同一故障 Worker”。</td></tr>
-              <tr><td>How</td><td>通过本地准入、显式错误返回、轻量健康摘要、probe 恢复和指数退避实现。</td><td>主文讲机制；DryRun Cases 展开可注入流程和变化模块。</td></tr>
-            </tbody>
-          </table>
+        <div class="note new-panel">
+          <span class="new-tag">新增</span>5W1H 说明
+          <ul>
+            <li><strong>Who：</strong>Client、发起 RemoteGet 的 Worker、提供数据的 Worker、迁移/Rebalance 执行方；开发和测试都要区分“请求发起端”和“真正发起 UB Write 的一端”。</li>
+            <li><strong>What：</strong>UB 写入目的端不可达或端口异常时，停止继续向该 Worker 写入/迁移；读命中该 Worker 时快速失败。</li>
+            <li><strong>When：</strong>URMA 返回 ERROR 4、连续 ERROR 9、provider 显式返回 UB 写失败、probe 未恢复或健康摘要显示不可写时触发。</li>
+            <li><strong>Where：</strong>Client 写入路径、Client/Worker RemoteGet 路径、Direct Read data phase、Migrate/Rebalance target 选择与执行前。</li>
+            <li><strong>Why：</strong>避免 UB 故障被 retry、fallback 或 batch 局部失败掩盖，造成持续静默成功率下降。</li>
+            <li><strong>How：</strong>通过本地准入、显式错误返回、轻量健康摘要、probe 恢复和指数退避实现；DryRun Cases 展开可注入流程和变化模块。</li>
+          </ul>
         </div>
         <div class="grid-2">
           <div class="card">
