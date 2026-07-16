@@ -196,7 +196,7 @@ th { background: #f8fafc; font-size: 12px; }
         <div class="grid-3">
           <div class="card">
             <div class="card-title">Global Fact</div>
-            <p>由 master/etcd/hash ring/cluster metadata 维护的全局事实，例如 Worker 是否在 ring 中、slot 归属、primary copy、迁移任务状态。</p>
+            <p>由 Coordinator/etcd/hash ring/cluster metadata 维护的全局事实，例如 Worker 是否在 ring 中、slot 归属、primary copy、迁移任务状态。</p>
           </div>
           <div class="card">
             <div class="card-title">Local Observation</div>
@@ -372,11 +372,11 @@ th { background: #f8fafc; font-size: 12px; }
           </div>
           <div class="card">
             <div class="card-title">目的端 Worker 如何知道自己故障并通知别人</div>
-            <p>被单边写的一端不能天然看到对端写失败，所以目的端 worker 需要两类输入：本地自检看到 ERROR 4/频繁 ERROR 9/Jetty 重建后 probe 失败；以及其他 client/worker 通过 RPC 上报“写不进该 worker”。worker 聚合这些信号更新 <code>LocalUbHealth</code>，再通过 master heartbeat 的 <code>extend</code> 或 client-worker heartbeat response 带出 <code>UbHealthSummary</code>，让其他节点减少向它写入和迁移。</p>
+            <p>被单边写的一端不能天然看到对端写失败，所以目的端 worker 需要两类输入：本地自检看到 ERROR 4/频繁 ERROR 9/Jetty 重建后 probe 失败；以及其他 client/worker 通过 RPC 上报“写不进该 worker”。worker 聚合这些信号更新 <code>LocalUbHealth</code>，再通过 Coordinator/etcd 元数据更新或 client-worker heartbeat response 带出 <code>UbHealthSummary</code>，让其他节点减少向它写入和迁移。</p>
           </div>
           <div class="card">
             <div class="card-title">千级节点下心跳是否可行</div>
-            <p>可行边界是“每个 worker 只上报自己的 UB 摘要”，而不是在心跳里广播所有 peer 状态。master 侧维护 O(N) 的 worker -> health epoch 摘要；client/worker 只按当前连接、候选 data location、迁移 target 消费相关摘要，普通 Put/Get 仍走本地 O(1) admission。</p>
+            <p>可行边界是“每个 worker 只上报自己的 UB 摘要”，而不是在心跳里广播所有 peer 状态。Coordinator/etcd 侧维护 O(N) 的 worker -> health epoch 摘要；client/worker 只按当前连接、候选 data location、迁移 target 消费相关摘要，普通 Put/Get 仍走本地 O(1) admission。</p>
           </div>
         </div>
         <div class="note warn">
@@ -445,7 +445,7 @@ stateDiagram-v2
           </table>
         </div>
         <h3 id="data-flow-design">3.2.2 关键读写与迁移时序设计</h3>
-        <p>关键路径只保留跨组件生命周期：Client、Worker-Meta、Worker-Data、Coordinator 和 URMA Operator。函数级调用放到附录，避免主设计被实现细节淹没。</p>
+        <p>关键路径只保留跨组件生命周期：Client、Worker-Meta、Worker-Data、Coordinator 和 URMA Operator。函数级调用放到附录，避免主设计被实现细节淹没。所有时序图中的 <strong>浅黄色区域</strong> 表示本 UB 故障隔离需求新增或改变的逻辑，消息前缀 <code>S1/S2/...</code> 用于评审时定位具体步骤。</p>
         <div class="table-wrap">
           <table>
             <caption>表 3-3 关键组件在读写路径中的职责</caption>
@@ -469,27 +469,47 @@ sequenceDiagram
     participant D as Worker-Data Provider
     participant U as URMA Operator
 
-    C->>M: fetch object location / service / task fact
-    M-->>C: GlobalFact snapshot
-    C->>O: Check source/target with GlobalFact + local admission
+    activate C
+    C->>M: S1 fetch object location / service / task fact
+    activate M
+    M-->>C: S2 GlobalFact snapshot
+    deactivate M
+    rect rgb(255, 248, 220)
+    Note over C,O: 新增 UB 隔离准入与结果消费
+    C->>O: S3 Check source/target with GlobalFact + local admission
+    activate O
     alt admission rejected
-      O-->>C: fail fast with UB data-plane error
+      O-->>C: S4 fail fast with UB data-plane error
     else client owns UB write
-      C->>U: client -> worker UB Write
-      U-->>C: ERROR 4 / ERROR 9 / success
-      C->>O: ReportOutcome(target, status)
-      O-->>C: update local admission and return result
+      O-->>C: S4 allow client-owned UB write
+      C->>U: S5 client -> worker UB Write
+      activate U
+      U-->>C: S6 ERROR 4 / ERROR 9 / success
+      deactivate U
+      C->>O: S7 ReportOutcome(target, status)
+      O-->>C: S8 update local admission and return result
     else provider owns UB write
-      C->>D: RemoteGet RPC with receiver endpoint
-      D->>O: Check receiver/source admission
-      D->>U: provider -> requester UB Write
-      U-->>D: ERROR 4 / ERROR 9 / success
-      D-->>C: structured RPC status with operator result
-      C->>O: consume explicit provider status
+      O-->>C: S4 allow RPC-triggered provider write
+      C->>D: S5 RemoteGet RPC with receiver endpoint
+      activate D
+      D->>O: S6 Check receiver/source admission
+      O-->>D: S7 allow / reject receiver
+      D->>U: S8 provider -> requester UB Write
+      activate U
+      U-->>D: S9 ERROR 4 / ERROR 9 / success
+      deactivate U
+      D-->>C: S10 structured RPC status with operator result
+      deactivate D
+      C->>O: S11 consume explicit provider status
+      O-->>C: S12 update requester local admission
     else migration/rebalance
-      C->>O: CheckMigrationTarget(target)
-      O-->>C: allow / reject target
+      O-->>C: S4 continue migration admission
+      C->>O: S5 CheckMigrationTarget(target)
+      O-->>C: S6 allow / reject target
     end
+    deactivate O
+    end
+    deactivate C
           </div>
         </div>
         <h3 id="global-local-state">3.2.3 GlobalFact 与局部同步及局部决策</h3>
@@ -514,16 +534,32 @@ sequenceDiagram
     participant Provider as Worker-Data Provider
     participant Local as Local Peer Admission
 
-    Req->>Provider: Put / RemoteGet / Migrate data phase
+    activate Req
+    Req->>Provider: S1 Put / RemoteGet / Migrate data phase
+    rect rgb(255, 248, 220)
+    Note over Req,Local: 新增：真实传输结果进入本地 PeerUbAdmission
     alt requester owns UB operator
-      Req--xReq: observe ERROR 4 / ERROR 9 / timeout
-      Req->>Local: ReportOutcome(peer, explicit local status)
+      Req--xReq: S2 observe ERROR 4 / ERROR 9 / timeout
+      Req->>Local: S3 ReportOutcome(peer, explicit local status)
+      activate Local
+      Local-->>Req: S4 mark UNAVAILABLE/SUSPECT
+      deactivate Local
     else provider owns UB operator
-      Provider--xProvider: observe provider-side URMA status
-      Provider-->>Req: RPC response carries explicit URMA status
-      Req->>Local: ReportOutcome(peer, provider status)
+      activate Provider
+      Provider--xProvider: S2 observe provider-side URMA status
+      Provider-->>Req: S3 RPC response carries explicit URMA status
+      deactivate Provider
+      Req->>Local: S4 ReportOutcome(peer, provider status)
+      activate Local
+      Local-->>Req: S5 mark peer by explicit provider status
+      deactivate Local
     end
-    Local-->>Req: same peer fail fast or enter probing
+    Req->>Local: S6 next same-peer admission check
+    activate Local
+    Local-->>Req: S7 fail fast or enter probing
+    deactivate Local
+    end
+    deactivate Req
           </div>
         </div>
         <p>图 3-4 只表达访问者本进程如何从真实传输结果更新 <code>PeerUbAdmission</code>。RPC timeout 只能作为弱信号进入 <code>SUSPECT</code>，不能伪造成 ERROR 4。</p>
@@ -537,13 +573,26 @@ sequenceDiagram
     participant Consumer as Client/Worker Consumer
     participant Local as Local Peer Admission
 
-    Provider->>Self: local ERROR 4 / frequent ERROR 9 / self probe failure
-    Self->>Self: bump local_ub_epoch and set SELF_UNAVAILABLE
-    Self->>Fact: heartbeat/metadata update UbHealthSummary(worker, epoch, state, reason)
-    Fact->>Fact: keep latest worker -> UbHealthSummary
-    Fact-->>Consumer: metadata / heartbeat response carries relevant summary
-    Consumer->>Local: ApplyHeartbeatSummary(peer, epoch, state)
-    Local-->>Consumer: block write / migration, read may switch source
+    activate Provider
+    Provider->>Self: S1 local ERROR 4 / frequent ERROR 9 / self probe failure
+    activate Self
+    rect rgb(255, 248, 220)
+    Note over Self,Fact: 新增：Provider 自身 UB 摘要进入 GlobalFact
+    Self->>Self: S2 bump local_ub_epoch and set SELF_UNAVAILABLE
+    Self->>Fact: S3 heartbeat/metadata update UbHealthSummary(worker, epoch, state, reason)
+    activate Fact
+    Fact->>Fact: S4 keep latest worker -> UbHealthSummary
+    Fact-->>Consumer: S5 metadata / heartbeat response carries relevant summary
+    deactivate Fact
+    deactivate Self
+    deactivate Provider
+    Consumer->>Local: S6 ApplyHeartbeatSummary(peer, epoch, state)
+    activate Consumer
+    activate Local
+    Local-->>Consumer: S7 block write / migration, read may switch source
+    deactivate Local
+    deactivate Consumer
+    end
           </div>
         </div>
         <p>图 3-5 只表达 Provider 自身健康的全局摘要通道。千级节点下只传播“本 worker 自己”的摘要，不传播 all-to-all peer matrix。</p>
@@ -557,18 +606,32 @@ sequenceDiagram
     participant Provider as Worker-Data Provider
     participant Fact as Coordinator/etcd GlobalFact
 
-    Local->>Probe: cooldown expired, schedule small probe
-    Probe->>Provider: handshake / warmup / small URMA probe
-    Provider-->>Probe: success or explicit failure
+    activate Req
+    Req->>Local: S1 business request hits isolated peer
+    activate Local
+    rect rgb(255, 248, 220)
+    Note over Local,Probe: 新增：恢复只由 probe 生命周期推进
+    Local->>Probe: S2 cooldown expired, schedule small probe
+    activate Probe
+    Probe->>Provider: S3 handshake / warmup / small URMA probe
+    activate Provider
+    Provider-->>Probe: S4 success or explicit failure
+    deactivate Provider
     alt probe failed
-      Probe->>Local: keep UNAVAILABLE and increase backoff
-      Local-->>Req: continue fail fast
+      Probe->>Local: S5 keep UNAVAILABLE and increase backoff
+      Local-->>Req: S6 continue fail fast
     else probe success
-      Probe->>Fact: check service/membership still allowed
-      Fact-->>Probe: GlobalFact allows peer
-      Probe->>Local: MarkAvailable(peer, epoch)
-      Local-->>Req: resume business write/read/migration admission
+      Probe->>Fact: S5 check service/membership still allowed
+      activate Fact
+      Fact-->>Probe: S6 GlobalFact allows peer
+      deactivate Fact
+      Probe->>Local: S7 MarkAvailable(peer, epoch)
+      Local-->>Req: S8 resume business write/read/migration admission
     end
+    deactivate Probe
+    end
+    deactivate Local
+    deactivate Req
           </div>
         </div>
         <p>图 3-6 表达恢复只能由 probe 和 GlobalFact 共同确认。fallback 成功或普通业务请求偶然成功，都不能直接清除本地隔离状态。</p>
@@ -741,7 +804,7 @@ classDiagram
           <li><span class="badge b-green">Provider Worker</span>在写回 requester/client 失败后标记对端 UB path，并把显式 URMA operator status 放进 response。</li>
           <li><span class="badge b-violet">Requester Worker</span>在收到显式 UB unavailable 时快速失败或换副本；若只是 RPC timeout/failure，则按 provider/RPC suspect 处理，不当成对象缺失或本端 ERROR 4。</li>
           <li><span class="badge b-amber">Migration</span>在目标选择和执行前检查 migration target，避免 stale task 继续向 UB 不可写 Worker 迁移。</li>
-          <li><span class="badge b-blue">Heartbeat</span>worker 把本地 UB health epoch/reason/backoff 放进 master heartbeat <code>extend</code> 或 client-worker heartbeat response；接收方只更新 peer admission，不修改 membership。</li>
+          <li><span class="badge b-blue">Heartbeat</span>worker 把本地 UB health epoch/reason/backoff 放进 Coordinator/etcd 元数据更新或 client-worker heartbeat response；接收方只更新 peer admission，不修改 membership。</li>
           <li><span class="badge b-red">Fallback</span>默认关闭；开启时仅允许小于等于 1MB 且非迁移路径的读取/写回，且要打点记录。</li>
         </ul>
         <h4>千级节点下的心跳可行性</h4>
@@ -756,11 +819,11 @@ classDiagram
           </div>
           <div class="card">
             <div class="card-title">按需消费</div>
-            <p>普通 Put/Get 不同步访问 master；它只读本进程 O(1) 的 <code>PeerUbAdmission</code>。心跳摘要用于刷新本地缓存，RPC response 用于本次请求的精确归因，probe 用于恢复确认。</p>
+            <p>普通 Put/Get 不同步访问 Coordinator/etcd；它只读本进程 O(1) 的 <code>PeerUbAdmission</code>。心跳摘要用于刷新本地缓存，RPC response 用于本次请求的精确归因，probe 用于恢复确认。</p>
           </div>
           <div class="card">
             <div class="card-title">流量控制</div>
-            <p>持续故障时，probe 和重新开放按指数退避；master 侧只保存每个 worker 最新 epoch 摘要，client/worker 可只接收与当前连接、候选 location、迁移 target 相关的摘要。</p>
+            <p>持续故障时，probe 和重新开放按指数退避；Coordinator/etcd 侧只保存每个 worker 最新 epoch 摘要，client/worker 可只接收与当前连接、候选 location、迁移 target 相关的摘要。</p>
           </div>
         </div>
         <div class="table-wrap">
@@ -807,7 +870,7 @@ classDiagram
               <tr><td>2.4 UC-4 Worker RemoteGet</td><td>Provider 写 requester 失败</td><td>Worker requester 发 RemoteGet，provider 写 requester 时注入 URMA error。</td><td>requester 消费显式 status；RPC timeout 不合成 ERROR 4。</td><td>response 区分 failed_endpoint、operator_worker、urma_status。</td></tr>
               <tr><td>2.5 UC-5 Migrate / Move / Rebalance</td><td>Migrate/Rebalance stale target</td><td>Global Fact 里 target 仍来自 task，但本地 UB admission 为 unavailable。</td><td>执行前拒绝该 target，可失败或触发重选；不发送数据。</td><td>task 记录 target rejected，migrated bytes 为 0。</td></tr>
               <tr><td>2.6 UC-6 扩容 / 缩容 / 故障恢复</td><td>扩缩容/恢复准入</td><td>构造 worker membership 可见但 UB probe 未成功，或 service/ring 已不可写但 UB AVAILABLE。</td><td>GlobalFact 与 UB admission 必须同时允许；任一侧不可写都拒绝写入和迁移。</td><td>PROBING 不承接写入；probe 成功且服务态允许后才 AVAILABLE。</td></tr>
-              <tr><td>2.7 UC-7 目的端 Worker 自身 UB 故障</td><td>千级节点心跳摘要</td><td>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。</td><td>master 侧保持 O(N) 摘要；client/worker 按需消费候选相关状态。</td><td>heartbeat payload 与 worker 数线性相关，普通 Put/Get 不同步访问 master。</td></tr>
+              <tr><td>2.7 UC-7 目的端 Worker 自身 UB 故障</td><td>千级节点心跳摘要</td><td>模拟 1000 workers，只上报本 worker health summary，不携带 peer matrix。</td><td>Coordinator/etcd 侧保持 O(N) 摘要；client/worker 按需消费候选相关状态。</td><td>heartbeat payload 与 worker 数线性相关，普通 Put/Get 不同步访问 Coordinator/etcd。</td></tr>
             </tbody>
           </table>
         </div>
@@ -823,21 +886,43 @@ sequenceDiagram
     participant O as Coordinator
     participant M as Worker-Meta
     participant D as Worker-Data
-    C->>M: Fetch location/service fact
-    M-->>C: target/data worker is eligible by metadata
-    C->>O: Check target/source before UB operation
-    O-->>C: allowed by local admission
-    C->>D: UB Write or RPC-triggered write request
-    alt Client/Requester owns UB operator
-      C--xC: URMA ERROR 4/9/timeout observed locally
-      C->>O: ReportOutcome(D, ERROR 4/9)
-      O-->>C: mark peer UNAVAILABLE/SUSPECT
-    else Worker-Data owns UB operator
-      D--xD: Provider-side URMA ERROR 4/9
-      D-->>C: RPC response carries failed_endpoint and urma_status
-      C->>O: consume explicit provider status
+    activate C
+    C->>M: S1 Fetch location/service fact
+    activate M
+    M-->>C: S2 target/data worker is eligible by metadata
+    deactivate M
+    rect rgb(255, 248, 220)
+    Note over C,O: 新增：写前 / 读前本地准入
+    C->>O: S3 Check target/source before UB operation
+    activate O
+    O-->>C: S4 allowed by local admission
+    deactivate O
     end
-    O-->>C: next same-target request fail fast
+    C->>D: S5 UB Write or RPC-triggered write request
+    rect rgb(255, 248, 220)
+    Note over C,O: 新增：显式 URMA 结果进入隔离状态
+    alt Client/Requester owns UB operator
+      C--xC: S6 URMA ERROR 4/9/timeout observed locally
+      C->>O: S7 ReportOutcome(D, ERROR 4/9)
+      activate O
+      O-->>C: S8 mark peer UNAVAILABLE/SUSPECT
+      deactivate O
+    else Worker-Data owns UB operator
+      activate D
+      D--xD: S6 Provider-side URMA ERROR 4/9
+      D-->>C: S7 RPC response carries failed_endpoint and urma_status
+      deactivate D
+      C->>O: S8 consume explicit provider status
+      activate O
+      O-->>C: S9 mark peer by provider status
+      deactivate O
+    end
+    C->>O: S10 next same-target admission check
+    activate O
+    O-->>C: S11 fail fast
+    deactivate O
+    end
+    deactivate C
           </div>
         </div>
         <h4 id="dryrun-flow-summary">DryRun 时序：Worker 自身 UB 故障摘要传播</h4>
@@ -850,14 +935,27 @@ sequenceDiagram
     participant O as Coordinator
     participant M as Worker-Meta
     participant C as Client/Requester
-    D->>O: local ERROR 4 or frequent ERROR 9 observed
-    O->>O: enter UNAVAILABLE, set reason and backoff_until
-    D->>M: heartbeat summary(worker, health_epoch, reason, backoff)
-    M->>M: keep O(N) summary by worker
-    C->>M: refresh related worker/location fact
-    M-->>C: return relevant worker summary only
-    C->>O: merge summary with local observation
-    O-->>C: block writes/migration while unreadiness is effective
+    activate D
+    D->>O: S1 local ERROR 4 or frequent ERROR 9 observed
+    activate O
+    rect rgb(255, 248, 220)
+    Note over D,M: 新增：只上报本 Worker 自身 UB health summary
+    O->>O: S2 enter UNAVAILABLE, set reason and backoff_until
+    D->>M: S3 heartbeat/metadata summary(worker, health_epoch, reason, backoff)
+    activate M
+    M->>M: S4 keep O(N) summary by worker
+    deactivate O
+    deactivate D
+    C->>M: S5 refresh related worker/location fact
+    activate C
+    M-->>C: S6 return relevant worker summary only
+    deactivate M
+    C->>O: S7 merge summary with local observation
+    activate O
+    O-->>C: S8 block writes/migration while unreadiness is effective
+    deactivate O
+    deactivate C
+    end
     Note over D,M: no all-to-all peer matrix in 1000-node scale
           </div>
         </div>
@@ -871,18 +969,29 @@ sequenceDiagram
     participant O as Coordinator
     participant M as Worker-Meta
     participant C as Client/Requester
-    O->>O: cooldown elapsed by exponential backoff
-    O->>D: small UB probe or warmup
+    activate O
+    rect rgb(255, 248, 220)
+    Note over O,D: 新增：指数退避后的 probe 恢复生命周期
+    O->>O: S1 cooldown elapsed by exponential backoff
+    O->>D: S2 small UB probe or warmup
+    activate D
     alt probe succeeds and service fact allows write
-      D-->>O: probe success with new health_epoch
-      D->>M: heartbeat summary AVAILABLE
-      M-->>C: next refresh includes AVAILABLE epoch
-      C->>O: check write/migration target again
-      O-->>C: allow normal request
+      D-->>O: S3 probe success with new health_epoch
+      D->>M: S4 heartbeat/metadata summary AVAILABLE
+      activate M
+      M-->>C: S5 next refresh includes AVAILABLE epoch
+      deactivate M
+      activate C
+      C->>O: S6 check write/migration target again
+      O-->>C: S7 allow normal request
+      deactivate C
     else probe fails or metadata disallows target
-      D-->>O: probe failure or stale service state
-      O-->>C: keep fail fast, increase backoff
+      D-->>O: S3 probe failure or stale service state
+      O-->>C: S4 keep fail fast, increase backoff
     end
+    deactivate D
+    end
+    deactivate O
     Note over C,D: fallback success never clears UB health
           </div>
         </div>
@@ -916,7 +1025,7 @@ sequenceDiagram
         <h2>5. 约束</h2>
         <ul>
           <li>不能把局部 UB 故障直接升级为 worker DOWN，也不能改写 object ownership / hash ring / migration task 的全局事实。</li>
-          <li>普通 Put/Get/RemoteGet 关键路径不能同步访问 master；准入判断必须是进程内 O(1) 本地状态读取。</li>
+          <li>普通 Put/Get/RemoteGet 关键路径不能同步访问 Coordinator/etcd；准入判断必须是进程内 O(1) 本地状态读取。</li>
           <li>千级节点下不能传播 peer matrix；心跳只传播本 worker 自身 UB health 摘要。</li>
           <li>RPC timeout 不能合成 URMA ERROR 4；只有 URMA operator 或 provider 显式 status 能作为 ERROR 4 归因依据。</li>
           <li>fallback 默认关闭；开启时也不覆盖迁移/rebalance，不作为 UB health 恢复证据。</li>
@@ -1040,28 +1149,49 @@ sequenceDiagram
     participant T as ClientRemoteDataTransport
     participant W as Data Worker Provider
     participant H as WorkerUbPathHealth
-    C->>F: Get / Read enters direct read
-    F->>M: meta phase via ClientQueryMetaTransport
-    M-->>F: query meta returns data worker W
-    F->>A: CheckReadSource(W)
+    activate C
+    C->>F: S1 Get / Read enters direct read
+    activate F
+    F->>M: S2 meta phase via ClientQueryMetaTransport
+    activate M
+    M-->>F: S3 query meta returns data worker W
+    deactivate M
+    rect rgb(255, 248, 220)
+    Note over F,A: 新增：direct read 数据源准入
+    F->>A: S4 CheckReadSource(W)
+    activate A
     alt W data path unavailable
-      A-->>F: K_URMA_DATA_WORKER_UNAVAILABLE
-      F-->>C: fail fast
+      A-->>F: S5 K_URMA_DATA_WORKER_UNAVAILABLE
+      F-->>C: S6 fail fast
     else source allowed
-      F->>T: ObjectReadDataFlow data phase
-      T->>W: GetObjectRemote / BatchGetObjectRemote(client URMA info)
-      W->>C: UrmaWritePayload(data -> client buffer)
+      A-->>F: S5 source allowed
+      F->>T: S6 ObjectReadDataFlow data phase
+      activate T
+      T->>W: S7 GetObjectRemote / BatchGetObjectRemote(client URMA info)
+      activate W
+      W->>C: S8 UrmaWritePayload(data -> client buffer)
+      rect rgb(255, 248, 220)
+      Note over W,H: 新增：provider 显式 UB failure 与 requester 消费
       alt explicit URMA ERROR 4
-        W-->>T: response/status carries UB failure
-        T->>H: ReportOutcome(peer=W, op=client_direct_read)
-        T-->>F: data_worker_unavailable
+        W-->>T: S9 response/status carries UB failure
+        T->>H: S10 ReportOutcome(peer=W, op=client_direct_read)
+        activate H
+        H-->>T: S11 mark peer unavailable
+        deactivate H
+        T-->>F: S12 data_worker_unavailable
       else RPC timeout before status
-        T-->>F: RPC/peer suspect only
+        T-->>F: S9 RPC/peer suspect only
       else success
-        W-->>T: DATA_ALREADY_TRANSFERRED or payload
-        T-->>F: append data
+        W-->>T: S9 DATA_ALREADY_TRANSFERRED or payload
+        T-->>F: S10 append data
+      end
+      deactivate W
+      deactivate T
       end
     end
+    deactivate A
+    deactivate F
+    deactivate C
           </div>
         </div>
 
