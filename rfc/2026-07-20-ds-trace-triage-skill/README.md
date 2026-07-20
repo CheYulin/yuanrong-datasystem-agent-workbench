@@ -6,6 +6,8 @@ publication workflow for analyzing slow/error DataSystem traces.
 ## Artifacts
 
 - [design-and-story.md](design-and-story.md): method and user stories.
+- [pipeline-rfc.md](pipeline-rfc.md): phased `run/verify` pipeline, run
+  directory, raw log retention, and cache reuse design.
 - [thread-artifact-audit.md](thread-artifact-audit.md): eight-source-thread
   evidence and capability mapping.
 - [issue-rfc.md](issue-rfc.md): GitCode issue draft.
