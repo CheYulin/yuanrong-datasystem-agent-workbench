@@ -1340,3 +1340,50 @@ Mandatory `ICoordinationBackend` boundary items remain:
   - `git diff --check -- src/datasystem/worker/worker_admission_facade.cpp` passed.
   - `clang-format-diff` over the fixed product hunk produced no output.
   - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`.
+
+### 2026-07-21 CodeCheck Follow-Up Round 2
+
+- CI retest result before this round:
+  - Retest note id `180841829` triggered CI job 7822.
+  - CLA passed; CodeCheck failed and pointed to OpenLibing report
+    `MR_cba51bc382474d7d9271f32312ed4d30/a7e3ac19dbc89a89e5ff1a784c452782`.
+  - The report page HTML could be fetched with browser headers, but the underlying summary/detail APIs required
+    authenticated portal parameters and returned 401/51002 from CLI. Local `clang-tidy` was used to identify actionable
+    warnings before asking for any manual report export.
+- Local issues isolated and fixed:
+  - `worker_runtime_state.cpp`: replaced recovery evidence bit-shift magic numbers with named constants.
+  - `ds_coordination_backend.{h,cpp}`: changed `SetMembershipReadyHandler` to accept the callback by const reference and
+    still copy it into backend state before invoking outside the backend lock.
+  - `topology_engine.{h,cpp}`: removed one unused watch-event log interval constant and made pure notification helpers
+    `const`.
+  - `topology_controller.{h,cpp}`: passed options by const reference, cached `GetActiveBatch()` per method, added explicit
+    runtime checks before optional dereference, and removed one `else-after-return` branch.
+- CLion/CMake build/index after the fixes:
+  - Command: `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+  - Result: passed with URMA mock enabled, third-party cache hit with `Compile thirdparty libraries success, total wall time: 0s`,
+    source build 146s, total 245s, `compile_commands` entries 1127.
+- Focused CMake UT after the fixes:
+  - `WorkerAdmissionFacadeTest.*:WorkerServiceAdmissionTest.*:WorkerRuntimeStateTest.*`: 24/24 passed, GoogleTest
+    time 259 ms, command wall time 0.31s.
+  - `cluster_topology_contract_ut --gtest_filter="*CoordinationBackend*:*TopologyRuntimeComposition*:*TopologyController*:*TopologyEngine*"`:
+    54/54 passed, GoogleTest time 3041 ms, command wall time 0:03.08.
+  - `ds_ut_object --gtest_filter="*Admission*"`: 5/5 passed, GoogleTest time 121 ms, command wall time 0.17s.
+- Bazel 7.4.1 focused validation after the fixes:
+  - Build target set `cluster_topology`, `coordination_backend`, `worker_runtime_state`, `worker_service_impl`,
+    `datasystem_worker_shared`: 5/5 targets built, command wall time 1:58.57.
+  - Tests `//tests/ut/worker:worker_admission_facade_test` and
+    `//tests/ut/worker:worker_isolation_coordinator_test`: 2/2 targets passed, each test runtime 0.5s, command wall time
+    1:24.61.
+  - Both Bazel commands used Bazel 7.4.1, `--output_user_root=/home/bazel-output/worker-self-healing-bazel-proxy`,
+    `--distdir=/home/ds-bazel-distdir`, URMA mock config, and local reverse proxy `127.0.0.1:17897`.
+- Static/check tooling after the fixes:
+  - `git diff --check` passed.
+  - `clang-format-diff` over modified product hunks produced no remaining diff.
+  - Focused `clang-tidy` on the four files with newly reported issues cleared the real product warnings; the only
+    remaining output was existing infrastructure noise from `inject_point.h` using deprecated `std::result_of`.
+  - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`.
+- Proxy/cache note:
+  - Remote `curl -x http://127.0.0.1:17897 https://github.com` returned HTTP 200, so the local reverse proxy is usable.
+  - Bazel rebuilt third-party actions in this round because the validation used a fresh output root
+    `/home/bazel-output/worker-self-healing-bazel-proxy`; this is separate from the CLion/CMake third-party cache, which
+    remained a 0s cache hit. Keeping the same Bazel output root should make later Bazel runs incremental.
