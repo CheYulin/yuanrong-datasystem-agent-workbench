@@ -1030,3 +1030,79 @@ This plan closes the cohesion gaps as follows:
 - Stream/KV admission is made explicit through Task 6 instead of silently claiming complete coverage.
 - Scale/fault overlap remains tracked in `scale-fault-overlap-followups.md`; it is not treated as closed by this
   cohesion refactor.
+
+## Execution Progress Log
+
+### 2026-07-21 Task 1 Recovery Evidence Tracker
+
+- Commit: `437836241 feat(worker): track recovery evidence generation`, pushed to MR !1405 branch
+  `feat/worker-self-healing-main-20260716`.
+- TDD RED: `JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index` failed after 22.4s because
+  `datasystem/worker/worker_recovery_evidence_tracker.h` did not exist. This confirmed the new UT was active in the
+  CMake `ds_ut` target.
+- TDD GREEN build/index: same CLion script passed with URMA mock enabled, third-party cache hit, total use time 139s,
+  `compile_commands` entries 1122.
+- New cases added: 2 UT cases.
+  - `WorkerRecoveryEvidenceTrackerTest.OldGenerationEvidenceIsRejected`
+  - `WorkerRecoveryEvidenceTrackerTest.EmptyEvidenceDoesNotCompleteNewRecovery`
+- Focused CMake UT command:
+  `tests/ut/ds_ut --gtest_filter="WorkerRecoveryEvidenceTrackerTest.*" --gtest_color=no`
+  Result: 2/2 passed, wall time 0.06s.
+- Bazel focused validation status: not completed. On `tiantiyun-80c128g`, `/usr/local/bin/bazel --version` hung and
+  `timeout 20s /usr/local/bin/bazel --version` returned 124. No `bazel-7.4.1` alternate binary was found under
+  `/usr/local/bin`, `/usr/bin`, `/opt`, or `/home` within the checked depth. Do not claim Bazel coverage for Task 1
+  until the remote Bazel 7.4.1 path is repaired or CI returns the target result.
+
+### 2026-07-21 Runtime/Coordination Boundary Review
+
+Read-only sub-agent review found the current largest coupling points:
+
+- `worker_oc_server.cpp` still directly includes `worker_control_backend_scope.h`, configures ETCD keepalive
+  isolation/recovery callbacks on `EtcdStore`, consumes `TopologyEngine` availability directly, and calls
+  `ClassifyControlBackendFailureScope` from worker server code.
+- `worker_service_impl` exposes `SetRuntimeStateManager(const WorkerRuntimeStateManager *)` and constructs
+  `WorkerServiceAdmission` directly.
+- `worker/object_cache` still passes `EtcdStore *` and `TopologyEngine *` through `WorkerOCServiceImpl`, uses
+  `WorkerServiceAdmission` directly in several RPC paths, and has `NodeSelector` reading runtime snapshots directly.
+- `slot_recovery_store.cpp` still uses `EtcdStore` for table/KV/CAS operations and should move to
+  `ICoordinationBackend` or a narrower slot recovery coordination store.
+
+Recommended refactor order:
+
+1. Add `RuntimeFacade`/admission facade first and migrate direct `WorkerRuntimeStateManager`/`WorkerServiceAdmission`
+   consumers in worker services and object-cache peer/master-worker service paths.
+2. Then narrow object-cache topology dependencies behind a worker-local topology/runtime facade.
+3. Then convert slot recovery storage to `ICoordinationBackend` or a narrow coordination-store abstraction.
+4. Finally move WorkerOCServer keepalive isolation/recovery, control-backend scope classification, and topology
+   availability callbacks behind coordination/runtime boundaries.
+
+Mandatory `ICoordinationBackend` boundary items remain:
+
+- Local isolation/recovery/check-backend-state callbacks must be exposed through `ICoordinationBackend`, not directly
+  through `EtcdStore`.
+- Slot recovery table/KV/CAS operations must not expose `EtcdStore` in object-cache public constructors/signatures.
+- Control-backend failure scope classification should become backend/topology observation consumed by worker runtime,
+  not a worker server dependency on backend internals.
+
+### 2026-07-21 Task 2 Object Recovery Evidence Generation
+
+- Commit: `1d177baa7 fix(worker): bind object recovery evidence to generation`, pushed to MR !1405 branch
+  `feat/worker-self-healing-main-20260716`. Scope is limited to `worker/object_cache` service evidence reporting plus
+  build/test deps.
+- TDD RED: `JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index` failed after 27.5s because
+  `WorkerOCServiceImpl` did not yet expose `BeginRecoveryEvidenceGeneration`. This confirmed the new UT was active in
+  the CMake `ds_ut_object` target before implementation.
+- TDD GREEN build/index: same CLion script passed with URMA mock enabled, third-party cache hit, total use time 216s,
+  `compile_commands` entries 1122.
+- New cases added: 1 UT case.
+  - `WorkerOcServiceImplTest.NewRecoveryGenerationInvalidatesOldCompleteEvidence`
+- Focused new-case command:
+  `tests/ut/ds_ut_object --gtest_filter="WorkerOcServiceImplTest.NewRecoveryGenerationInvalidatesOldCompleteEvidence" --gtest_color=no`
+  Result: 1/1 passed, wall time 0.05s.
+- Focused recovery-evidence group command:
+  `tests/ut/ds_ut_object --gtest_filter="WorkerOcServiceImplTest.*RecoveryEvidence*:WorkerOcServiceImplTest.NewRecoveryGenerationInvalidatesOldCompleteEvidence" --gtest_color=no`
+  Result: 3/3 passed, wall time 0.05s.
+- `git diff --check` passed locally.
+- Bazel focused validation status: not completed for this task yet. Previous remote Bazel 7.4.1 lookup remained blocked
+  by `/usr/local/bin/bazel --version` hanging; rerun Bazel once the remote Bazel 7.4.1 path is available or CI returns
+  target results.
