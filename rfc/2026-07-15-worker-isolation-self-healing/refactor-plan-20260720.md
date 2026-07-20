@@ -160,9 +160,10 @@ Callers must not depend on:
   `EtcdKeepAlive`, or kvstore backend internals. Runtime code should receive topology/backend observations from
   `ICoordinationBackend` or from a narrow adapter implemented inside the coordination backend boundary.
 - Runtime/worker callback integration must be covered across backend paths, not only ETCD:
-  ETCD keepalive isolation/recovery, coordinator-service availability changes, metastore-backed startup/recovery when
-  applicable, and the no-external-backend or unsupported-backend fallback path. Unsupported paths must fail closed with
-  explicit `INCONCLUSIVE`/`K_NOT_SUPPORTED` behavior rather than silently opening serving admission.
+  pure ETCD keepalive isolation/recovery, coordinator-service availability changes, metastore-backed startup/recovery
+  when applicable, and the no-external-backend or unsupported-backend fallback path. Pure ETCD backend and Coordinator
+  backend are both required coverage paths. Unsupported paths must fail closed with explicit
+  `INCONCLUSIVE`/`K_NOT_SUPPORTED` behavior rather than silently opening serving admission.
 
 ### Runtime Interface Usage Rules
 
