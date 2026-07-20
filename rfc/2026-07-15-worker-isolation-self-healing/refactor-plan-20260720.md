@@ -38,6 +38,10 @@ Create:
 - `src/datasystem/worker/worker_recovery_evidence_tracker.h`: generation-aware holder for recovery evidence freshness.
 - `src/datasystem/worker/worker_recovery_evidence_tracker.cpp`: tracker implementation.
 - `tests/ut/worker/worker_recovery_evidence_tracker_test.cpp`: focused tracker UT.
+- `src/datasystem/worker/runtime/worker_runtime.h`: stable worker-local runtime facade for state, admission, and
+  topology-availability mapping.
+- `src/datasystem/worker/runtime/worker_runtime.cpp`: facade implementation that owns runtime state and delegates to
+  admission/evidence helpers.
 - `src/datasystem/worker/worker_isolation_coordinator.h`: thin coordinator for local isolation/recovery callback actions.
 - `src/datasystem/worker/worker_isolation_coordinator.cpp`: coordinator implementation.
 - `tests/ut/worker/worker_isolation_coordinator_test.cpp`: focused coordinator UT.
@@ -63,6 +67,85 @@ Modify:
 - Existing hot-path files such as `src/datasystem/worker/object_cache/worker_oc_service_impl.cpp`,
   `src/datasystem/worker/object_cache/worker_worker_oc_service_impl.cpp`, and
   `src/datasystem/worker/worker_service_impl.cpp`.
+
+## Worker Runtime Module Boundary
+
+Use `worker/runtime` as the long-term module name instead of `worker/self_healing`. The module name describes the
+worker-local responsibility rather than the story name.
+
+### Files Owned By `worker/runtime`
+
+- `worker_runtime.h/.cpp`: public facade. This is the preferred include for `worker_oc_server` and other worker entry
+  points.
+- `worker_runtime_state.h/.cpp`: local service mode, isolation reason, evidence snapshot, and state transition rules.
+- `worker_service_admission.h/.cpp`: admission matrix for `WorkerAdmissionKind`.
+- `worker_recovery_controller.h/.cpp`: common recovery evidence model and builder.
+- `worker_recovery_evidence_tracker.h/.cpp`: optional generation-aware evidence freshness tracker when the generic
+  tracker is shared by OC/KV/Stream paths.
+- `worker_topology_availability_admission.h/.cpp`: adapter from cluster topology availability evidence to local runtime
+  state/admission.
+
+Do not move object-cache-local recovery ownership into `worker/runtime`. Keep `ObjectTable`,
+`worker_recovery_evidence_adapter`, `ObjectCacheRecoveryEvidenceTracker`, and `ObjectCacheOwnershipReconciler` in
+`worker/object_cache` because they know metadata, slot, resource, and object ownership details.
+
+### Public Facade
+
+The stable public facade should stay small:
+
+```cpp
+class WorkerRuntime {
+public:
+    WorkerRuntimeSnapshot GetSnapshot() const;
+
+    void MarkStarting(std::string detail = {});
+    void MarkJoining(std::string detail = {});
+    void MarkRunning(WorkerRecoveryEvidenceReport report);
+    void MarkRecovering(WorkerIsolationReason reason, std::string detail,
+                        WorkerRecoveryEvidenceReport report = {});
+    void MarkLocalIsolated(WorkerIsolationReason reason, std::string detail = {});
+    void MarkDraining(WorkerIsolationReason reason, std::string detail = {});
+    void MarkOutOfMemory(std::string detail = {});
+    void MarkStopping(WorkerIsolationReason reason, std::string detail = {});
+
+    Status CheckAdmission(WorkerAdmissionKind kind) const;
+    std::optional<WorkerRuntimeReadGuard> TryAcquireReadGuard(WorkerAdmissionKind kind) const;
+
+    void ApplyTopologyAvailability(cluster::TopologyAvailabilityLevel level,
+                                   const WorkerRecoveryEvidenceReport *report = nullptr);
+    bool ShouldOpenTopologyServingAdmission(cluster::TopologyAvailabilityLevel level) const;
+};
+```
+
+The facade may expose these stable types:
+
+- `WorkerServiceMode`
+- `WorkerIsolationReason`
+- `WorkerAdmissionKind`
+- `WorkerRunningEvidence`
+- `WorkerRecoveryEvidenceReport`
+- `WorkerRuntimeSnapshot`
+- `WorkerRecoveryEvidenceBuilder`
+- `WorkerRuntime`
+
+### Hidden Details
+
+Callers must not depend on:
+
+- the internal admission matrix;
+- `UpdateLocked` or other state-manager internals;
+- how evidence mask values are computed for metrics/protos;
+- how topology availability maps to `RUNNING`, `RECOVERING`, `LOCAL_ISOLATED`, `DRAINING`, or `OUT_OF_MEMORY`;
+- how recovery generations are incremented or stale evidence is rejected;
+- concrete coordination backend internals such as `EtcdStore`.
+
+### Dependency Direction
+
+- `worker_oc_server` may depend on `worker/runtime` and pass object-cache evidence reports into it.
+- `worker/object_cache`, `worker/kv`, and `worker/stream` may consume runtime admission and evidence types.
+- `worker/runtime` may consume cluster public evidence such as `TopologyAvailabilityLevel`.
+- `worker/runtime` must not depend on object-cache internals, master metadata internals, hash-ring mutation details, or
+  concrete backend implementation classes.
 
 ## PR-Internal ObjectCache Abstraction Follow-Up
 
