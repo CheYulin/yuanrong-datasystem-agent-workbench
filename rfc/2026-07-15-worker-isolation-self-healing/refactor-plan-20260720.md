@@ -233,6 +233,93 @@ the diff between `main/master` and PR !1405, not to unrelated mainline cleanup.
   the mutation API changes.
 - Report added case count and elapsed time for every new UT/ST group.
 
+## Master ObjectCache Reconciliation Boundary
+
+PR !1405 also changes master-side object-cache metadata recovery. This code is not part of `worker/runtime`; it belongs
+to `src/datasystem/master/object_cache` because it owns master metadata, primary-copy ownership, and worker notification
+semantics.
+
+### Event-Triggered Operations
+
+- `ReconciliationQueryPb::LOCAL_ISOLATION` should trigger local-isolation metadata fencing:
+  mark the worker faulted, reconcile primary copies whose primary is the isolated worker, persist
+  `PRIMARY_COPY_INVALID` for the old primary, and keep objects on the isolated worker when no acknowledged replacement
+  exists.
+- `ReconciliationQueryPb::NETWORK_RECOVERY` should trigger recovery replay:
+  remove the fault mark, reconcile primary copies, push pending worker operations, and push metadata/grefs back to the
+  recovering worker. If replay fails, restore the fault mark.
+- Restart reconciliation should remain a separate flow:
+  remove worker-owned metadata, clear async worker ops, and push restart metadata when reconciliation is enabled.
+
+### Decoupling Shape
+
+Do not let `MasterOCServiceImpl::IfNeedTriggerReconciliationImpl` directly know every metadata operation. Route the
+event through a small master-OC event handler that depends on injected action hooks:
+
+```cpp
+enum class OCReconciliationEvent {
+    RESTART,
+    LOCAL_ISOLATION,
+    NETWORK_RECOVERY,
+};
+
+struct OCReconciliationRequest {
+    OCReconciliationEvent event;
+    std::string workerAddr;
+    int64_t eventTimestamp{ 0 };
+    bool isOffline{ false };
+};
+
+class IOCReconciliationActions {
+public:
+    virtual ~IOCReconciliationActions() = default;
+    virtual Status MarkWorkerFaulted(const std::string &workerAddr) = 0;
+    virtual Status ClearWorkerFaulted(const std::string &workerAddr) = 0;
+    virtual Status ReconcilePrimaryOwnership(const std::string &workerAddr,
+                                             bool requireAcknowledgedReplacement) = 0;
+    virtual Status RemoveWorkerMetadata(const std::string &workerAddr) = 0;
+    virtual Status ClearWorkerAsyncOps(const std::string &workerAddr) = 0;
+    virtual Status NotifyPendingWorkerOps(const std::string &workerAddr, int64_t timestamp) = 0;
+    virtual Status PushWorkerMetadata(const std::string &workerAddr, int64_t timestamp, bool isRestart) = 0;
+};
+
+class OCReconciliationEventHandler {
+public:
+    explicit OCReconciliationEventHandler(IOCReconciliationActions &actions);
+    Status Handle(const OCReconciliationRequest &request);
+};
+```
+
+The production `IOCReconciliationActions` implementation should live in `master/object_cache` and delegate to
+`OCMetadataManager`, `OCNotifyWorkerManager`, and object-store persistence. Tests should inject fake actions to verify
+event ordering, fault-mark rollback, and error propagation without constructing full master metadata state.
+
+### Primary Ownership Hook
+
+Primary-copy promotion/fencing should also be isolated behind a narrower hook or component:
+
+```cpp
+class IOCPrimaryOwnershipReconciler {
+public:
+    virtual ~IOCPrimaryOwnershipReconciler() = default;
+    virtual Status ReconcileWorkerPrimaryOwnership(const std::string &workerAddr,
+                                                   bool requireAcknowledgedReplacement) = 0;
+};
+```
+
+This component owns candidate collection, acknowledged-copy selection, `SendChangePrimaryCopy`, metadata primary commit,
+and persisted `PRIMARY_COPY_INVALID` fencing. `OCMetadataManager` should eventually delegate these steps instead of
+embedding them inline.
+
+### Boundary Rules
+
+- `master/object_cache` must not depend on `worker/runtime`, `WorkerServiceMode`, or runtime admission details.
+- `worker/runtime` must not call master metadata recovery methods.
+- `MasterOCServiceImpl` should translate proto event type to `OCReconciliationEvent` and call the event handler; it
+  should not directly sequence metadata cleanup, primary promotion, and worker notification.
+- Event handler tests must assert operation order for LOCAL_ISOLATION, NETWORK_RECOVERY, and RESTART, including failure
+  rollback for NETWORK_RECOVERY.
+
 ## Task 1: Recovery Evidence Tracker
 
 **Files:**
