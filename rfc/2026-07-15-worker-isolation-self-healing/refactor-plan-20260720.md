@@ -1456,3 +1456,37 @@ Mandatory `ICoordinationBackend` boundary items remain:
   - `c91e16856 fix(worker): clear runtime state test codecheck warnings`
   - Branch was checked against latest `main/master=34bbc3df5` and pushed to MR !1405.
   - Retest note id after the push: `180842866`, CI job 7827.
+
+### 2026-07-21 CodeCheck Follow-Up Round 5
+
+- CI retest result before this round:
+  - Retest note id `180842866` triggered CI job 7827.
+  - CodeCheck failed and pointed to OpenLibing report
+    `MR_304fef70a4824f0090df8c72eaa86627/61d58a3e2163ba872bd0ccc9502dd4f7`.
+  - The portal detail API was still not reliably callable from CLI, so the local changed-line `clang-tidy` scan was used
+    to reproduce and close actionable warnings.
+- Local issues isolated and fixed:
+  - `worker_runtime_state.h`, `worker_recovery_controller.h`, `worker_control_backend_scope.h`, and
+    `worker_service_admission.h`: narrowed small enum base types to `std::uint8_t`.
+  - `worker_isolation_coordinator.h`: removed redundant default member initializers from callback hooks.
+  - `worker_recovery_evidence_tracker_test.cpp`: replaced unchecked optional access with explicit value validation.
+  - `worker_isolation_coordinator_test.cpp`: changed callback parameter passing to const reference and initialized hook
+    fields explicitly before move.
+  - `worker_control_backend_scope_test.cpp`: replaced the stale-evidence magic number with a named duration constant.
+- Validation after the fixes:
+  - `git diff --check` passed.
+  - `clang-format-diff` over changed C++ hunks produced no remaining diff.
+  - Focused changed-line `clang-tidy` on the 8 fixed files passed with `CHANGED_LINE_WARNINGS 0` and
+    `BAD_RETURNCODES 0` after suppressing compile-database linker-argument noise via
+    `-extra-arg=-Wno-unused-command-line-argument`.
+  - CLion remote `tests-index` passed with URMA mock enabled, source build 129s, total 210s, and
+    `compile_commands` entries 1128. The script finished with
+    `.clion-remote/worker-self-healing-main-20260716/build/compile_commands.json` ready for local indexing.
+  - CMake focused UT
+    `WorkerControlBackendScopeTest.*:WorkerIsolationCoordinatorTest.*:WorkerRecoveryControllerTest.*:WorkerRecoveryEvidenceTrackerTest.*:WorkerServiceAdmissionTest.*:WorkerRuntimeStateTest.*`:
+    35/35 passed, GoogleTest time 259 ms, command wall time 0.31s.
+  - Bazel 7.4.1 focused validation with URMA mock and local proxy `127.0.0.1:17897`: 6/6 worker UT targets passed.
+    The latest cached run completed in 0:05.46; the previous non-fully-cached run for the same target set completed in
+    0:08.66.
+  - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`,
+    file_count 133, comment_count 162, total_changed_lines 13766.
