@@ -1387,3 +1387,44 @@ Mandatory `ICoordinationBackend` boundary items remain:
   - Bazel rebuilt third-party actions in this round because the validation used a fresh output root
     `/home/bazel-output/worker-self-healing-bazel-proxy`; this is separate from the CLion/CMake third-party cache, which
     remained a 0s cache hit. Keeping the same Bazel output root should make later Bazel runs incremental.
+
+### 2026-07-21 CodeCheck/Bazel Follow-Up Round 3
+
+- Local issues isolated and fixed after the next focused Bazel pass:
+  - `tests/ut/worker:worker_service_admission_test` missed a direct Bazel dependency on
+    `//src/datasystem/worker:metadata_route_resolver`; CMake allowed it transitively, Bazel did not.
+  - `WorkerRuntimeStateTest.RecordsLocalIsolationAndRecoveryReason` used `EXPECT_EQ` on `const char *` returned by
+    `ToString(...)`, which compared pointer values under Bazel; changed to `EXPECT_STREQ`.
+  - `worker_control_backend_scope` mixed pure backend-evidence classification and real peer RPC probing in one library.
+    Added `worker_control_backend_scope_classification.cpp` plus a light Bazel/CMake target so the pure classification
+    UT no longer links object-cache RPC internals.
+- Static/check tooling after the fixes:
+  - `git diff --check` passed.
+  - `clang-format-diff` over changed C++ hunks produced no remaining diff.
+  - `clang-tidy -p compile_commands.json` on
+    `worker_control_backend_scope_classification.cpp`, `worker_control_backend_scope.cpp`, and
+    `worker_runtime_state_test.cpp` passed with `--extra-arg=-Wno-unused-command-line-argument`; remaining warnings were
+    old test-file lines outside this round's changed hunks.
+  - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`.
+- CLion/CMake build/index after the fixes:
+  - Command: `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+  - Result: passed with URMA mock enabled, third-party cache hit with `Compile thirdparty libraries success, total wall time: 0s`,
+    source build 48s, total 144s, `compile_commands` entries 1128.
+- Focused CMake UT after the fixes:
+  - `WorkerControlBackendScopeTest.*:WorkerAdmissionFacadeTest.*:WorkerServiceAdmissionTest.*:WorkerRuntimeStateTest.*`:
+    30/30 passed, GoogleTest time 259 ms, command wall time 0.31s.
+  - `ds_ut_object --gtest_filter="*MetadataRecovery*:WorkerOcServiceImplTest.RetryFailedMetadataRecovery*:SlotRecoveryTest.ExecuteRecoveryTask*:SlotRecoveryTest.ExecuteRecoveryTaskShouldPushSucceededSlotsEvenWhenAnotherSlotPreloadFails"`:
+    28/28 passed, GoogleTest time 548 ms, command wall time 0.60s.
+- Bazel 7.4.1 focused validation after the fixes:
+  - Tests `//tests/ut/worker:worker_admission_facade_test`,
+    `//tests/ut/worker:worker_isolation_coordinator_test`,
+    `//tests/ut/worker:worker_control_backend_scope_test`,
+    `//tests/ut/worker:worker_runtime_state_test`, and
+    `//tests/ut/worker:worker_service_admission_test`: 5/5 targets passed, command wall time 0:18.37.
+  - Command used Bazel 7.4.1, `--output_user_root=/home/bazel-output/worker-self-healing-bazel-proxy`,
+    `--distdir=/home/ds-bazel-distdir`, URMA mock config, and local reverse proxy `127.0.0.1:17897`.
+- Boundary follow-up recorded:
+  - Keep `worker_control_backend_scope_classification` as the pure evidence classifier.
+  - Move any future peer probing / backend-scope runtime orchestration behind `RuntimeFacade` or an equivalent worker
+    runtime boundary; other modules should not couple directly to object-cache RPC internals for classification-only use
+    cases.
