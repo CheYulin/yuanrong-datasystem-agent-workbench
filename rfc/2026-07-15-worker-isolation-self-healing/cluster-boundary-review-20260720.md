@@ -36,6 +36,26 @@ is complete, fresh, and role-isolated."
 | CB-I06 | Normal object, stream, KV, migration, and recovery RPC admission must all be covered consistently. | Partial. Object/migration coverage is stronger than stream/KV; some hot paths still need linearization. | Fix CB-05/CB-06 or mark scope limits in PR. |
 | CB-I07 | Scale-in/scale-out overlap with fault/recovery must be explicit acceptance coverage, not implied by separate tests. | Open. Base self-healing coverage exists; overlap matrix remains incomplete. | Track in `scale-fault-overlap-followups.md`. |
 
+## Refactoring Strategy
+
+The accepted implementation direction is Plan A: thin abstractions and gradual cohesion.
+
+The goal is not to rename the current code until it looks exactly like the original story design. The goal is to make
+the current PR easier to audit while preserving the existing topology, metadata recovery, slot recovery, stream, and KV
+flows.
+
+Planned thin abstractions:
+
+- `WorkerRecoveryEvidenceTracker`: owns recovery generation and freshness. Existing metadata/slot/resource/ownership
+  evidence producers remain where they are, but stale evidence can no longer complete a new recovery cycle.
+- `WorkerIsolationCoordinator`: owns the local isolation/recovery action sequence currently embedded in
+  `WorkerOCServer` lambdas. It may close local admission and drive recovery callbacks, but it must not write topology or
+  master metadata.
+- `WorkerAdmissionFacade`: wraps `WorkerServiceAdmission` with named operations and read-guard acquisition so hot paths
+  can use the same admission vocabulary without duplicating mode checks.
+
+Implementation plan: `refactor-plan-20260720.md`.
+
 ## Required Plan Items
 
 ### CB-01: Delay READY Until Recovery Evidence Completes
@@ -137,14 +157,16 @@ Object and migration. Stream/KV paths need either implementation closure or an e
 
 Required behavior:
 
-- If in scope for PR !1405, wire stream and KV business paths to the same runtime/admission policy.
-- If out of scope for this stage, state that in the PR plan and add named follow-up acceptance cases.
+- In Plan A, keep stream and KV source changes out of the cohesion refactor to avoid expanding the PR blast radius.
+- Record stream and KV admission as explicit follow-up acceptance cases, and do not claim full Stream/KV closure in
+  PR !1405 until those cases have active tests.
 
 Acceptance cases:
 
-- Stream put/get-like business paths reject normal traffic during `LOCAL_ISOLATED` and `RECOVERING`.
-- KV paths reject normal traffic during `LOCAL_ISOLATED` and `RECOVERING`, while explicitly allowed recovery/internal
-  probes remain usable.
+- `CB-06-SC-01`: Stream worker client-facing business RPC rejects normal traffic during `LOCAL_ISOLATED`.
+- `CB-06-SC-02`: Stream worker client-facing business RPC rejects normal traffic during `RECOVERING`.
+- `CB-06-KV-01`: KV worker-facing normal request rejects during `LOCAL_ISOLATED`.
+- `CB-06-KV-02`: KV worker-facing normal request rejects during `RECOVERING`.
 
 ### CB-07: Close Scale/Fault Overlap Matrix
 
