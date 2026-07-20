@@ -186,6 +186,10 @@ Callers must not depend on:
 - The current `worker_control_backend_scope.*` implementation uses object-cache worker-worker RPCs as its peer probe
   transport. When moving under `worker/runtime`, hide that dependency behind a narrow probe interface so the public
   runtime API does not expose object-cache transport classes.
+- Keep the current `worker/object_cache/worker_worker_peer_state_codec.*` behavior for PR !1405, including backend
+  observation refresh and UUID string/bytes conversion. In the follow-up refactor, wrap it behind a runtime-private
+  `IControlBackendPeerProbe` interface so `control_backend_failure_scope` depends on a probe abstraction, not directly
+  on object-cache worker-worker RPC codec/transport classes.
 
 ## PR-Internal ObjectCache Abstraction Follow-Up
 
