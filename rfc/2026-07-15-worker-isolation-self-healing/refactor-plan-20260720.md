@@ -1428,3 +1428,31 @@ Mandatory `ICoordinationBackend` boundary items remain:
   - Move any future peer probing / backend-scope runtime orchestration behind `RuntimeFacade` or an equivalent worker
     runtime boundary; other modules should not couple directly to object-cache RPC internals for classification-only use
     cases.
+
+### 2026-07-21 CodeCheck Follow-Up Round 4
+
+- CI retest result before this round:
+  - Retest note id `180842741` triggered CI job 7826.
+  - CLA passed; CodeCheck failed and pointed to OpenLibing report
+    `MR_b0213b537aef4e00a3d09b6ac61a21a8/d6f06bd2839aeb4b3ac1d9b5d2e55598`.
+  - The report shell HTML was accessible, but direct detail API access from CLI was still blocked by portal routing/auth;
+    local changed-line `clang-tidy` was used to isolate actionable warnings.
+- Local issues isolated and fixed:
+  - `tests/ut/worker/worker_runtime_state_test.cpp`: replaced sleep/retry magic numbers with named constants.
+  - Removed an unnecessary lambda capture in inject cleanup.
+  - Replaced unchecked optional `operator->` access with an explicit failure branch plus `value()` after validation.
+- Validation after the fixes:
+  - `git diff --check` passed.
+  - `clang-format-diff` over `worker_runtime_state_test.cpp` produced no remaining diff.
+  - Single-file `clang-tidy -p compile_commands.json tests/ut/worker/worker_runtime_state_test.cpp --extra-arg=-Wno-unused-command-line-argument`
+    exited 0.
+  - Changed-line warning filter for `worker_runtime_state_test.cpp`: 0 warnings.
+  - CMake UT `WorkerRuntimeStateTest.*`: 15/15 passed, GoogleTest time 205 ms, command wall time 0.29s.
+  - Bazel 7.4.1 test `//tests/ut/worker:worker_runtime_state_test` with URMA mock: 1/1 target passed, command wall
+    time 0:09.72.
+  - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`,
+    file_count 133, total_changed_lines 13766.
+- Product commit:
+  - `c91e16856 fix(worker): clear runtime state test codecheck warnings`
+  - Branch was checked against latest `main/master=34bbc3df5` and pushed to MR !1405.
+  - Retest note id after the push: `180842866`, CI job 7827.
