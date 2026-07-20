@@ -1106,3 +1106,36 @@ Mandatory `ICoordinationBackend` boundary items remain:
 - Bazel focused validation status: not completed for this task yet. Previous remote Bazel 7.4.1 lookup remained blocked
   by `/usr/local/bin/bazel --version` hanging; rerun Bazel once the remote Bazel 7.4.1 path is available or CI returns
   target results.
+
+### 2026-07-21 Task 3 Worker Isolation Coordinator
+
+- Commit: `0617e49fb refactor(worker): coordinate local isolation recovery actions`, pushed to MR !1405 branch
+  `feat/worker-self-healing-main-20260716`. Scope is limited to adding `WorkerIsolationCoordinator`, moving the local
+  isolation/recovery action sequence out of `WorkerOCServer::InitCoordinationBackend()`, and adding focused UT/build
+  entries.
+- Correct-base check: `git rebase main/master` reported the branch was up to date. An earlier attempt against
+  `origin/master` was aborted because that ref was older and tried to replay 676 historical commits.
+- TDD RED: `JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index` failed in the new
+  `WorkerIsolationCoordinatorTest` path after the test was added, first on missing/default hook initialization. This
+  confirmed the new UT was in the default CMake `ds_ut` build path.
+- TDD GREEN build/index: same CLion script passed with URMA mock enabled, third-party cache hit, total use time 169s,
+  `compile_commands` entries 1124.
+- New cases added: 2 UT cases.
+  - `WorkerIsolationCoordinatorTest.LocalIsolationClosesAdmissionAndKeepsProcessAlive`
+  - `WorkerIsolationCoordinatorTest.LocalRecoveryStartsRecoveringBeforeTopologyReconciliation`
+- Focused new-case command:
+  `tests/ut/ds_ut --gtest_filter="WorkerIsolationCoordinatorTest.*" --gtest_color=no`
+  Result: 2/2 passed, wall time 0.06s.
+- Focused runtime/recovery/admission group command:
+  `tests/ut/ds_ut --gtest_filter="WorkerIsolationCoordinatorTest.*:WorkerRecoveryControllerTest.*:WorkerRuntimeStateTest.*:WorkerServiceAdmissionTest.*:WorkerTopologyAvailabilityAdmissionTest.*" --gtest_color=no`
+  Result: 38/38 passed, wall time 0.32s.
+- ETCD keepalive ST command:
+  `tests/st/ds_st --gtest_filter="EtcdStoreTest.TestKeepAliveFailedDueToNetworkerFailure:EtcdStoreTest.TestKeepAliveGlobalEtcdFailureDoesNotReportLocalIsolation" --gtest_color=no`
+  Result: 2/2 passed, wall time 18.03s.
+- Worker keepalive/object-cache ST command:
+  `tests/st/ds_st_object_cache --gtest_filter="WorkerPushMetaTest.LEVEL1_TestGlobalBackendOutageDoesNotSelfIsolateWorkers:WorkerPushMetaTest.LEVEL1_TestKeepAliveLocalIsolationRecoversThroughEvidenceGate" --gtest_color=no`
+  Result: 2/2 passed, wall time 40.30s.
+- `git diff --check` and changed-file `clang-format --dry-run --Werror` passed locally after formatting only changed
+  hunks.
+- Bazel focused validation status: not completed for this task yet because the remote Bazel 7.4.1 path is still not
+  repaired in the local Tiantiyun shell.
