@@ -17,8 +17,9 @@ infrastructure, URMA mock enabled for UT/ST runs that need URMA paths.
 
 - Use the existing worktree: `/home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/worker-self-healing-main-20260716`.
 - Rebase latest `main/master` before implementation and again before final regression.
-- Minimize modifications outside `src/datasystem/worker`, `src/datasystem/common/kvstore/etcd`,
-  `src/datasystem/cluster/coordination_backend`, and their focused tests.
+- Minimize implementation changes to `src/datasystem/worker` and focused worker tests.
+- Any cluster interaction must go through `ICoordinationBackend` interfaces or worker-owned callbacks; do not make the
+  worker self-healing plan depend on direct `EtcdStore` or ETCD adapter internals.
 - Do not directly write `ClusterTopologyPb`, cluster node table, hash ring membership, topology stamp, or master
   metadata from worker self-healing code.
 - Do not count disabled tests as acceptance coverage.
@@ -53,8 +54,10 @@ Modify:
 - `src/datasystem/worker/object_cache/worker_oc_service_impl.cpp`: invalidate evidence on recovery start and publish only matching-generation reports.
 - `src/datasystem/worker/worker_oc_server.h`: add a `std::unique_ptr<WorkerIsolationCoordinator>` member.
 - `src/datasystem/worker/worker_oc_server.cpp`: replace inline local isolation/recovery lambdas with coordinator calls.
-- `src/datasystem/cluster/coordination_backend/etcd_coordination_backend.cpp`: make callback clearing role-scoped or no-op for controller-only shutdown.
-- `tests/ut/cluster/coordination_backend_contract_test.cpp`: prove controller shutdown does not clear worker callbacks.
+- `src/datasystem/cluster/coordination_backend/coordination_backend.h`: document the member/controller callback ownership
+  contract only if the interface lacks enough wording for review.
+- `tests/ut/cluster/coordination_backend_contract_test.cpp`: optional contract test for `ICoordinationBackend` role
+  separation, implemented with fake backends rather than ETCD internals.
 - Existing hot-path files such as `src/datasystem/worker/object_cache/worker_oc_service_impl.cpp`,
   `src/datasystem/worker/object_cache/worker_worker_oc_service_impl.cpp`, and
   `src/datasystem/worker/worker_service_impl.cpp`.
@@ -360,64 +363,69 @@ git add src/datasystem/worker/worker_isolation_coordinator.* \
 git commit -m "refactor(worker): centralize local isolation recovery actions"
 ```
 
-## Task 4: Role-Scoped Coordination Backend Callback Lifecycle
+## Task 4: ICoordinationBackend Role Boundary Audit
 
 **Files:**
 
-- Modify: `src/datasystem/cluster/coordination_backend/etcd_coordination_backend.cpp`
-- Modify: `src/datasystem/cluster/coordination_backend/etcd_coordination_backend.h`
-- Modify: `src/datasystem/common/kvstore/etcd/etcd_store.h`
-- Modify: `tests/ut/cluster/coordination_backend_contract_test.cpp`
+- Modify: `src/datasystem/cluster/coordination_backend/coordination_backend.h` only if contract comments need to state
+  callback ownership explicitly.
+- Modify: `tests/ut/cluster/coordination_backend_contract_test.cpp` only if a backend-agnostic fake contract test is
+  needed.
+- Do not modify `src/datasystem/cluster/coordination_backend/etcd_coordination_backend.*`.
+- Do not modify `src/datasystem/common/kvstore/etcd/etcd_store.*`.
 
 **Interfaces:**
 
-- Consumes: existing `EtcdStore::SetLocalIsolationHandler()` and `SetLocalRecoveryHandler()`.
+- Consumes: `ICoordinationBackend::ShutdownEventSources()`, `ICoordinationBackend::Shutdown()`,
+  `ICoordinationBackend::SetEventHandler()`, `ICoordinationBackend::InitKeepAlive()`, and worker-owned local isolation
+  callbacks registered outside the topology controller path.
 - Produces:
-  - `enum class CoordinationBackendRole { MEMBER = 0, CONTROLLER };`
-  - `explicit EtcdCoordinationBackend(EtcdStore *etcdStore);`
-  - `EtcdCoordinationBackend(EtcdStore *etcdStore, CoordinationBackendRole role);`
-  - `bool EtcdStore::HasLocalIsolationHandlerForTest() const;`
-  - `bool EtcdStore::HasLocalRecoveryHandlerForTest() const;`
-  - Worker/member shutdown may clear keepalive callbacks; controller-only shutdown may not.
+  - written contract statement: member/backend ownership of keepalive local-isolation callbacks is separate from
+    controller topology watch ownership;
+  - worker self-healing code must not clear or mutate callbacks by reaching into backend implementation classes;
+  - backend implementation fixes, if required, are split into a separate PR owned by the coordination backend module.
 
-- [ ] **Step 1: Write failing lifecycle UT**
-
-Add test:
-
-```cpp
-TEST(CoordinationBackendContractTest, ControllerShutdownDoesNotClearWorkerKeepAliveHandlers)
-{
-    EtcdStore store("127.0.0.1:2379");
-    store.SetLocalIsolationHandler([](const Status &) {});
-    store.SetLocalRecoveryHandler([] {});
-
-    EtcdCoordinationBackend controllerBackend(&store, CoordinationBackendRole::CONTROLLER);
-    EXPECT_TRUE(controllerBackend.ShutdownEventSources().IsOk());
-
-    EXPECT_TRUE(store.HasLocalIsolationHandlerForTest());
-    EXPECT_TRUE(store.HasLocalRecoveryHandlerForTest());
-}
-```
-
-Add `HasLocalIsolationHandlerForTest()` and `HasLocalRecoveryHandlerForTest()` as public methods compiled only when
-`WITH_TESTS` is defined. They return whether the corresponding `std::function` is non-empty and do not invoke callbacks.
-
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 1: Audit current `ICoordinationBackend` usage**
 
 Run:
 
 ```bash
-time ./build/tests/ut/cluster_topology_contract_ut --gtest_filter='CoordinationBackendContractTest.ControllerShutdownDoesNotClearWorkerKeepAliveHandlers'
+cd /home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/worker-self-healing-main-20260716
+rg -n "ICoordinationBackend|ShutdownEventSources|InitKeepAlive|SetEventHandler|SetLocalIsolationHandler|SetLocalRecoveryHandler" \
+  src/datasystem/cluster src/datasystem/worker src/datasystem/common/kvstore/etcd tests/ut/cluster tests/ut/worker
 ```
 
-Expected: FAIL because controller shutdown currently clears callbacks.
+Expected: a short evidence list showing which module owns member keepalive callbacks and which module owns controller
+watch callbacks.
 
-- [ ] **Step 3: Implement minimal role scoping**
+- [ ] **Step 2: Update contract wording or fake contract test**
 
-Add a role flag to `EtcdCoordinationBackend`. `ShutdownEventSources()` clears local isolation/recovery handlers only for
-the Worker/member backend role. Avoid creating new topology ownership paths.
+If source comments are enough, do not change DataSystem source. If contract wording is ambiguous, add this wording to
+`coordination_backend.h` near `ShutdownEventSources()`:
 
-- [ ] **Step 4: Run focused cluster UT and record time**
+```cpp
+/**
+ * @brief Idempotently stop asynchronous event sources owned by this backend instance.
+ *
+ * A controller/topology backend must not clear worker/member keepalive local-isolation callbacks that it does not own.
+ * Worker self-healing must interact through the backend contract or worker-owned callbacks, not backend internals.
+ */
+virtual Status ShutdownEventSources() = 0;
+```
+
+If a test is needed, write it against a fake `ICoordinationBackend` in `coordination_backend_contract_test.cpp` that
+tracks shutdown ownership at the interface level. The fake must not include or instantiate `EtcdStore`.
+
+- [ ] **Step 3: Record backend implementation risk as follow-up**
+
+Update `cluster-boundary-review-20260720.md` CB-03 with:
+
+- current Plan A does not directly modify ETCD backend or kvstore internals;
+- the required boundary is `ICoordinationBackend` role ownership;
+- any ETCD-specific callback lifecycle fix must be a separate coordination-backend change if the interface audit proves
+  current implementation violates the contract.
+
+- [ ] **Step 4: Run focused cluster contract UT only if changed**
 
 Run:
 
@@ -425,16 +433,18 @@ Run:
 time ./build/tests/ut/cluster_topology_contract_ut --gtest_filter='*CoordinationBackend*:*TopologyRuntimeComposition*'
 ```
 
-Expected: PASS. Record elapsed time and added case count.
+Expected: PASS if `coordination_backend.h` or contract tests changed. If only RFC docs changed, record "not run,
+documentation-only".
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/datasystem/cluster/coordination_backend/etcd_coordination_backend.* \
-        src/datasystem/common/kvstore/etcd/etcd_store.h \
+git add src/datasystem/cluster/coordination_backend/coordination_backend.h \
         tests/ut/cluster/coordination_backend_contract_test.cpp
-git commit -m "fix(cluster): keep worker isolation callbacks across controller shutdown"
+git commit -m "docs(cluster): clarify coordination backend callback ownership"
 ```
+
+If no DataSystem source/test file changed, skip this DataSystem commit and commit only the workbench RFC update.
 
 ## Task 5: Admission Facade and Hot-Path Linearization
 

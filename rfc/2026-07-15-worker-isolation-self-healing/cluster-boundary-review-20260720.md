@@ -31,7 +31,7 @@ is complete, fresh, and role-isolated."
 | CB-I01 | Worker local isolation can only narrow local service admission; it cannot directly change cluster topology authority. | Mostly satisfied. No direct self-healing topology CAS path was found. | Keep this as a regression check during review and rebase. |
 | CB-I02 | `READY`, `ACTIVE`, and `RUNNING` are separate views; recovery must finish before a worker is visible for normal service. | Gap. Current recovery callback can call `MarkReady()` before recovery evidence is complete. | Fix CB-01 before merge. |
 | CB-I03 | Recovery evidence must be fresh for the current isolation/recovery generation. | Gap. Old or empty metadata evidence can be reused across recovery cycles. | Fix CB-02 before merge. |
-| CB-I04 | Worker-role and controller-role coordination backends must not share lifecycle that can clear each other's event callbacks. | Gap. ETCD mode currently shares the Worker-owned `EtcdStore` between member and controller backend paths. | Fix CB-03 before merge or explicitly split into a blocking follow-up. |
+| CB-I04 | Worker-role and controller-role coordination backends must not share lifecycle that can clear each other's event callbacks. | Gap. The boundary must be expressed at `ICoordinationBackend` ownership level, not by worker code reaching into backend implementations. | Audit CB-03 through the coordination backend contract; split backend-specific implementation fixes out of Plan A. |
 | CB-I05 | Unknown or inconclusive backend evidence must fail closed for this worker's normal admission. | Gap. `INCONCLUSIVE` does not clearly drive local admission closure. | Fix CB-04 before merge or record an explicit staged risk decision. |
 | CB-I06 | Normal object, stream, KV, migration, and recovery RPC admission must all be covered consistently. | Partial. Object/migration coverage is stronger than stream/KV; some hot paths still need linearization. | Fix CB-05/CB-06 or mark scope limits in PR. |
 | CB-I07 | Scale-in/scale-out overlap with fault/recovery must be explicit acceptance coverage, not implied by separate tests. | Open. Base self-healing coverage exists; overlap matrix remains incomplete. | Track in `scale-fault-overlap-followups.md`. |
@@ -97,21 +97,23 @@ Acceptance cases:
 
 ### CB-03: Separate Worker and Controller Coordination Backend Lifecycles
 
-Problem: ETCD mode currently creates member and controller coordination backends from the same Worker-owned `EtcdStore`.
-`EtcdCoordinationBackend::ShutdownEventSources()` clears local isolation/recovery handlers, so controller runtime
-shutdown can remove Worker self-healing callbacks.
+Problem: worker self-healing depends on member keepalive local-isolation/recovery callbacks, while topology/controller
+runtime owns controller watch/event-source lifecycle. The correctness boundary is `ICoordinationBackend` ownership:
+controller shutdown must not clear worker/member callbacks it does not own. This should not be modeled as worker code
+directly modifying `EtcdCoordinationBackend` or `EtcdStore` internals.
 
 Required behavior:
 
-- Use distinct `ICoordinationBackend`/`EtcdStore` instances or explicit role-scoped callback ownership for Worker
-  membership and Controller topology event sources.
+- Use distinct `ICoordinationBackend` role ownership for Worker membership and Controller topology event sources.
 - Only the Worker/member backend may own keepalive local-isolation and local-recovery callbacks.
 - Controller backend shutdown must not clear Worker keepalive callbacks or change Worker business admission.
+- If a concrete backend violates this contract, fix it as a coordination-backend change with backend-owned tests, not as
+  a worker self-healing module change.
 
 Acceptance cases:
 
-- Start Worker and Controller roles, register local isolation/recovery handlers, stop only the controller runtime, and
-  verify Worker keepalive callbacks remain installed.
+- Start Worker and Controller roles through `ICoordinationBackend`-level seams, register local isolation/recovery
+  handlers on the member side, stop only the controller runtime, and verify Worker keepalive callbacks remain installed.
 - Trigger local isolation after controller shutdown and verify admission still closes through the Worker path.
 
 ### CB-04: Fail Closed on Inconclusive Backend Scope
