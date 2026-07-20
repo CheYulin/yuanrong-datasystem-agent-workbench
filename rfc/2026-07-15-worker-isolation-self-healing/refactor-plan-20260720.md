@@ -366,7 +366,7 @@ by reviewers.
 | `WorkerServiceAdmissionRejectsReadWriteDuringIsolation` | Object/KV/Stream ordinary read/write must fail fast in `LOCAL_ISOLATED` and `RECOVERING`. | Object path is better covered than KV/Stream; KV/Stream remain gaps. | Add KV Get/Set and Stream Publish/Subscribe admission tests; do not rely only on indirect lifecycle tests. |
 | `MigrationTargetFiltersIsolatedWorker` | Rebalance/migration target selection filters `LOCAL_ISOLATED`, `RECOVERING`, and `DRAINING`; target RPC rejects too. | Partially covered by rebalance guard. | Add candidate-selection UT plus target-RPC admission regression. |
 | `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect` | A second control-backend disconnect during recovery must not half-open ordinary service. | Covered by enabled UT `WorkerRecoveryControllerTest.SecondDisconnectDuringRecoveryKeepsAdmissionClosed`. | Keep in focused worker UT/Bazel regression and extend later with a higher-level `RuntimeFacade` callback case if review asks for end-to-end backend injection. |
-| `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability` | Failed metadata rebuild entries have finite retry budget; success entries and other workers proceed. | Missing/incomplete. | Add retry-budget UT using fake `RecoverMetadataWithSummary`; assert failed entries do not block successful evidence or other worker availability. |
+| `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability` | Failed metadata rebuild entries have finite retry budget; success entries and other workers proceed. | Covered at worker object-cache retry boundary by enabled UT `WorkerOcServiceImplTest.RetryFailedMetadataRecoveryBestEffortDoesNotBlockRecoveredEntries`; still needs higher-level availability evidence wiring after `RuntimeFacade` refactor. | Keep the focused UT in regression and extend later so runtime availability evidence ignores unresolved entries after bounded retry/cleanup accounting. |
 | `MetadataRecoveryDoesNotHoldObjectTableLockDuringFullScan` | Recovery scans by candidate/shard/snapshot batch; no long write-lock full-table traversal. | Partially covered by `ObjectTable` snapshot index, but needs performance-oriented regression. | Add focused ObjectTable/concurrent scan UT with bounded batch size and lock-hold metric assertion where feasible. |
 | topology/metadata/slot/notify-worker UT + KV/Object ST regression | Existing recovery capability must not regress; legal recovery RPCs must not be blocked by admission. | Needs final full regression after rebase. | Run and record focused CMake/Bazel UT/ST plus CI retest; report case count and elapsed time for new cases. |
 
@@ -390,9 +390,14 @@ by reviewers.
   boundary: after `RECOVERING` sees a second backend disconnect and moves to `LOCAL_ISOLATED`, late complete evidence
   cannot reopen `RUNNING`. CMake `WorkerRecoveryControllerTest.*`: 4/4 passed, elapsed 0.05s. Bazel 7.4.1 +
   URMA mock `//tests/ut/worker:worker_recovery_controller_test`: 1 target passed, test time 0.5s, elapsed 0:07.51.
-- [ ] Add `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability`. Use fake metadata recovery results with success,
-  retryable, and hard-failed entries. Assert retry budget is finite, successful objects produce evidence, failed objects
-  remain invisible or enter cleanup, and other workers are not blocked.
+- [x] Add `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability`. Enabled UT
+  `WorkerOcServiceImplTest.RetryFailedMetadataRecoveryBestEffortDoesNotBlockRecoveredEntries` uses fake metadata recovery
+  results with one recovered object, one clearable object, and one unresolved object. It asserts recovered entries stay
+  visible, clearable unrecoverable entries are removed, unresolved IDs are reported as best-effort failures, and the
+  result does not discard successful progress. Added case count: 1. CMake `ds_ut_object` focused filter: 1/1 passed,
+  test time 3ms, elapsed 0.05s; target rebuild elapsed 50.62s. Bazel 7.4.1 + URMA mock
+  `//tests/ut/worker:worker_oc_service_impl_test`: 1 target passed, test time 15.3s, elapsed 0:59.89 after incremental
+  rebuild. Changed-line clang-tidy warnings: 0, and no codecheck suppression is used for this case.
 - [ ] Add isolated-worker E2E coverage for `RecoverableLocalDataRebuildsOrUpdatesMetadata`. The test must drive
   `LOCAL_ISOLATED -> RECOVERING`, recover or update metadata for provably owned local data, record success/failed
   summary, and open admission only after evidence passes.
