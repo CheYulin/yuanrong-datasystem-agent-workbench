@@ -817,7 +817,7 @@ If no DataSystem source/test file changed, skip this DataSystem commit and commi
   - `Status CheckRecoveryRpc(const std::string &operation) const;`
   - `std::optional<WorkerRuntimeStateReadGuard> TryAcquireNormalGuard(const std::string &operation) const;`
 
-- [ ] **Step 1: Write failing facade UT**
+- [x] **Step 1: Write failing facade UT**
 
 Add tests:
 
@@ -844,7 +844,7 @@ TEST(WorkerAdmissionFacadeTest, RecoveryRpcAllowedOnlyInRecovering)
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -854,18 +854,24 @@ time ./build/tests/ut/ds_ut --gtest_filter='WorkerAdmissionFacadeTest.*'
 
 Expected: build fails because facade does not exist.
 
-- [ ] **Step 3: Implement facade**
+Observed RED evidence:
+
+- Command: `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+- Result: CMake configure failed because `worker_admission_facade.cpp` did not exist yet.
+- Elapsed: 9.3s.
+
+- [x] **Step 3: Implement facade**
 
 Wrap existing `WorkerServiceAdmission`. `TryAcquireNormalGuard()` first acquires `WorkerRuntimeStateReadGuard`, then
 runs `WorkerServiceAdmission::Check(snapshot, WorkerAdmissionKind::NORMAL_WRITE, operation)` against the guarded
 snapshot. Return empty optional on failure.
 
-- [ ] **Step 4: Integrate lowest-risk object hot paths**
+- [x] **Step 4: Integrate lowest-risk object hot paths**
 
 Replace scattered snapshot-only checks only where they guard Object and base Worker critical business sections. Keep
 operation behavior unchanged and do not modify stream/KV source files in this task.
 
-- [ ] **Step 5: Run focused UT and record time**
+- [x] **Step 5: Run focused UT and record time**
 
 Run:
 
@@ -876,7 +882,37 @@ time ./build/tests/ut/ds_ut_object --gtest_filter='WorkerOCServiceImplTest.*Admi
 
 Expected: PASS. Record elapsed time and added case count.
 
-- [ ] **Step 6: Commit**
+Observed GREEN evidence:
+
+- CLion/CMake with URMA mock and remote proxy:
+  `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+  passed; source build 66s, total 180s, `compile_commands.json` entries 1127.
+- New facade UT:
+  `.clion-remote/worker-self-healing-main-20260716/build/tests/ut/ds_ut --gtest_filter="WorkerAdmissionFacadeTest.*" --gtest_color=no`
+  passed 2/2 cases; gtest time 0 ms; wall time 0.05s.
+- Runtime/admission focused group:
+  `ds_ut --gtest_filter="WorkerAdmissionFacadeTest.*:WorkerServiceAdmissionTest.*:WorkerRuntimeStateTest.*"`
+  passed 24/24 cases; gtest time 258 ms; wall time 0.31s.
+- Object admission group:
+  `ds_ut_object --gtest_filter="*Admission*"`
+  passed 5/5 cases; gtest time 121 ms; wall time 0.17s. The initial narrower object filter matched 0 tests and was not counted.
+- Bazel 7.4.1 build with URMA mock, distdir, and proxy:
+  `bazel-7.4.1 --output_user_root=/home/bazel-output/worker-self-healing-bazel-proxy --batch build --distdir=/home/ds-bazel-distdir --config=debug --config=urma_mock --config=test --jobs=80 //src/datasystem/worker:worker_admission_facade //src/datasystem/worker:worker_service_impl //src/datasystem/worker/object_cache:worker_oc_service_impl //src/datasystem/worker/object_cache:worker_worker_oc_service_impl`
+  passed 4 targets; elapsed 1:25.66.
+- Bazel 7.4.1 new UT:
+  `bazel-7.4.1 --output_user_root=/home/bazel-output/worker-self-healing-bazel-proxy --batch test --distdir=/home/ds-bazel-distdir --config=debug --config=urma_mock --config=test --jobs=80 --test_output=errors //tests/ut/worker:worker_admission_facade_test`
+  passed 1 test target; test runtime 0.5s; elapsed 1:12.41.
+- Formatting/noise checks:
+  `git diff --check` on Task 5 files passed with no output.
+  `clang-format-diff` on Task 5 C++ hunks produced no output.
+- Mainline freshness:
+  `git fetch main master`; `main/master=34bbc3df5`, `HEAD=343e54be4` before Task 5 commit, merge-base `34bbc3df5`,
+  so the branch was based on latest `main/master` at this validation point.
+- Added new test cases: 2 (`WorkerAdmissionFacadeTest.NormalGuardRejectsPendingTransition`,
+  `WorkerAdmissionFacadeTest.RecoveryRpcAllowedOnlyInRecovering`). Additional regression cases re-run: 24 runtime/admission
+  cases and 5 object-admission cases.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/datasystem/worker/worker_admission_facade.* \
@@ -887,6 +923,8 @@ git add src/datasystem/worker/worker_admission_facade.* \
         tests/ut/worker/worker_admission_facade_test.cpp tests/ut/worker/BUILD.bazel
 git commit -m "refactor(worker): add admission facade for self-healing paths"
 ```
+
+Observed commit: `14fc34f3d refactor(worker): add admission facade for self-healing paths`.
 
 ## Task 6: Scope Stream/KV Admission and Update Acceptance Matrix
 
