@@ -365,7 +365,7 @@ by reviewers.
 | `RecoveredCoordinationEntersRecoveringBeforeRunning` | Coordination recovery must enter `RECOVERING` first; ordinary read/write stays closed until all evidence passes. | Partially covered by runtime state/evidence tests. | Keep existing runtime tests and add server callback test through `RuntimeFacade`. |
 | `WorkerServiceAdmissionRejectsReadWriteDuringIsolation` | Object/KV/Stream ordinary read/write must fail fast in `LOCAL_ISOLATED` and `RECOVERING`. | Object path is better covered than KV/Stream; KV/Stream remain gaps. | Add KV Get/Set and Stream Publish/Subscribe admission tests; do not rely only on indirect lifecycle tests. |
 | `MigrationTargetFiltersIsolatedWorker` | Rebalance/migration target selection filters `LOCAL_ISOLATED`, `RECOVERING`, and `DRAINING`; target RPC rejects too. | Partially covered by rebalance guard. | Add candidate-selection UT plus target-RPC admission regression. |
-| `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect` | A second control-backend disconnect during recovery must not half-open ordinary service. | Missing. | Add recovery-controller test that injects backend disconnect while metadata/slot recovery is running; expect `RECOVERING` remains closed or transitions to `LOCAL_ISOLATED`. |
+| `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect` | A second control-backend disconnect during recovery must not half-open ordinary service. | Covered by enabled UT `WorkerRecoveryControllerTest.SecondDisconnectDuringRecoveryKeepsAdmissionClosed`. | Keep in focused worker UT/Bazel regression and extend later with a higher-level `RuntimeFacade` callback case if review asks for end-to-end backend injection. |
 | `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability` | Failed metadata rebuild entries have finite retry budget; success entries and other workers proceed. | Missing/incomplete. | Add retry-budget UT using fake `RecoverMetadataWithSummary`; assert failed entries do not block successful evidence or other worker availability. |
 | `MetadataRecoveryDoesNotHoldObjectTableLockDuringFullScan` | Recovery scans by candidate/shard/snapshot batch; no long write-lock full-table traversal. | Partially covered by `ObjectTable` snapshot index, but needs performance-oriented regression. | Add focused ObjectTable/concurrent scan UT with bounded batch size and lock-hold metric assertion where feasible. |
 | topology/metadata/slot/notify-worker UT + KV/Object ST regression | Existing recovery capability must not regress; legal recovery RPCs must not be blocked by admission. | Needs final full regression after rebase. | Run and record focused CMake/Bazel UT/ST plus CI retest; report case count and elapsed time for new cases. |
@@ -385,8 +385,11 @@ by reviewers.
   must assert fail-fast status includes mode/reason and no metadata/data write path is entered.
 - [ ] Add `MigrationTargetFiltersIsolatedWorker` for candidate filtering and target RPC rejection. Cover
   `LOCAL_ISOLATED`, `RECOVERING`, and `DRAINING`.
-- [ ] Add `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect`. Inject a second coordination/backend disconnect during
-  metadata or slot recovery. Assert service never becomes half-open and phase/reason remains observable.
+- [x] Add `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect`. Enabled UT
+  `WorkerRecoveryControllerTest.SecondDisconnectDuringRecoveryKeepsAdmissionClosed` covers the conservative runtime
+  boundary: after `RECOVERING` sees a second backend disconnect and moves to `LOCAL_ISOLATED`, late complete evidence
+  cannot reopen `RUNNING`. CMake `WorkerRecoveryControllerTest.*`: 4/4 passed, elapsed 0.05s. Bazel 7.4.1 +
+  URMA mock `//tests/ut/worker:worker_recovery_controller_test`: 1 target passed, test time 0.5s, elapsed 0:07.51.
 - [ ] Add `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability`. Use fake metadata recovery results with success,
   retryable, and hard-failed entries. Assert retry budget is finite, successful objects produce evidence, failed objects
   remain invisible or enter cleanup, and other workers are not blocked.
