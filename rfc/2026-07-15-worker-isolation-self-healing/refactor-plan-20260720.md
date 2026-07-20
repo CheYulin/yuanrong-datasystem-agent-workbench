@@ -343,6 +343,72 @@ embedding them inline.
   `oc_metadata_manager.h`. Keep behavior hunks for metadata recovery, primary ownership promotion/fencing, event
   handling, and notify error propagation; avoid whole-file clang-format or unrelated signature/whitespace churn.
 
+## Story Build Use-Case Coverage And Missing Follow-Ups
+
+This section is the acceptance map against the story HTML `#build` / `#8` self-verification cases. A PR is not ready for
+merge until every case is either covered by an enabled UT/ST/CI regression or explicitly split into a follow-up accepted
+by reviewers.
+
+### Required Acceptance Cases
+
+| Story case | Required coverage | Current judgement | Plan action |
+| --- | --- | --- | --- |
+| `EtcdKeepAliveIsolationTest.ConfirmedLocalIsolationPublishesDeleteAndIsolationCallbackOnce` | Local keepalive isolation must not self-kill; callback is once-only; normal admission closes. | Partially covered by ETCD-path implementation, but must be rechecked after moving interaction behind `ICoordinationBackend`. | Keep existing case and add backend-interface assertion that worker code receives the event via `ICoordinationBackend`, not `EtcdStore`. |
+| `EtcdKeepAliveIsolationTest.GlobalEtcdOutageDoesNotPublishDeleteOrCloseAdmission` | Global backend outage is not local isolation; no delete event, no admission close. | Partially covered on pure ETCD path. | Keep as regression and add coordinator-backend variant that returns `INCONCLUSIVE`/global unavailable. |
+| `HashRingSelfPassiveScaleDownDoesNotKill` | Local worker missing from ring or in `del_node_info` must enter `LOCAL_ISOLATED`, not `SIGKILL`; voluntary path remains exit. | Missing or not independently acceptable yet. | Add enabled UT around local passive scale-down decision with death/kill hook faked; assert no kill and runtime state transition. |
+| `VoluntaryScaleDownStillStopsAfterDrain` | Admin/voluntary scale-down remains `DRAINING -> STOPPING`; self-healing must not reopen service. | Covered conceptually by state/admission tests, but needs end-to-end regression after runtime facade refactor. | Add focused runtime/service test for voluntary deletion path and keep existing scale-down ST in regression set. |
+| `RecoveredOldPrimaryDoesNotOverrideMasterPrimary` | Old primary on recovered worker must obey master-confirmed primary and downgrade/clear. | Partially covered by master/object-cache reconciliation changes. | Keep current logic; add event-handler fake-action ordering test and one object-cache ST with old primary losing ownership. |
+| `OrphanLocalDataRequiresRecoveryOrClearDataWithoutMeta` | Master meta cleared but local data remains: recovery enabled recovers provable data, disabled clears or keeps invisible. | Partially covered by clear-data flow and metadata recovery tests. | Add explicit two-configuration ST/UT pair for `enable_metadata_recovery=true/false`. |
+| `OtherWorkersRecoverMetadataBeforeClearingDataWithoutMetadata` | Other workers first try metadata recovery, then clear only failed/unrecoverable entries. | Partially covered by existing clear-data-without-meta path; retry/failure matrix incomplete. | Add fake master recovery summary test covering success, retryable failure, hard failure, and recovery disabled. |
+| `IsolatedWorkerMetaCleanupAllowsNewOwnerRebuild` | Isolated worker old meta cleanup allows new owner rebuild/update; isolated worker data remains invisible. | Partially covered by master meta cleanup path. | Add ST or integration UT verifying new owner rebuild/update after local isolation cleanup event. |
+| `RecoverableLocalDataRebuildsOrUpdatesMetadata` | Isolated worker with provably owned local data rebuilds/updates metadata and reports success/failed summary. | Gap for isolated worker E2E; lower-level recovery exists. | Add isolated-worker recovery ST that drives runtime `RECOVERING`, metadata recovery summary, and evidence acceptance. |
+| `RecoveredCoordinationEntersRecoveringBeforeRunning` | Coordination recovery must enter `RECOVERING` first; ordinary read/write stays closed until all evidence passes. | Partially covered by runtime state/evidence tests. | Keep existing runtime tests and add server callback test through `RuntimeFacade`. |
+| `WorkerServiceAdmissionRejectsReadWriteDuringIsolation` | Object/KV/Stream ordinary read/write must fail fast in `LOCAL_ISOLATED` and `RECOVERING`. | Object path is better covered than KV/Stream; KV/Stream remain gaps. | Add KV Get/Set and Stream Publish/Subscribe admission tests; do not rely only on indirect lifecycle tests. |
+| `MigrationTargetFiltersIsolatedWorker` | Rebalance/migration target selection filters `LOCAL_ISOLATED`, `RECOVERING`, and `DRAINING`; target RPC rejects too. | Partially covered by rebalance guard. | Add candidate-selection UT plus target-RPC admission regression. |
+| `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect` | A second control-backend disconnect during recovery must not half-open ordinary service. | Missing. | Add recovery-controller test that injects backend disconnect while metadata/slot recovery is running; expect `RECOVERING` remains closed or transitions to `LOCAL_ISOLATED`. |
+| `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability` | Failed metadata rebuild entries have finite retry budget; success entries and other workers proceed. | Missing/incomplete. | Add retry-budget UT using fake `RecoverMetadataWithSummary`; assert failed entries do not block successful evidence or other worker availability. |
+| `MetadataRecoveryDoesNotHoldObjectTableLockDuringFullScan` | Recovery scans by candidate/shard/snapshot batch; no long write-lock full-table traversal. | Partially covered by `ObjectTable` snapshot index, but needs performance-oriented regression. | Add focused ObjectTable/concurrent scan UT with bounded batch size and lock-hold metric assertion where feasible. |
+| topology/metadata/slot/notify-worker UT + KV/Object ST regression | Existing recovery capability must not regress; legal recovery RPCs must not be blocked by admission. | Needs final full regression after rebase. | Run and record focused CMake/Bazel UT/ST plus CI retest; report case count and elapsed time for new cases. |
+
+### Missing Case Implementation Tasks
+
+- [ ] Add `HashRingSelfPassiveScaleDownDoesNotKill` as an enabled UT. The test must fake the process-kill hook and prove
+  non-voluntary local passive removal calls `RuntimeFacade::MarkLocalIsolated` without raising `SIGKILL`; voluntary local
+  removal must still reach `DRAINING -> STOPPING`.
+- [ ] Add pure ETCD and coordinator-backend callback coverage. Both paths must deliver local isolation/recovery through
+  `ICoordinationBackend` callback/evidence APIs. Worker code must not include or call `EtcdStore`, `EtcdKeepAlive`,
+  `TopologyController`, or `TopologyEngine` internals.
+- [ ] Add `RecoveredCoordinationEntersRecoveringBeforeRunning` through `RuntimeFacade`, not direct state-manager calls.
+  The test must show ordinary admission remains closed until membership, topology/ring, metadata, slot, ownership, and
+  resource evidence are accepted.
+- [ ] Add `WorkerServiceAdmissionRejectsReadWriteDuringIsolation` for Object, KV, and Stream ordinary APIs. Each test
+  must assert fail-fast status includes mode/reason and no metadata/data write path is entered.
+- [ ] Add `MigrationTargetFiltersIsolatedWorker` for candidate filtering and target RPC rejection. Cover
+  `LOCAL_ISOLATED`, `RECOVERING`, and `DRAINING`.
+- [ ] Add `RecoveringWorkerFallsBackToLocalIsolatedOnDisconnect`. Inject a second coordination/backend disconnect during
+  metadata or slot recovery. Assert service never becomes half-open and phase/reason remains observable.
+- [ ] Add `MetadataRecoveryBestEffortRetryDoesNotBlockAvailability`. Use fake metadata recovery results with success,
+  retryable, and hard-failed entries. Assert retry budget is finite, successful objects produce evidence, failed objects
+  remain invisible or enter cleanup, and other workers are not blocked.
+- [ ] Add isolated-worker E2E coverage for `RecoverableLocalDataRebuildsOrUpdatesMetadata`. The test must drive
+  `LOCAL_ISOLATED -> RECOVERING`, recover or update metadata for provably owned local data, record success/failed
+  summary, and open admission only after evidence passes.
+- [ ] Add overlap coverage for scale/fault combinations: local isolation during rebalance, voluntary scale-down while
+  recovery is pending, and recovery while another worker is being removed. These cases are follow-up scope but must stay
+  tracked until covered or explicitly waived.
+- [ ] Add performance regression for recovery snapshot scanning. The case must verify batch/shard/snapshot scanning and
+  avoid whole-table write-lock traversal. Record batch size, object count, and elapsed time.
+
+### Case Reporting Rules
+
+- Every new UT/ST group must report: case name, added case count, command, elapsed wall time, and whether URMA mock was
+  enabled.
+- New cases should be kept focused. Target budget: single UT group under 30 seconds locally; single ST group under
+  5 minutes unless it is explicitly tagged as full regression.
+- Do not count disabled tests, skipped backend variants, or CI-only theoretical coverage as completion.
+- Final acceptance summary must include the denominator from this table: 16 story self-verification rows plus the
+  scale/fault overlap follow-up group.
+
 ## Task 1: Recovery Evidence Tracker
 
 **Files:**
