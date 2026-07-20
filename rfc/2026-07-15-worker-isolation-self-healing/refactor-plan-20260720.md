@@ -1268,3 +1268,40 @@ Mandatory `ICoordinationBackend` boundary items remain:
   - `git diff --check` passed.
 - Scope control: the proxy support is limited to `scripts/clion_remote_build.sh` environment propagation and does not
   change the default remote build behavior when proxy variables are unset.
+
+### 2026-07-21 Task 5/6 Final Validation And MR Retest
+
+- Product commit pushed to MR !1405:
+  - `14fc34f3d refactor(worker): add admission facade for self-healing paths`
+- Workbench evidence commits:
+  - `d45201c docs: record worker admission facade validation`
+  - `ad31807 docs(worker): clarify stream kv self-healing admission scope`
+- Latest mainline freshness:
+  - `git fetch main master`
+  - `main/master=34bbc3df5`, merge-base with product HEAD is `34bbc3df5`; branch is based on latest `main/master`.
+- CLion/CMake final build/index:
+  - Command: `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+  - Result: passed with URMA mock enabled, third-party cache hit with `Compile thirdparty libraries success, total wall time: 0s`,
+    source build 5s, total 88s, `compile_commands` entries 1127.
+  - Note: repeated strip emitted `debuglink section already exists` objcopy warnings, but script exit code was 0.
+- Focused CMake UT regression:
+  - `WorkerAdmissionFacadeTest.*:WorkerServiceAdmissionTest.*:WorkerRuntimeStateTest.*`: 24/24 passed, wall time 0.31s.
+  - `ds_ut_object --gtest_filter="*Admission*"`: 5/5 passed, wall time 0.17s.
+  - `WorkerRecoveryEvidenceTrackerTest.*:WorkerIsolationCoordinatorTest.*:WorkerRecoveryControllerTest.*:WorkerTopologyAvailabilityAdmissionTest.*`:
+    18/18 passed, wall time 0.05s.
+- Bazel 7.4.1 focused validation with URMA mock, distdir, and remote proxy:
+  - Build target set `worker_admission_facade`, `worker_service_impl`, `worker_oc_service_impl`,
+    `worker_worker_oc_service_impl`: 4/4 targets built, wall time 1:10.60.
+  - Test `//tests/ut/worker:worker_admission_facade_test`: passed from Bazel cache, test runtime 0.5s, command wall time
+    2:23.63. The command waited for the previous Bazel build client lock because build/test were launched in parallel.
+- Static/check tooling:
+  - `git diff --check` passed.
+  - `clang-format-diff` over Task 5 C++ hunks produced no output.
+  - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`.
+- MR status:
+  - Pushed `feat/worker-self-healing-main-20260716` to GitCode source branch; remote hooks passed.
+  - Posted `/retest` after the push, note id `180841711`.
+- Task 6 scope decision:
+  - Stream/KV admission is explicitly not claimed as fully closed in Plan A.
+  - Follow-up cases are now named in the boundary/overlap docs: `CB-06-SC-01`, `CB-06-SC-02`, `CB-06-KV-01`,
+    `CB-06-KV-02`, plus scale/fault follow-ups `SF-11` and `SF-12`.
