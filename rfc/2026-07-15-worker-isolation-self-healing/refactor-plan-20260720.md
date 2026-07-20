@@ -183,6 +183,11 @@ Callers must not depend on:
   helper types in method signatures.
 - Build rules should expose one public `worker_runtime` target and keep helper targets private or narrowly depended on by
   the facade target. New OC/KV/Stream code should depend on the public target, not helper targets.
+- Keep the runtime/recovery metrics set minimal for PR !1405. Target 8 metrics only:
+  `worker_service_mode`, `worker_service_reason`, `worker_recovery_phase`, `worker_recovery_evidence_mask`,
+  `worker_admission_reject_total`, `worker_admission_reject_latency`, `worker_object_table_lock_hold_latency`, and
+  `worker_metadata_recovery_batch_latency`. Do not keep per-mode admission reject counters,
+  `worker_mode_transition_latency`, `worker_recovery_candidate_count`, or `worker_cleanup_batch_latency`.
 - The current `worker_control_backend_scope.*` implementation uses object-cache worker-worker RPCs as its peer probe
   transport. When moving under `worker/runtime`, hide that dependency behind a narrow probe interface so the public
   runtime API does not expose object-cache transport classes.
