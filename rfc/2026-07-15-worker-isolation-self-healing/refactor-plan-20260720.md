@@ -1139,3 +1139,82 @@ Mandatory `ICoordinationBackend` boundary items remain:
   hunks.
 - Bazel focused validation status: not completed for this task yet because the remote Bazel 7.4.1 path is still not
   repaired in the local Tiantiyun shell.
+
+### 2026-07-21 Task 4 ICoordinationBackend Local Callback Boundary
+
+- Scope: moved worker local isolation/recovery callback registration behind `ICoordinationBackend` instead of direct
+  `EtcdStore` callback registration from worker code. `EtcdStore` callback calls now remain concrete-backend internals
+  inside `EtcdCoordinationBackend`; coordinator-service mode maps keepalive local-isolation/recovery events through
+  `DsCoordinationBackend`.
+- Boundary result: worker code no longer calls `etcdStore_->SetLocalIsolationHandler` or
+  `etcdStore_->SetLocalRecoveryHandler`. `WorkerOCServer` registers callbacks on `TopologyEngine::Builder`, which
+  installs them on the member-role `ICoordinationBackend`.
+- TDD RED: `JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index` failed after about 1 minute because
+  the new contract test expected `ICoordinationBackend::SetLocalIsolationHandler` and
+  `ICoordinationBackend::SetLocalRecoveryHandler`, but the interface did not yet expose them.
+- TDD GREEN build/index: same CLion script passed with URMA mock enabled, third-party cache hit, total use time 121s,
+  `compile_commands` entries 1125. CLion CompDB indexing is Ready at
+  `.clion-remote/worker-self-healing-main-20260716/build/compile_commands.json`.
+- New cases added: 1 UT case.
+  - `CoordinationBackendContractTest.ShutdownEventSourcesDoesNotClearLocalMembershipCallbacks`
+- Focused new-case command:
+  `cluster_topology_contract_ut --gtest_filter="CoordinationBackendContractTest.ShutdownEventSourcesDoesNotClearLocalMembershipCallbacks" --gtest_color=no`
+  Result: 1/1 passed, GoogleTest time 0 ms, command wall time 0.04s.
+- Focused cluster boundary group command:
+  `cluster_topology_contract_ut --gtest_filter="*CoordinationBackend*:*TopologyRuntimeComposition*" --gtest_color=no`
+  Result: 18/18 passed, GoogleTest time 1 ms, command wall time 0.04s.
+- Bazel 7.4.1 root cause/fix: `/usr/local/bin/bazel` on the remote is a Bazelisk-style launcher and can hang on
+  downloads. Copied/used `/usr/local/bin/bazel-7.4.1`, exposed the local proxy to the remote with SSH reverse tunnel
+  `127.0.0.1:17897`, and used `/home/ds-bazel-distdir` for cached external archives.
+- Bazel focused build command:
+  `bazel-7.4.1 build --distdir=/home/ds-bazel-distdir --config=debug --config=urma_mock --config=test --jobs=80 //src/datasystem/cluster/coordination_backend:coordination_backend //src/datasystem/cluster:cluster_topology //src/datasystem/worker:datasystem_worker_shared`
+  Result: 3/3 targets built, wall time 1:35.18 after syncing the local BUILD.bazel dependency fix to the remote.
+- Bazel focused test command:
+  `bazel-7.4.1 test --distdir=/home/ds-bazel-distdir --config=debug --config=urma_mock --config=test --jobs=80 --test_output=errors //tests/ut/worker:worker_isolation_coordinator_test`
+  Result: 1/1 test target passed, test runtime 0.5s, command wall time 1:29.04.
+- Formatting/static checks:
+  - `git diff --check` passed.
+  - `clang-format-diff` over modified hunks produced no remaining diff.
+  - Full-file `clang-format --dry-run --Werror` still reports pre-existing formatting issues in touched files, so full
+    file formatting was intentionally not applied to avoid format-only noise.
+  - `clang-tidy` completed on `ds_coordination_backend.cpp`, `etcd_coordination_backend.cpp`, and
+    `topology_engine.cpp` with only existing/non-blocking warnings after suppressing compile-command linker flag and
+    `std::result_of` infrastructure noise. `worker_oc_server.cpp` generated warnings but did not exit after more than
+    5 minutes and was interrupted; do not count it as a completed tidy check yet.
+- Remaining gap after Task 4: branch is currently behind latest `main/master` by 2 commits. Rebase latest main/master
+  and rerun focused CMake/Bazel checks before committing/pushing this task.
+
+### 2026-07-21 Task 4 Post-Rebase Validation And Proxy Build Support
+
+- Rebase status: fetched latest `main/master` and rebased `feat/worker-self-healing-main-20260716` successfully. No
+  conflict remained after the rebase.
+- Commit after rebase:
+  - `13e5615de refactor(cluster): route isolation callbacks through backend`
+  - `343e54be4 build: support remote proxy for clion build`
+- CLion remote build/index command:
+  `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+  Result: passed with URMA mock enabled, build source 525s, total 619s, `compile_commands` entries 1125. CLion CompDB
+  project is ready at `.clion-remote/worker-self-healing-main-20260716/build/compile_commands.json`.
+- Third-party cache note: latest `main/master` upgraded brpc/braft cache keys, so the first CMake remote run rebuilt
+  and installed `brpc_a1b1f1f1...` and `braft_66330b...` into `/home/ds-thirdparty-cache`. The remote proxy tunnel
+  `127.0.0.1:17897` was used to avoid direct GitHub HTTP/2 failures; later runs should hit the cache.
+- New cases added in Task 4: 1 UT case.
+  - `CoordinationBackendContractTest.ShutdownEventSourcesDoesNotClearLocalMembershipCallbacks`
+- Focused new-case command:
+  `cluster_topology_contract_ut --gtest_filter="CoordinationBackendContractTest.ShutdownEventSourcesDoesNotClearLocalMembershipCallbacks" --gtest_color=no`
+  Result: 1/1 passed, GoogleTest time 0 ms, command wall time 0.03s.
+- Focused cluster boundary group command:
+  `cluster_topology_contract_ut --gtest_filter="*CoordinationBackend*:*TopologyRuntimeComposition*" --gtest_color=no`
+  Result: 18/18 passed, GoogleTest time 2 ms, command wall time 0.03s.
+- Bazel 7.4.1 focused build command:
+  `bazel-7.4.1 build --distdir=/home/ds-bazel-distdir --config=debug --config=urma_mock --config=test --jobs=80 //src/datasystem/cluster/coordination_backend:coordination_backend //src/datasystem/cluster:cluster_topology //src/datasystem/worker:datasystem_worker_shared`
+  Result: 3/3 targets built, command wall time 1:17.58. The command used remote proxy environment variables.
+- Bazel 7.4.1 focused test command:
+  `bazel-7.4.1 test --distdir=/home/ds-bazel-distdir --config=debug --config=urma_mock --config=test --jobs=80 --test_output=errors //tests/ut/worker:worker_isolation_coordinator_test`
+  Result: 1/1 test target passed from Bazel cache, test runtime 0.5s, command wall time 1:14.63. The command used
+  remote proxy environment variables.
+- Local checks:
+  - `bash -n scripts/clion_remote_build.sh` passed.
+  - `git diff --check` passed.
+- Scope control: the proxy support is limited to `scripts/clion_remote_build.sh` environment propagation and does not
+  change the default remote build behavior when proxy variables are unset.
