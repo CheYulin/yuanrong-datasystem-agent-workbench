@@ -147,6 +147,27 @@ Callers must not depend on:
 - `worker/runtime` must not depend on object-cache internals, master metadata internals, hash-ring mutation details, or
   concrete backend implementation classes.
 
+### Runtime Interface Usage Rules
+
+- Components outside `worker/runtime` should include `datasystem/worker/runtime/worker_runtime.h` by default.
+- Components outside `worker/runtime` may include dedicated stable model headers only when necessary:
+  `worker_runtime_state.h` for `WorkerRuntimeSnapshot`/mode/reason types,
+  `worker_service_admission.h` for `WorkerAdmissionKind`, and
+  `worker_recovery_controller.h` for evidence report/builder types.
+- Components outside `worker/runtime` must not include or depend on implementation-detail headers once the facade exists:
+  `worker_recovery_evidence_tracker.h`, internal state transition helpers, admission matrix helpers, or topology
+  mapping internals. If a caller needs one of these, first add a narrow method to `WorkerRuntime`.
+- Callers must not inspect `WorkerServiceMode` and reimplement the admission matrix locally. Use
+  `WorkerRuntime::CheckAdmission()` or `WorkerRuntime::TryAcquireReadGuard()`.
+- Callers must not directly update evidence bits, evidence masks, or recovery generations. Build a
+  `WorkerRecoveryEvidenceReport` from local business evidence and pass it to `WorkerRuntime`.
+- Callers must not directly call topology availability helper functions to decide health-file or serving-admission state.
+  Use `WorkerRuntime::ApplyTopologyAvailability()` and `WorkerRuntime::ShouldOpenTopologyServingAdmission()`.
+- `worker/runtime` implementation files may include the private helper headers; public headers must not expose private
+  helper types in method signatures.
+- Build rules should expose one public `worker_runtime` target and keep helper targets private or narrowly depended on by
+  the facade target. New OC/KV/Stream code should depend on the public target, not helper targets.
+
 ## PR-Internal ObjectCache Abstraction Follow-Up
 
 This subsection records the current PR-internal `src/datasystem/worker/object_cache` cohesion review. It is scoped to
