@@ -17,8 +17,9 @@
 #     bash scripts/testing/verify/run_worktree_verify_remote.sh \
 #       --worktree client-direct-read-flow --phase st --skip-build
 #
-#   # Perf benchmarks (requires ENABLE_PERF=on build + DS_DIRECT_READ_PERF=1):
-#   ENABLE_PERF=on DS_DIRECT_READ_PERF=1 ST_CTEST_REGEX='CrossNode.*LatencyBenchmark' \
+#   # Meta-affinity write perf (ENABLE_PERF=on + DS_META_AFFINITY_WRITE_PERF=1):
+#   ENABLE_PERF=on DS_META_AFFINITY_WRITE_PERF=1 DS_META_AFFINITY_WRITE_PERF_RPC=1 \
+#     DS_META_AFFINITY_WRITE_PERF_ASSERT=1 ST_CTEST_REGEX='MetaAffinityWritePerfTest.GetRpcReduction' \
 #     bash scripts/testing/verify/run_worktree_verify_remote.sh ...
 #
 # Environment:
@@ -27,7 +28,8 @@
 #   ST_CTEST_LABEL_EXCLUDE — ctest -LE labels (default level2; cleared when DS_DIRECT_READ_PERF=1)
 #   WORKTREE_SLUG, WORKTREE_BRANCH, GIT_CLONE_URL, LOCAL_WORKTREE
 #   UT_CTEST_REGEX / ST_CTEST_REGEX (phase ut/st)
-#   SKIP_SYNC — skip rsync of local WIP (use pure git pull on remote)
+#   BUILD_WITH_URMA_MOCK — on/off: use build.sh -U on and isolated build-wt-*-urma-mock dir
+#   VERIFY_TRANSPORT — tcp (default build) | urma (URMA mock build) | both (run ut/st twice)
 
 set -euo pipefail
 
@@ -86,7 +88,13 @@ LOCAL_WORKTREE="${LOCAL_WORKTREE:-${MAIN_DS}/.worktrees/${WORKTREE_SLUG}}"
 REMOTE_GIT_MAIN="/home/cache/git-repos/yuanrong-datasystem"
 REMOTE_WORKTREE="${REMOTE_GIT_MAIN}/.worktrees/${WORKTREE_SLUG}"
 BUILD_DIR="${BUILD_DIR:-/home/cache/build-wt-${WORKTREE_SLUG}}"
+if [[ "${BUILD_WITH_URMA_MOCK:-off}" == "on" ]]; then
+  BUILD_DIR="${BUILD_DIR}-urma-mock"
+fi
 VERIFY_LOG_DIR="${VERIFY_LOG_DIR:-/home/cache/verify-logs/wt-${WORKTREE_SLUG}}"
+if [[ "${BUILD_WITH_URMA_MOCK:-off}" == "on" ]]; then
+  VERIFY_LOG_DIR="${VERIFY_LOG_DIR}-urma-mock"
+fi
 
 init_remote "${NODE}"
 
@@ -243,16 +251,22 @@ fi
 ST_NAME_EXCLUDE="${WT_ST_CTEST_EXCLUDE:-}"
 
 if [[ "${SKIP_BUILD}" -eq 0 && "${PHASE}" != "setup" ]]; then
-  echo "[build] $(date -Is) backend=${BUILD_BACKEND} jobs=${BUILD_JOBS} enable_perf=${WT_ENABLE_PERF:-0}" | tee -a "${LOG}"
+  mkdir -p /home/cache/tmp
+  export TMPDIR=/home/cache/tmp
+  echo "[build] $(date -Is) backend=${BUILD_BACKEND} jobs=${BUILD_JOBS} enable_perf=${WT_ENABLE_PERF:-0} urma_mock=${WT_BUILD_WITH_URMA_MOCK:-${BUILD_WITH_URMA_MOCK:-off}} tmpdir=${TMPDIR}" | tee -a "${LOG}"
   BUILD_ENV=()
-  if [[ "${WT_ENABLE_PERF:-}" == "1" || -n "${WT_DS_DIRECT_READ_PERF:-}" ]]; then
+  BUILD_URMA_MOCK_ARGS=()
+  if [[ "${WT_BUILD_WITH_URMA_MOCK:-${BUILD_WITH_URMA_MOCK:-off}}" == "on" ]]; then
+    BUILD_URMA_MOCK_ARGS=(-U on)
+  fi
+  if [[ "${WT_ENABLE_PERF:-}" == "1" || -n "${WT_DS_DIRECT_READ_PERF:-}" || -n "${WT_DS_META_AFFINITY_WRITE_PERF:-}" ]]; then
     BUILD_ENV=(env ENABLE_PERF=on)
     BUILD_PERF_ARGS=(-p on)
   else
     BUILD_PERF_ARGS=()
   fi
   "${BUILD_ENV[@]}" bash build.sh -t build -B "${BUILD_DIR}" -b "${BUILD_BACKEND}" -j "${BUILD_JOBS}" \
-    "${BUILD_PERF_ARGS[@]}" -i on 2>&1 | tee -a "${LOG}" | tail -80
+    "${BUILD_PERF_ARGS[@]}" "${BUILD_URMA_MOCK_ARGS[@]}" -i on 2>&1 | tee -a "${LOG}" | tail -80
 fi
 
 case "${PHASE}" in
@@ -284,6 +298,16 @@ case "${PHASE}" in
       export DS_DIRECT_READ_PERF_WARMUP="${WT_DS_DIRECT_READ_PERF_WARMUP:-50}"
       export DS_DIRECT_READ_PERF_SIZE="${WT_DS_DIRECT_READ_PERF_SIZE:-262144}"
       echo "[st] DS_DIRECT_READ_PERF=${DS_DIRECT_READ_PERF} iters=${DS_DIRECT_READ_PERF_ITERS} size=${DS_DIRECT_READ_PERF_SIZE}" | tee -a "${LOG}"
+    fi
+    if [[ -n "${WT_DS_META_AFFINITY_WRITE_PERF:-}" ]]; then
+      export DS_META_AFFINITY_WRITE_PERF="${WT_DS_META_AFFINITY_WRITE_PERF}"
+      export DS_META_AFFINITY_WRITE_PERF_RPC="${WT_DS_META_AFFINITY_WRITE_PERF_RPC:-}"
+      export DS_META_AFFINITY_WRITE_PERF_ASSERT="${WT_DS_META_AFFINITY_WRITE_PERF_ASSERT:-}"
+      export DS_META_AFFINITY_WRITE_PERF_ITERS="${WT_DS_META_AFFINITY_WRITE_PERF_ITERS:-60}"
+      export DS_META_AFFINITY_WRITE_PERF_WARMUP="${WT_DS_META_AFFINITY_WRITE_PERF_WARMUP:-15}"
+      export DS_META_AFFINITY_WRITE_PERF_SIZE="${WT_DS_META_AFFINITY_WRITE_PERF_SIZE:-4096}"
+      export DS_META_AFFINITY_WRITE_PERF_MODE="${WT_DS_META_AFFINITY_WRITE_PERF_MODE:-all}"
+      echo "[st] DS_META_AFFINITY_WRITE_PERF=${DS_META_AFFINITY_WRITE_PERF} rpc=${DS_META_AFFINITY_WRITE_PERF_RPC} assert=${DS_META_AFFINITY_WRITE_PERF_ASSERT} iters=${DS_META_AFFINITY_WRITE_PERF_ITERS}" | tee -a "${LOG}"
     fi
     CTEST_ST_ARGS=(--test-dir "${BUILD_DIR}" --output-on-failure -R "${CTEST_REGEX}" -j "${CTEST_JOBS_ST}" --timeout 600)
     if [[ -n "${ST_LABEL_EXCLUDE}" ]]; then
@@ -327,6 +351,13 @@ run_remote() {
     WT_DS_DIRECT_READ_PERF_ITERS="${DS_DIRECT_READ_PERF_ITERS:-}" \
     WT_DS_DIRECT_READ_PERF_WARMUP="${DS_DIRECT_READ_PERF_WARMUP:-}" \
     WT_DS_DIRECT_READ_PERF_SIZE="${DS_DIRECT_READ_PERF_SIZE:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF="${DS_META_AFFINITY_WRITE_PERF:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF_RPC="${DS_META_AFFINITY_WRITE_PERF_RPC:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF_ASSERT="${DS_META_AFFINITY_WRITE_PERF_ASSERT:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF_ITERS="${DS_META_AFFINITY_WRITE_PERF_ITERS:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF_WARMUP="${DS_META_AFFINITY_WRITE_PERF_WARMUP:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF_SIZE="${DS_META_AFFINITY_WRITE_PERF_SIZE:-}" \
+    WT_DS_META_AFFINITY_WRITE_PERF_MODE="${DS_META_AFFINITY_WRITE_PERF_MODE:-}" \
     WT_ENABLE_PERF="${ENABLE_PERF:+1}" \
     WT_BUILD_JOBS="${BUILD_JOBS}" \
     WT_CTEST_JOBS_UT="${CTEST_JOBS_UT}" \
@@ -334,6 +365,7 @@ run_remote() {
     WT_ST_CTEST_LABEL_EXCLUDE="${ST_CTEST_LABEL_EXCLUDE}" \
     WT_ST_CTEST_EXCLUDE="${ST_CTEST_EXCLUDE}" \
     WT_THIRD_PARTY="${DS_OPENSOURCE_DIR}" \
+    WT_BUILD_WITH_URMA_MOCK="${BUILD_WITH_URMA_MOCK:-off}" \
     bash -s <<EOF
 ${REMOTE_BODY}
 EOF
