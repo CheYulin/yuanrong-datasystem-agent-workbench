@@ -84,6 +84,9 @@ worker-local responsibility rather than the story name.
   tracker is shared by OC/KV/Stream paths.
 - `worker_topology_availability_admission.h/.cpp`: adapter from cluster topology availability evidence to local runtime
   state/admission.
+- `control_backend_failure_scope.h/.cpp`: private runtime helper that classifies a keepalive/control-backend failure as
+  local isolation, global outage, or inconclusive. This replaces the PR-internal root-level
+  `worker_control_backend_scope.*` placement.
 
 Do not move object-cache-local recovery ownership into `worker/runtime`. Keep `ObjectTable`,
 `worker_recovery_evidence_adapter`, `ObjectCacheRecoveryEvidenceTracker`, and `ObjectCacheOwnershipReconciler` in
@@ -157,6 +160,9 @@ Callers must not depend on:
 - Components outside `worker/runtime` must not include or depend on implementation-detail headers once the facade exists:
   `worker_recovery_evidence_tracker.h`, internal state transition helpers, admission matrix helpers, or topology
   mapping internals. If a caller needs one of these, first add a narrow method to `WorkerRuntime`.
+- Components outside `worker/runtime` must not include `control_backend_failure_scope.h` or call its classifier directly.
+  Backend failure-scope classification is an implementation detail behind `WorkerRuntime` or `worker_oc_server` callback
+  orchestration during the transition.
 - Callers must not inspect `WorkerServiceMode` and reimplement the admission matrix locally. Use
   `WorkerRuntime::CheckAdmission()` or `WorkerRuntime::TryAcquireReadGuard()`.
 - Callers must not directly update evidence bits, evidence masks, or recovery generations. Build a
@@ -167,6 +173,9 @@ Callers must not depend on:
   helper types in method signatures.
 - Build rules should expose one public `worker_runtime` target and keep helper targets private or narrowly depended on by
   the facade target. New OC/KV/Stream code should depend on the public target, not helper targets.
+- The current `worker_control_backend_scope.*` implementation uses object-cache worker-worker RPCs as its peer probe
+  transport. When moving under `worker/runtime`, hide that dependency behind a narrow probe interface so the public
+  runtime API does not expose object-cache transport classes.
 
 ## PR-Internal ObjectCache Abstraction Follow-Up
 
