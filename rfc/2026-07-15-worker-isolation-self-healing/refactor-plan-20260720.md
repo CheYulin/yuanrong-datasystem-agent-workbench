@@ -64,6 +64,55 @@ Modify:
   `src/datasystem/worker/object_cache/worker_worker_oc_service_impl.cpp`, and
   `src/datasystem/worker/worker_service_impl.cpp`.
 
+## PR-Internal ObjectCache Abstraction Follow-Up
+
+This subsection records the current PR-internal `src/datasystem/worker/object_cache` cohesion review. It is scoped to
+the diff between `main/master` and PR !1405, not to unrelated mainline cleanup.
+
+### Current Shape
+
+- `ObjectTable` is a real object-cache-local wrapper that replaces the previous
+  `using ObjectTable = SafeTable<ImmutableString, ObjectInterface>` alias. Most `Insert`, `Reserve*`, `Get`, `Erase`,
+  `begin/end`, and `GetSize` methods are compatibility surface copied from the former `SafeTable` usage pattern so
+  existing object-cache callers do not need a broad rewrite.
+- The new `ObjectTable` behavior is the recovery snapshot index: 64 sharded key/generation indexes,
+  `BeginRecoverySnapshot`, `NextRecoverySnapshotBatch`, and `GetRecoverySnapshotObject`. This index is a lightweight
+  key/generation side table, not a copy of object payloads.
+- `ObjectTable` consistency depends on it being the only mutation entry for object-cache-local table content. Insert,
+  reserve, and erase paths update or roll back the recovery index under the shard lock. New code must not bypass
+  `ObjectTable` and mutate the embedded `SafeTable` directly.
+- The largest remaining scatter is not `ObjectTable`; it is self-healing state spread across
+  `WorkerOCServiceImpl`, `SlotRecoveryManager`, `NodeSelector`, `WorkerOCEvictionManager`, and
+  `worker_recovery_evidence_adapter`.
+
+### Refactor Direction
+
+- **First priority: `ObjectCacheRecoveryEvidenceTracker`.** Keep this object-cache-local if the generic
+  `WorkerRecoveryEvidenceTracker` is not enough to own metadata, slot, resource, and ownership evidence together.
+  It should invalidate stale generation evidence, merge reports from current modules, and make
+  `BuildObjectCacheRecoveryEvidenceReport` auditable from one place.
+- **Second priority: `ObjectCacheOwnershipReconciler`.** Extract `ReconcileMembershipChange`,
+  `ReconcileLocalIsolationOwnership`, `ReconcileNetworkRecoveryOwnership`, and `ScheduleReconciliationRequest` from
+  `WorkerOCServiceImpl` behind `Status Reconcile(ObjectCacheReconciliationReason reason)`.
+- **Third priority: `ObjectCacheResourceRecoveryCoordinator`.** Only introduce this if resource readiness continues to
+  spread across `NodeSelector`, `WorkerOCServiceImpl`, `WorkerOCEvictionManager`, and `WorkerOCServer` callbacks. It
+  should own memory/disk recovery-required flags, resource generation, and resource evidence publication.
+- **Fourth priority: `ObjectCacheAdmissionGate`.** Wrap object-cache-specific local read/write, peer read, and migration
+  target admission checks while still consuming the shared `WorkerRuntimeStateManager`/`WorkerServiceAdmission` policy.
+- **Do not expand `ObjectTable`.** Keep it focused on local object table access plus recovery snapshot indexing. Do not
+  add admission, cluster, topology, or ownership-reconciliation responsibilities to it.
+
+### TDD Acceptance For The Follow-Up
+
+- Add focused UTs before refactoring each abstraction.
+- For `ObjectCacheRecoveryEvidenceTracker`, include stale-generation rejection, incomplete default evidence, metadata
+  evidence update, slot evidence update, resource readiness update, and complete-report merge cases.
+- For `ObjectCacheOwnershipReconciler`, include restart, local-isolation, and network-recovery reason mapping tests with
+  fake master APIs; verify no direct dependency on ETCD internals.
+- For `ObjectTable`, keep the current snapshot consistency tests as regression coverage and add only targeted tests if
+  the mutation API changes.
+- Report added case count and elapsed time for every new UT/ST group.
+
 ## Task 1: Recovery Evidence Tracker
 
 **Files:**
