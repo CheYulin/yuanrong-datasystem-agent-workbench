@@ -172,6 +172,9 @@ Callers must not depend on:
   orchestration during the transition.
 - Callers must not inspect `WorkerServiceMode` and reimplement the admission matrix locally. Use
   `WorkerRuntime::CheckAdmission()` or `WorkerRuntime::TryAcquireReadGuard()`.
+- Worker common services such as `WorkerServiceImpl` must depend on the runtime facade directly. They must not store
+  `WorkerRuntimeStateManager *` or construct `WorkerServiceAdmission` themselves. Use the facade method, for example
+  `runtimeFacade.CheckAdmission(WorkerAdmissionKind::CLIENT_REGISTRATION_RPC, "RegisterClient")`.
 - Callers must not directly update evidence bits, evidence masks, or recovery generations. Build a
   `WorkerRecoveryEvidenceReport` from local business evidence and pass it to `WorkerRuntime`.
 - Callers must not directly call topology availability helper functions to decide health-file or serving-admission state.
