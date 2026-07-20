@@ -28,6 +28,7 @@ is complete, fresh, and role-isolated."
 
 | ID | Invariant | Current Judgment | Plan Action |
 | --- | --- | --- | --- |
+| CB-I00 | Other modules must use `ICoordinationBackend` when reading, watching, or updating cluster information; they must not directly couple to backend-internal store/client/session/watch classes. | Required module-boundary rule. Concrete backend internals belong to the backend implementation, not worker/topology business modules. | Enforce in review and tests before adding any new cluster-information interaction. |
 | CB-I01 | Worker local isolation can only narrow local service admission; it cannot directly change cluster topology authority. | Mostly satisfied. No direct self-healing topology CAS path was found. | Keep this as a regression check during review and rebase. |
 | CB-I02 | `READY`, `ACTIVE`, and `RUNNING` are separate views; recovery must finish before a worker is visible for normal service. | Gap. Current recovery callback can call `MarkReady()` before recovery evidence is complete. | Fix CB-01 before merge. |
 | CB-I03 | Recovery evidence must be fresh for the current isolation/recovery generation. | Gap. Old or empty metadata evidence can be reused across recovery cycles. | Fix CB-02 before merge. |

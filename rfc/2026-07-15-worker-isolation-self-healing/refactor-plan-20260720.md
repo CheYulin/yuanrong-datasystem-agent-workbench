@@ -18,6 +18,8 @@ infrastructure, URMA mock enabled for UT/ST runs that need URMA paths.
 - Use the existing worktree: `/home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/worker-self-healing-main-20260716`.
 - Rebase latest `main/master` before implementation and again before final regression.
 - Minimize implementation changes to `src/datasystem/worker` and focused worker tests.
+- Cross-module cluster information access must go through `ICoordinationBackend`; modules outside a concrete backend
+  implementation must not directly call or depend on that backend's internal store/client/session/watch classes.
 - Any cluster interaction must go through `ICoordinationBackend` interfaces or worker-owned callbacks; do not make the
   worker self-healing plan depend on direct `EtcdStore` or ETCD adapter internals.
 - Do not directly write `ClusterTopologyPb`, cluster node table, hash ring membership, topology stamp, or master
