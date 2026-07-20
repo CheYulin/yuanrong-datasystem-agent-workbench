@@ -331,6 +331,9 @@ embedding them inline.
   should not directly sequence metadata cleanup, primary promotion, and worker notification.
 - Event handler tests must assert operation order for LOCAL_ISOLATION, NETWORK_RECOVERY, and RESTART, including failure
   rollback for NETWORK_RECOVERY.
+- Before final PR update, reduce format-only noise in `master/object_cache`, especially `oc_metadata_manager.cpp` and
+  `oc_metadata_manager.h`. Keep behavior hunks for metadata recovery, primary ownership promotion/fencing, event
+  handling, and notify error propagation; avoid whole-file clang-format or unrelated signature/whitespace churn.
 
 ## Task 1: Recovery Evidence Tracker
 
