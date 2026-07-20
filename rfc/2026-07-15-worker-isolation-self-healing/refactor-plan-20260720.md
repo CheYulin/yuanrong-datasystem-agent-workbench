@@ -26,6 +26,9 @@ infrastructure, URMA mock enabled for UT/ST runs that need URMA paths.
   `EtcdStore`, `EtcdKeepAlive`, or other kvstore/backend implementation classes. It may only consume cluster state and
   backend health through `ICoordinationBackend` public interfaces, public immutable topology evidence exposed by that
   interface, or callbacks registered through that interface.
+- `ICoordinationBackend` must provide the worker-facing callback/evidence boundary for local control-backend isolation
+  and recovery. Implementations may map these callbacks to ETCD keepalive events, coordinator-service observations, or
+  metastore-backed evidence internally, but worker code must not know which backend path produced the event.
 - Do not directly write `ClusterTopologyPb`, cluster node table, hash ring membership, topology stamp, or master
   metadata from worker self-healing code.
 - Do not count disabled tests as acceptance coverage.
@@ -156,6 +159,10 @@ Callers must not depend on:
 - `worker/runtime` must not directly call `TopologyController`, `TopologyEngine` control/mutation methods, `EtcdStore`,
   `EtcdKeepAlive`, or kvstore backend internals. Runtime code should receive topology/backend observations from
   `ICoordinationBackend` or from a narrow adapter implemented inside the coordination backend boundary.
+- Runtime/worker callback integration must be covered across backend paths, not only ETCD:
+  ETCD keepalive isolation/recovery, coordinator-service availability changes, metastore-backed startup/recovery when
+  applicable, and the no-external-backend or unsupported-backend fallback path. Unsupported paths must fail closed with
+  explicit `INCONCLUSIVE`/`K_NOT_SUPPORTED` behavior rather than silently opening serving admission.
 
 ### Runtime Interface Usage Rules
 
