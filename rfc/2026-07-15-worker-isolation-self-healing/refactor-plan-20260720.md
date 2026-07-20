@@ -1305,3 +1305,38 @@ Mandatory `ICoordinationBackend` boundary items remain:
   - Stream/KV admission is explicitly not claimed as fully closed in Plan A.
   - Follow-up cases are now named in the boundary/overlap docs: `CB-06-SC-01`, `CB-06-SC-02`, `CB-06-KV-01`,
     `CB-06-KV-02`, plus scale/fault follow-ups `SF-11` and `SF-12`.
+
+### 2026-07-21 CodeCheck Follow-Up For Task 5/6
+
+- CI retest result before this follow-up:
+  - Retest note id `180841711` triggered CI job 7821.
+  - CLA passed; CodeCheck failed and pointed to OpenLibing report
+    `MR_670a7fffd2a34bd8be3db8f5049ad053/e2545b71d503ea34b5b6913ddfc69680`.
+  - The report page was blocked from CLI by CloudWAF 418, so local static checks were used to narrow the actionable issue.
+- Local issue isolated:
+  - `clang-tidy` on `worker_admission_facade.cpp` reported `bugprone-branch-clone` in
+    `WorkerAdmissionFacade::Check`: four consecutive branches delegated identically except `RECOVERY_RPC`.
+- Product fix:
+  - Commit `3b222c11c fix(worker): simplify admission facade dispatch`.
+  - The facade now special-cases only `RECOVERY_RPC`; all other kinds delegate directly to `WorkerServiceAdmission`.
+  - Behavior is unchanged for `NORMAL_READ`, `NORMAL_WRITE`, and `MIGRATION_TARGET`; the change removes duplicate
+    dispatch branches and reduces CodeCheck noise.
+- CLion/CMake validation after the fix:
+  - Command: `REMOTE_HTTP_PROXY=http://127.0.0.1:17897 REMOTE_HTTPS_PROXY=http://127.0.0.1:17897 JOBS=80 TEST_JOBS=20 bash scripts/clion_remote_build.sh tests-index`
+  - Result: passed with URMA mock enabled, third-party cache hit with `Compile thirdparty libraries success, total wall time: 0s`,
+    source build 27s, total 147s, `compile_commands` entries 1127.
+- Focused CMake UT after the fix:
+  - `WorkerAdmissionFacadeTest.*:WorkerServiceAdmissionTest.*:WorkerRuntimeStateTest.*`: 24/24 passed, GoogleTest
+    time 259 ms, command wall time 0.32s.
+- Bazel 7.4.1 focused validation after the fix:
+  - Build target set `worker_admission_facade`, `worker_service_impl`, `worker_oc_service_impl`,
+    `worker_worker_oc_service_impl`: 4/4 targets built, command wall time 1:12.36.
+  - Test `//tests/ut/worker:worker_admission_facade_test`: 1/1 target passed, test runtime 0.5s, command wall time
+    1:10.31.
+  - Both Bazel commands used `--output_user_root=/home/bazel-output/worker-self-healing-bazel-proxy`,
+    `--distdir=/home/ds-bazel-distdir`, Bazel 7.4.1, URMA mock, and the local reverse proxy
+    `127.0.0.1:17897`.
+- Static/check tooling after the fix:
+  - `git diff --check -- src/datasystem/worker/worker_admission_facade.cpp` passed.
+  - `clang-format-diff` over the fixed product hunk produced no output.
+  - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`.
