@@ -1,6 +1,6 @@
 # Worker Self-Healing Scale/Fault Overlap Follow-Ups
 
-Updated: 2026-07-20
+Updated: 2026-07-21
 
 This file records the scale-up/scale-down plus overlapping-fault cases that are not yet fully closed as active
 acceptance coverage for the worker local-isolation self-healing story.
@@ -28,6 +28,8 @@ and recovery are already in progress when another worker/control-plane fault ove
 | SF-08 | Local topology stamp lags while peer has newer topology and reports control backend available. | Review feedback identified risk; coverage needs to prove stale local stamp does not block local-isolation admission closure. | UT plus ST/injection proves peer AVAILABLE with stale local stamp still closes admission and records stale-authority diagnostics. |
 | SF-09 | Peer probe partially fails after earlier local-isolation evidence was observed. | Review feedback identified all-or-nothing probe risk. | UT proves partial successful peer observations are retained and sticky LOCAL evidence is not overwritten by a later empty batch. |
 | SF-10 | Active scale-in/scale-out request overlaps with global backend outage. | Global outage no-self-isolation is covered; active topology operation overlap needs explicit acceptance. | ST proves workers do not self-isolate during true global outage and do not commit unsafe scale migration until backend evidence returns. |
+| SF-11 | Stream client-facing traffic overlaps with local isolation or recovery. | Task 6 audit found no runtime/admission integration in `worker/stream_cache`; this is explicitly out of Plan A source changes. | Active stream ST/UT proves Subscribe/GetDataPage/DeleteStream/Reset or equivalent normal stream traffic rejects during `LOCAL_ISOLATED` and `RECOVERING`, while legal recovery/control RPCs remain allowed. |
+| SF-12 | KV/object-style normal API traffic overlaps with local isolation or recovery. | Object-cache admission is stronger after Task 5, but the design-level KV acceptance cases need named active coverage instead of implicit mapping. | Active KV-facing Get/Set acceptance proves normal traffic rejects during `LOCAL_ISOLATED` and `RECOVERING`, and data remains readable after recovery completes. |
 
 ## Recommended Closure Order
 
@@ -35,7 +37,8 @@ and recovery are already in progress when another worker/control-plane fault ove
    whether admission closes during real local isolation.
 2. SF-01 and SF-04 next: these directly validate the story's data-loss goals during scale-down/recovery overlap.
 3. SF-02 and SF-05 next: these close scale-up target safety and planner/admission integration.
-4. SF-06, SF-07, and SF-10 after the above pass: these harden OOM, reason semantics, and global-outage overlap.
+4. SF-06, SF-07, SF-10, SF-11, and SF-12 after the above pass: these harden OOM, reason semantics, global-outage,
+   stream admission, and KV-facing admission overlap.
 
 ## Acceptance Rule
 

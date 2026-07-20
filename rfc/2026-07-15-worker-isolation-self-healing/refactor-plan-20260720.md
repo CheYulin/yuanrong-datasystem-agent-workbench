@@ -942,7 +942,7 @@ Observed commit: `14fc34f3d refactor(worker): add admission facade for self-heal
   - named follow-up cases `CB-06-SC-01`, `CB-06-SC-02`, `CB-06-KV-01`, and `CB-06-KV-02`
   - risk note that PR !1405 must not claim full Stream/KV admission closure until those follow-ups have active tests.
 
-- [ ] **Step 1: Audit stream/KV worker-side entry points**
+- [x] **Step 1: Audit stream/KV worker-side entry points**
 
 Run:
 
@@ -952,7 +952,17 @@ rg -n "CheckRuntimeAdmission|WorkerServiceAdmission|RegisterService|Status .*\\(
 
 Expected: a short list of worker-side stream/KV business entry points and current admission coverage.
 
-- [ ] **Step 2: Pick one scope decision**
+Observed audit:
+
+- The first broad `rg` command produced too much `Status` noise and was narrowed to runtime/admission keywords.
+- `src/datasystem/worker/stream_cache` client-facing entries include `ClientWorkerSCServiceImpl::Subscribe`,
+  `GetDataPage`, `DeleteStream`, `GetLastAppendCursor`, reset/resume, and worker-worker push paths. No
+  `WorkerRuntimeStateManager`, `WorkerServiceAdmission`, or `WorkerAdmissionFacade` usage was found in stream_cache.
+- There is no separate `src/datasystem/worker/kv_cache` directory in this tree. KV-style ordinary Get/Set acceptance must
+  be named against the object-cache/KV-facing API path instead of being counted implicitly.
+- Object/migration paths are partially linearized by Task 5; stream/KV source changes are deferred from Plan A.
+
+- [x] **Step 2: Pick one scope decision**
 
 Update `cluster-boundary-review-20260720.md` with these follow-up IDs:
 
@@ -961,7 +971,7 @@ Update `cluster-boundary-review-20260720.md` with these follow-up IDs:
 - `CB-06-KV-01`: KV worker-facing normal request rejects during `LOCAL_ISOLATED`.
 - `CB-06-KV-02`: KV worker-facing normal request rejects during `RECOVERING`.
 
-- [ ] **Step 3: Run docs/self-check**
+- [x] **Step 3: Run docs/self-check**
 
 Run:
 
@@ -970,6 +980,8 @@ rg -n "CB-06|Stream|KV|admission" /home/t14s/workspace/git-repos/yuanrong-datasy
 ```
 
 Expected: CB-06 is explicit and no longer ambiguous.
+
+Observed: self-check found `CB-06`, `SF-11`, `SF-12`, Stream, KV, and admission entries across the RFC directory.
 
 - [ ] **Step 4: Commit**
 

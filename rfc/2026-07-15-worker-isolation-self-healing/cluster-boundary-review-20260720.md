@@ -158,6 +158,18 @@ Acceptance cases:
 Problem: the story design expects Object/Stream/KV/migration admission coverage, but current implementation emphasis is
 Object and migration. Stream/KV paths need either implementation closure or an explicit PR-scope decision.
 
+Current audit:
+
+- `src/datasystem/worker/stream_cache` has client-facing service entries such as `ClientWorkerSCServiceImpl::Subscribe`,
+  `GetDataPage`, `DeleteStream`, `GetLastAppendCursor`, reset/resume, and worker-worker push paths. No
+  `WorkerRuntimeStateManager`, `WorkerServiceAdmission`, or `WorkerAdmissionFacade` usage was found in this module
+  during the Task 6 audit.
+- The current tree does not have a separate `src/datasystem/worker/kv_cache` module. KV-style ordinary Get/Set traffic
+  is represented through the object-cache worker service path, which has stronger admission coverage than stream but
+  still needs explicit KV API acceptance naming instead of being treated as implicitly closed.
+- Object and migration paths were partially linearized through `WorkerAdmissionFacade` in Task 5; stream/KV source
+  changes remain deliberately out of scope for the Plan A cohesion refactor to keep the PR blast radius bounded.
+
 Required behavior:
 
 - In Plan A, keep stream and KV source changes out of the cohesion refactor to avoid expanding the PR blast radius.
