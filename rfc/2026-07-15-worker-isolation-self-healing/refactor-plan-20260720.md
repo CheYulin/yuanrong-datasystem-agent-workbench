@@ -1498,3 +1498,40 @@ Mandatory `ICoordinationBackend` boundary items remain:
     0:08.66.
   - `ds-pr-review prepare 1405` passed with bundle `/tmp/yuanrong-pr-review-cache/pr-1405/bundle.json`, warnings `[]`,
     file_count 133, comment_count 162, total_changed_lines 13766.
+
+### 2026-07-21 CI Retest Round 6: aarch64 Runtime Admission Fix
+
+- Trigger and gate status:
+  - Retest note `4382c69e3cd213efc6c06c648e57855cde824fc6` triggered CI job 7833 after commit `ee3dfba9e`.
+  - CI 7833 CodeCheck passed: `check_code`, `check_package_license`, and `check_sca` all returned result `0`.
+  - x86-64 build job 7950 passed. It transiently retried GitHub `lcov-1.16.tar.gz` download, then completed
+    `Finished: SUCCESS`.
+  - aarch64 job 7951 failed on two persistent rerun failures:
+    `ScEvictionObjectTest.DiskPressureBlocksGlobalDiskRecovery` and `OcServiceDisableTest.TestInit`.
+- Root cause and fix:
+  - `DiskPressureBlocksGlobalDiskRecovery` directly called `WorkerOcEvictionManager::IsResourceRecovered` without
+    initializing allocator/spill state. It passed on some local paths but segfaulted on aarch64. The test now uses the
+    existing `InitTest()` setup and named constants for shared-memory size/cache percentages.
+  - `OcServiceDisableTest.TestInit` exercises OC disabled + SC enabled. The worker startup path set the health probe
+    after topology readiness but skipped object-cache recovery admission refresh, leaving topology serving admission
+    closed for SC. `WorkerOCServer::MarkRunningWithoutObjectCacheRecovery()` now marks complete runtime evidence and
+    reopens admission only in the OC-disabled startup branch.
+- Validation after the fixes:
+  - `git diff --check` passed.
+  - `clang-format-diff` over `worker_oc_server.{h,cpp}` and `worker_oc_eviction_test.cpp` produced no remaining diff.
+  - `clang-tidy-diff -extra-arg=-Wno-unused-command-line-argument` over changed lines exited 0. The extra arg suppresses
+    compile-database linker-flag noise from `-Wl,...`; no changed-line diagnostics remained.
+  - CLion remote `tests-index` with URMA mock passed, total 167s, `compile_commands` entries 1128.
+  - CMake focused UT `ScEvictionObjectTest.DiskPressureBlocksGlobalDiskRecovery`: passed, rebuild 2.27s after final
+    constant cleanup, test 10.06s.
+  - CMake focused ST `OcServiceDisableTest.TestInit`: passed, test 2.41s.
+  - Bazel 7.4.1 focused UT
+    `//tests/ut/worker:worker_oc_eviction_test --test_filter=ScEvictionObjectTest.DiskPressureBlocksGlobalDiskRecovery`
+    passed, test 14.2s, command 0:21.13.
+  - Bazel 7.4.1 build `//src/datasystem/worker:worker_oc_server` passed, command 3:21.87.
+- Notes:
+  - Bazel whole-target `//tests/ut/worker:worker_oc_eviction_test` still has pre-existing single-process
+    allocator/spill global-state interference when all tests in the file run together.
+  - Bazel whole-target `//tests/st/client/object_cache:oc_service_disable_test` still fails in the Bazel packaging
+    environment because the launched worker reports unknown flag `use_brpc`; CMake ST is the matching gate path for
+    this failure.
