@@ -249,3 +249,40 @@ commit: `10f4ada74440`.
 
 Note: an earlier topology run against `./build/tests/ut/ds_ut` returned `0 tests`; that result is not counted as pass
 evidence. The corrected target is `cluster_topology_contract_ut`.
+
+## Review Feedback Closure 2026-08-02
+
+Scope: handle the review round pulled from PR !1798 after head `10f4ada74440`, keeping the version boundary agreed in
+discussion: peer-observed hash ring is a non-authoritative rejoin hint only, not a local routing/placement view.
+
+CodeGraph:
+
+| Command | Status | Notes |
+|---|---|---|
+| `timeout 30s /home/t14s/.local/bin/codegraph status /home/t14s/workspace/git-repos/yuanrong-datasystem/.codegraph` | BLOCKED | `unable to open database file`; exact-head source, PR comments, and remote build/test evidence used as fallback |
+
+Review items:
+
+| Review item | Decision | Change |
+|---|---|---|
+| Peer hash ring refresh does not correct routing | Partially accepted; route correction is deferred for this version | `RefreshPeerTopology` now treats peer-observed local `FAILED` as rejoin-required. PR/RFC explicitly state peer data is not installed as routing state. |
+| Rejoin cleanup does not wait for already admitted ordinary RPCs | Accepted | `CleanupLocalStateForRejoin` closes migration admission, then drains ordinary OC RPCs by acquiring the `reconFlag_` writer fence before metadata/object cleanup. |
+| Ensure/Reconcile path bypasses membership recreate cleanup gate | Accepted | `DsCoordinationBackend::OnMembershipEnsured` now returns `Status`, runs the same recreate gate before accepting a new membership revision, and `WorkerLeaderReconciler` propagates failure. |
+| Cleanup runs synchronously and lacks independent backoff | Valid follow-up, not fixed in this PR | PR/RFC disclaimer records async cleanup state machine, deadline-aware batching, retry/backoff, and de-dup as follow-up work. |
+| Backend-unavailable peer refresh can serially block the topology thread | Valid follow-up, not fixed in this PR | PR/RFC disclaimer records shared/async peer probing as follow-up work. |
+
+TDD evidence:
+
+| Gate | Command | Status | Runtime / Notes |
+|---|---|---|---|
+| RED tests-only build | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache cmake --build build --target cluster_topology_contract_ut ds_ut_object -j80` on branch `origin/verify/pr1798-review-red-82963b36e` | FAIL as expected | New tests required `OnMembershipEnsured` to return `Status`, but production still returned `void`. This is counted only as RED evidence. |
+| GREEN focused build | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache cmake --build build --target cluster_topology_contract_ut ds_ut_object ds_ut ds_st_kv_cache -j80` on `tiantiyun-80c128g` under `tmux` | PASS | 21.49 s incremental build at `111c134ea421094ed6164ef35188801a0b652805`; used `/home/ds-thirdparty-cache` |
+| Review UT | `./build/tests/ut/cluster_topology_contract_ut --gtest_filter=TopologyEngineTest.PeerHashRingRefreshFailedLocalMemberRequiresRejoin:DsCoordinationBackendSessionTest.EnsuredMembershipIsBlockedUntilCleanupGatePasses` | PASS, 2 tests | gtest 23 ms; outer 0.05 s |
+| Worker drain UT | `./build/tests/ut/ds_ut_object --gtest_filter=WorkerOcServiceImplTest.CleanupLocalStateForRejoinWaitsForOrdinaryRpcDrain` | PASS, 1 test | gtest 23 ms; outer 0.07 s |
+| Previously failed UT | `./build/tests/ut/ds_ut --gtest_filter=TopologyRecoveryManagerTest.UnboundRequestsDoNotConsumeClusterAdmission:TopologyRecoveryManagerTest.RequestsOnePayloadForIdenticalHighestEvidence` | PASS, 2 tests | gtest 5 ms; outer 0.05 s |
+| Previously failed ST | `TEST_SRCDIR=$(pwd) TEST_WORKSPACE=. ./build/tests/st/ds_st_kv_cache --gtest_filter=KVCacheClientServiceDiscoverySwitchBackTest.TestRecoverLocalWorker` | PASS, 1 test | gtest 13.545 s; outer 13.61 s |
+| Whitespace | `git diff --check main/master...HEAD` | PASS | local static check only |
+| clang-format dry-run | `clang-format --dry-run --Werror` over touched C++ files | NOT USED AS PASS GATE | Reports large existing full-file format differences; no auto-format applied to avoid unrelated review noise. |
+
+Counts for PR description: review/new UT 3 cases, previously failed UT 2 cases, previously failed ST 1 case. Counted
+remote validation used `URMA_MOCK=on` build configuration from the existing build tree and `-j80`.

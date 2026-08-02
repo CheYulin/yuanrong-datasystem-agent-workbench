@@ -21,7 +21,7 @@ membership, and rejoin as a new member.
 | G3 | A removed Worker rejects ordinary business before rejoining. | Object-cache business RPC validation returns `K_NOT_READY` or equivalent closed-admission behavior. | M2 |
 | G4 | Membership recreate is blocked until local cleanup succeeds. | UT proves recreate path returns blocked status before cleanup and proceeds after cleanup. | M2 |
 | G5 | Cleanup for cold rejoin is local and narrow. | UT proves local meta/data cleanup does not invoke topology failure cleanup/ref rebuild. | M2 |
-| G6 | While Coordinator is unavailable, peer `GetHashRing` accepts only newer topology versions and treats missing local member as rejoin-required. | UT covers newer, stale, RPC-failure, and missing-local peer responses. | M2 |
+| G6 | While Coordinator is unavailable, peer `GetHashRing` accepts only newer topology versions as non-authoritative rejoin evidence and treats missing or `FAILED` local member as rejoin-required. | UT covers newer, stale, RPC-failure, missing-local, and failed-local peer responses. | M2 |
 
 ## 2. Requirement Boundary
 
@@ -70,7 +70,7 @@ flowchart LR
 | UC1 | Client | Worker loses Coordinator link but has not been removed | Avoid process death | Keep last snapshot and existing availability decision | Worker process alive |
 | UC2 | Client | Worker is later removed from topology | Avoid stale service | Enter rejoin-required and close ordinary admission | RPC returns not ready |
 | UC3 | Operator | Coordinator link recovers after removal | Rejoin safely | Cleanup local state before membership recreate | New membership after cleanup |
-| UC4 | Worker runtime | Peer has newer topology while Coordinator is unavailable | Reduce stale routing | Pull existing `GetHashRing` from peers and accept only newer versions | Newer version accepted only |
+| UC4 | Worker runtime | Peer has newer topology while Coordinator is unavailable | Detect whether this Worker was removed or failed | Pull existing `GetHashRing` from peers, accept only newer versions as non-authoritative evidence, and do not install peer data as a routing view | Newer evidence accepted only; missing or failed local member enters rejoin-required |
 | UC5 | Coordinator and peers | Active batch depends on isolated Worker | Avoid wrong topology | Do not add compensation protocol; recover by exact read or cold rejoin | No incorrect Worker-side self-publish |
 
 ## 4. Design
@@ -141,7 +141,7 @@ sequenceDiagram
 
 | Step | Rule |
 |---|---|
-| Detect | Only an exact topology snapshot or accepted newer peer topology can trigger local-member-missing. |
+| Detect | Only an exact topology snapshot can publish routing state. Accepted newer peer topology can only trigger local-member-missing or local-member-failed rejoin-required. |
 | Close | Admission closes before cleanup starts. |
 | Clean | Local cleanup is idempotent and deadline-aware. |
 | Recreate | Every `AutoCreateKeepAliveKey(true)` path checks cleanup readiness. |
@@ -166,7 +166,7 @@ flowchart TB
 |---|---|---|
 | `TopologyAvailabilityLevel` plus reason | `TopologyEngine` | Existing `stateMutex_` and availability transition mutex |
 | cleanup gate boolean/status | `DsCoordinationBackend` or `TopologyEngine` hook result | Guarded by existing membership mutation flow |
-| peer-observed response | `TopologyEngine` local method scope | Not persisted and not published as Coordinator authority |
+| peer-observed response | `TopologyEngine` local method scope | Records newest observed version for diagnostics and rejoin hints; not persisted, not published as Coordinator authority, and not installed as routing state |
 | local object key list | `WorkerOcServiceClearDataFlow` | Snapshot object ids before clearing; clear entries by existing object locks |
 
 ### 4.6 Component Interfaces
@@ -175,7 +175,7 @@ flowchart TB
 |---|---|---|
 | rejoin cleanup hook | `std::function<Status(std::chrono::steady_clock::time_point)>` | Called after admission close and before membership recreate. |
 | recreate gate | `std::function<Status(bool waitForCompletion)>` or equivalent existing reconcile hook | Blocks recreate until cleanup succeeds. |
-| peer hash ring hook | `std::function<Status(uint64_t currentVersion, ClusterTopologyPb &)>` | Existing RPC only; accept newer version and ignore stale failures. |
+| peer hash ring hook | `std::function<Status(uint64_t currentVersion, ClusterTopologyPb &)>` | Existing RPC only; accept newer version as evidence, ignore stale failures, and trigger rejoin if local member is missing or `FAILED`. |
 | local data cleanup | `Status ClearAllLocalObjectsForRejoin(deadline)` | No meta-owner query and no ref rebuild. |
 
 ## 5. External Interfaces
@@ -199,6 +199,15 @@ No public SDK API, deployment parameter, environment variable, RPC, or protobuf 
 | R2 | Peer topology refresh overlaps exact Coordinator reload. | Accept only monotonic newer versions and revalidate by exact read on recovery. |
 | R3 | Cleanup can fail or time out. | Keep admission closed and do not recreate membership. |
 | R4 | Object clear-all can be costly. | Use UT for matrices; ST uses small object counts only. |
+| R5 | Peer refresh is synchronous with backend-unavailable probing. | Keep v1 scope as a bounded synchronous probe; move shared/async probing to follow-up if needed. |
+
+### 6.1 Current-Version Disclaimer
+
+This version does not install or use a peer-observed newer hash ring as a local routing or placement view. Peer
+`GetHashRing` remains a non-authoritative signal: it can show that another Worker has observed a newer version and can
+tell this Worker that its own member is missing or `FAILED`, which triggers cold rejoin. Coordinator exact topology read
+remains the only authoritative source for published routing state. Route correction from peer-observed hash rings,
+async peer probing, and cleanup retry/backoff state machines are intentionally left for follow-up design.
 
 ## 7. Landing Steps
 
