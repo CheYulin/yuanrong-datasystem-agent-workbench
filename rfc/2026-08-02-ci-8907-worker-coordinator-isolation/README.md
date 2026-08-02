@@ -61,6 +61,16 @@ Export file: `openeuler_yuanrong-datasystem_全量导出（未解决）_20260802
 | `G.NAM.03-CPP` static variable naming | `src/datasystem/worker/worker_oc_server.cpp:488` | Renamed `SHA256_HEX_SIZE` to `sha256HexSize`. |
 | `G.FUN.01-CPP` function size | `src/datasystem/coordinator/topology_recovery_manager.cpp:954` | Not modified per request; `MaybeFinalize` is 52 non-comment lines and should be handled by shielding/suppression if gate requires it. |
 
-Validation must run only on `tiantiyun-80c128`. A local tmux build was started briefly by mistake and stopped before
-completion; do not use that partial local log as verification evidence. Remote validation should use
-`/home/ds-thirdparty-cache`, `BUILD_WITH_URMA_MOCK=on`, and `-j80`.
+Validation must run only on `tiantiyun-80c128g`. A local tmux build was started briefly by mistake and stopped before
+completion; do not use that partial local log as verification evidence. Remote validation uses
+`/home/ds-thirdparty-cache`, `BUILD_WITH_URMA_MOCK=on`, and requested `-j80`.
+
+### Remote Validation After CodeCheck Fix
+
+Commit: `65bfeed0f24403cd80a178a37659b2d67b6ce98e`
+
+| Type | Command | Result | Time |
+| --- | --- | --- | --- |
+| CMake build | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache bash build.sh -b cmake -t build -U on -X off -P off -s off -j 80 -u 80 -i on` | PASS | 491 s |
+| UT fixed failures | `./build/tests/ut/ds_ut --gtest_filter=TopologyRecoveryManagerTest.UnboundRequestsDoNotConsumeClusterAdmission:TopologyRecoveryManagerTest.RequestsOnePayloadForIdenticalHighestEvidence` | PASS, 2 cases | 0.07 s |
+| ST fixed failure | `TEST_SRCDIR=<repo> TEST_WORKSPACE=. ./build/tests/st/ds_st_kv_cache --gtest_filter=KVCacheClientServiceDiscoverySwitchBackTest.TestRecoverLocalWorker` | PASS, 1 case | 13.61 s |
