@@ -230,3 +230,22 @@ Bazel environment note: the first Bazel attempt used default `/root/.cache/bazel
 device`. The second attempt moved Bazel `output_user_root` to `/home` and proved source build success
 (`5416 total actions`) but install still touched root-backed `/tmp`. The final counted Bazel run set both
 `output_user_root` and `TMPDIR` under `/home`, then passed.
+
+## Topology Engine Test Diff Noise Closure 2026-08-02
+
+Scope: user review feedback noted that `tests/ut/cluster/topology_engine_test.cpp` contained many formatting-only
+changes. The file was restored against upstream style and only the semantic test changes were re-applied. Final PR
+commit: `10f4ada74440`.
+
+| Gate | Command | Status | Runtime / Notes |
+|---|---|---|---|
+| CodeGraph | `timeout 30s /home/t14s/.local/bin/codegraph status /home/t14s/workspace/git-repos/yuanrong-datasystem/.codegraph` | BLOCKED: `unable to open database file`; exact-head source and CMake evidence used as fallback | shared index was not rebuilt from this worktree |
+| Diff noise check | `git diff main/master -- tests/ut/cluster/topology_engine_test.cpp` plus helper-name scan | PASS: public PR diff no longer includes helper-only clang-format churn; remaining changes are test semantic replacements and rejoin assertions | single-file PR diff remains 250 lines because death-test replacements are semantic |
+| CMake incremental build | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache cmake --build build --target ds_ut ds_st_kv_cache -j 80` on `tiantiyun-80c128g` under `tmux` | PASS | `ds_ut` build 4.46 s; `ds_st_kv_cache` build 2.32 s |
+| Previously failed UT | `./build/tests/ut/ds_ut --gtest_filter="TopologyRecoveryManagerTest.UnboundRequestsDoNotConsumeClusterAdmission:TopologyRecoveryManagerTest.RequestsOnePayloadForIdenticalHighestEvidence"` | PASS, 2 tests | gtest 5 ms; outer 0.05 s |
+| Previously failed ST | `TEST_SRCDIR=<repo> TEST_WORKSPACE=. ./build/tests/st/ds_st_kv_cache --gtest_filter="KVCacheClientServiceDiscoverySwitchBackTest.TestRecoverLocalWorker"` | PASS, 1 test | gtest 13.602 s; outer 13.67 s |
+| Topology Engine UT build | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache cmake --build build --target cluster_topology_contract_ut -j 80` on `tiantiyun-80c128g` under `tmux` | PASS | target contains `topology_engine_test.cpp`; `TopologyEngineTest` is not in aggregate `ds_ut` |
+| Topology Engine changed UT | `./build/tests/ut/cluster_topology_contract_ut --gtest_filter="TopologyEngineTest.LocalMemberRemovedFromSnapshotRequiresRejoinWithoutSigkill:TopologyEngineTest.PeerHashRingRefreshAcceptsNewerVersionOnly:TopologyEngineTest.PeerHashRingRefreshMissingLocalMemberRequiresRejoin:TopologyEngineTest.ConfirmedLocalBackendIsolationKeepsWorkerAliveAfterTimeout:TopologyEngineTest.NonAuthoritativeReadFailureDoesNotCancelKeepAliveIsolation:TopologyEngineTest.AsymmetricBackendOutageIsolatesThenRecovers"` | PASS, 6 tests | gtest 455 ms; outer 0.49 s |
+
+Note: an earlier topology run against `./build/tests/ut/ds_ut` returned `0 tests`; that result is not counted as pass
+evidence. The corrected target is `cluster_topology_contract_ut`.
