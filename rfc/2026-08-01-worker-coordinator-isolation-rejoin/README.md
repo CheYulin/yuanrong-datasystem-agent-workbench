@@ -6,6 +6,8 @@
 | Source branch | `feat/worker-coordinator-isolation-rejoin` |
 | Source baseline | `main/master@a90f6c6b718857367575068c83fb976494f6c751` |
 | Scope | Measure 2: worker keeps running during worker-coordinator isolation and rejoins after removal |
+| GitCode issue | `openeuler/yuanrong-datasystem#924` |
+| GitCode PR | `openeuler/yuanrong-datasystem!1798` |
 | Worktree | `yuanrong-datasystem/.worktrees/worker-coordinator-isolation-rejoin-20260801` |
 
 ## Files
