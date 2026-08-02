@@ -160,3 +160,73 @@ and does not add periodic background work.
 | clang-format dry-run | `git diff --name-only main/master...HEAD | rg '\.(cpp|h)$' | xargs -r clang-format --dry-run --Werror` | NOT USED AS PASS GATE: full-file dry-run reports large existing/local style differences across changed files | no auto-format applied to avoid noisy unrelated reformat |
 | Final push | `git push --force-with-lease origin feat/worker-coordinator-isolation-rejoin` | PASS: final fork branch `ec1418f75601b703ebb6d030eac72dc73b2fa2f6` | openeuler remote was not pushed |
 | Final PR status | GitCode API without proxy env; `review_pr.py prepare 1798` | PASS: `mergeable=True`, `conflict_passed=True`, `branch_missing_passed=True`, `non_ff_passed=True`, head `ec1418f75601b703ebb6d030eac72dc73b2fa2f6`, base `ee711eb52baf0130752aefc1ae64159cace64b11`; prepare: 18 files, 303 changed lines, no warnings | PR updated at `2026-08-02T10:02:14+08:00` |
+
+## Weak Evidence Closure 2026-08-02
+
+Scope: finish incomplete/weak-evidence items after the conflict-resolution PR head. Worktree and remote validation both ran
+under `/home`; third-party components used `/home/ds-thirdparty-cache`; long-running commands ran in `tmux`. Build
+parallelism used `-j40` because there were other validation sessions on the host.
+
+Design cross-check:
+
+- Original measure 2 requires Worker not to self-kill during coordinator control-plane isolation, and to recover once the
+  coordinator topology is available again.
+- Coordinator remains the authority; worker peer information is still non-authoritative. This round does not add new
+  peer-authority paths.
+- Membership recreation remains gated by local cleanup. This round only fixes recovery progress and keepalive/reporting
+  liveness around the existing design.
+
+Fixes:
+
+| Area | Gap | Fix | Evidence |
+|---|---|---|---|
+| Coordinator recovery | Accepted canonical payload could wait forever if no exact new report arrived at the discovery deadline. | Add one delayed reconcile at the discovery deadline after an accepted payload is stored but no install version is ready yet. | `TopologyRecoveryManagerTest.AcceptedPayloadInstallsAfterDiscoveryWindowWithoutNewReport` |
+| Worker keepalive | `OnMembershipEnsured()` notified the keepalive loop, but the wait predicate only checked exit, so the immediate renew could be swallowed until the lease interval. | Add a protected `keepAliveWakeEpoch_` and make the keepalive wait predicate wake on membership ensure. | `DsCoordinationBackendSessionTest.EnsuredMembershipWakesRenewalBeforeLeaseExpires` |
+| Recovery reporter | A RECOVERING response without payload request stopped the current report loop, requiring a new membership signal. | Keep reporting with backoff while the coordinator remains RECOVERING, and attach payload only when requested. | `TopologyRecoveryReporterTest.RecoveringKeepsReportingWithoutMembershipSignal`; `TopologyRecoveryReporterTest.SendsPayloadOnlyWhenCoordinatorRequestsIt` |
+
+Validation:
+
+| Gate | Command | Status | Runtime / Notes |
+|---|---|---|---|
+| CMake focused build | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache cmake --build build --target cluster_topology_contract_ut ds_ut ds_ut_object ds_st_coordinator_backend_manual -j40` in tmux | PASS after keepalive wake fix | 89.40 s |
+| Coordinator recovery UT | `./build/tests/ut/ds_ut --gtest_filter="TopologyRecoveryManagerTest.InstallsUniqueHighestCanonicalPayload:TopologyRecoveryManagerTest.AcceptedPayloadInstallsAfterDiscoveryWindowWithoutNewReport:TopologyRecoveryManagerTest.RecoveryTasksPreserveSubmittingTraceContext"` | PASS, 3 tests | wall 0.09 s |
+| Backend session UT | `./build/tests/ut/cluster_topology_contract_ut --gtest_filter="DsCoordinationBackendSessionTest.EnsuredMembershipClearsEarlierRenewalFailure:DsCoordinationBackendSessionTest.EnsuredMembershipWakesRenewalBeforeLeaseExpires:DsCoordinationBackendSessionTest.RecreatedMembership*:DsCoordinationBackendSessionTest.StaleEnsuredRevisionCannotRollbackNewerMembershipMutation"` | PASS, 4 tests | wall 0.07 s |
+| Topology contract UT | `./build/tests/ut/cluster_topology_contract_ut --gtest_filter="TopologyEngineTest.LocalMemberRemovedFromSnapshotRequiresRejoinWithoutSigkill:TopologyEngineTest.AsymmetricBackendOutageIsolatesThenRecovers:TopologyEngineTest.*BackendEvidence*"` | PASS, 4 tests | wall 0.45 s |
+| Worker OC UT | `./build/tests/ut/ds_ut_object --gtest_filter="WorkerOcServiceImplTest.CleanupLocalStateForRejoin*:WorkerWorkerOcApiTest.RemoteHashRingRefreshRequiresInitializedSession:WorkerGetHashRingTest.*"` | PASS, 2 matched tests in this build layout | wall 0.07 s |
+| Recovery reporter UT | `./build/tests/ut/ds_ut --gtest_filter="TopologyRecoveryReporterTest.*"` | PASS, 14 tests | wall 0.22 s |
+| Coordinator outage ST | `./build/tests/st/ds_st_coordinator_backend_manual --gtest_filter="CoordinatorBackendClusterTest.WorkersStayAliveDuringCoordinatorOutageAndRecover"` rerun in tmux | PASS, 1 test | gtest 47.772 s; wall 47.85 s; in-test recovery path logged 24.044 s |
+
+Notes:
+
+- First full ST attempt after the UT pass failed during initial process startup before the target outage/recovery
+  scenario: one worker hit `Coordinator routing deadline exceeded` and another saw `cluster topology Snapshot is not
+  ready`. The ST-only rerun passed and is the counted ST evidence for this round.
+- Focused UT count for this round is 27 cases, aggregate outer runtime 0.90 s. Counted ST is 1 case, outer runtime
+  47.85 s.
+
+## URMA_MOCK Final Validation 2026-08-02
+
+Scope: user requested final validation with `URMA_MOCK` enabled and build parallelism `-j80`. Validation ran on remote
+HEAD `066caeb3b23929d6baa902f28c4706721345e8e8`, using `/home/ds-thirdparty-cache`, under `tmux`, with all new
+temporary output rooted under `/home`.
+
+| Gate | Command | Status | Runtime / Notes |
+|---|---|---|---|
+| CMake build | `bash build.sh -t build -P off -X off -U on -j80 -i on` | PASS, `CMAKE_BUILD_RC=0`; `BUILD_WITH_URMA_MOCK=on` | 611 s |
+| Coordinator recovery UT | `./build/tests/ut/ds_ut --gtest_filter="TopologyRecoveryManagerTest.InstallsUniqueHighestCanonicalPayload:TopologyRecoveryManagerTest.AcceptedPayloadInstallsAfterDiscoveryWindowWithoutNewReport:TopologyRecoveryManagerTest.RecoveryTasksPreserveSubmittingTraceContext"` | PASS, 3 tests | gtest 9 ms; outer 0 s |
+| Backend session UT | `./build/tests/ut/cluster_topology_contract_ut --gtest_filter="DsCoordinationBackendSessionTest.EnsuredMembershipClearsEarlierRenewalFailure:DsCoordinationBackendSessionTest.EnsuredMembershipWakesRenewalBeforeLeaseExpires:DsCoordinationBackendSessionTest.RecreatedMembership*:DsCoordinationBackendSessionTest.StaleEnsuredRevisionCannotRollbackNewerMembershipMutation"` | PASS, 5 tests | gtest 11 ms; outer 0 s |
+| Topology contract UT | `./build/tests/ut/cluster_topology_contract_ut --gtest_filter="TopologyEngineTest.LocalMemberRemovedFromSnapshotRequiresRejoinWithoutSigkill:TopologyEngineTest.AsymmetricBackendOutageIsolatesThenRecovers:TopologyEngineTest.*BackendEvidence*"` | PASS, 2 matched tests | gtest 66 ms; outer 0 s |
+| Worker OC UT | `./build/tests/ut/ds_ut_object --gtest_filter="WorkerOcServiceImplTest.CleanupLocalStateForRejoin*:WorkerWorkerOcApiTest.RemoteHashRingRefreshRequiresInitializedSession:WorkerGetHashRingTest.*"` | PASS, 8 tests | gtest 5 ms; outer 0 s |
+| Recovery reporter UT | `./build/tests/ut/ds_ut --gtest_filter="TopologyRecoveryReporterTest.*"` | PASS, 14 tests | gtest 141 ms; outer 1 s |
+| Coordinator outage ST | `./build/tests/st/ds_st_coordinator_backend_manual --gtest_filter="CoordinatorBackendClusterTest.WorkersStayAliveDuringCoordinatorOutageAndRecover"` | PASS, 1 test | gtest 39.748 s; outer 39 s; shutdown 543 ms; outage survival 5000 ms; recovery 12402 ms; scenario 17946 ms |
+| clang-tidy | line-filtered `clang-tidy --quiet -p build --extra-arg=-Wno-unused-command-line-argument --extra-arg=-Wno-error --line-filter=...` over 8 changed files | PASS by progression through all 8 files and continuation into Bazel; no touched-line diagnostic was emitted | full log retained in tmux validation ledger |
+| Bazel build and install | `TMPDIR=/home/.../tmp PATH=/home/.../bazel-home-bin:$PATH bash build.sh -b bazel -P off -X off -U on -j80 -i on`, wrapper injects `bazel --output_user_root=/home/.../bazel-output-root` | PASS, `BAZEL_HOME4_RC=0`; command used `--config=release --config=urma_mock --jobs=80`; `Build completed successfully`, `bazel install done`, `build datasystem (bazel) success` | final incremental/install run 26 s; preceding full Bazel source build succeeded in 548 s before install hit environment space |
+
+Counts for PR description: focused UT 32 cases, counted ST 1 case. UT outer runtime from script markers is 1 s
+aggregate; gtest-reported UT runtime is 232 ms aggregate. ST outer runtime is 39 s; gtest-reported ST runtime is
+39.748 s.
+
+Bazel environment note: the first Bazel attempt used default `/root/.cache/bazel` and failed with `No space left on
+device`. The second attempt moved Bazel `output_user_root` to `/home` and proved source build success
+(`5416 total actions`) but install still touched root-backed `/tmp`. The final counted Bazel run set both
+`output_user_root` and `TMPDIR` under `/home`, then passed.
