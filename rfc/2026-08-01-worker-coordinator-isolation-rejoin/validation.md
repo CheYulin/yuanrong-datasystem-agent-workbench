@@ -255,6 +255,9 @@ evidence. The corrected target is `cluster_topology_contract_ut`.
 Scope: handle the review round pulled from PR !1798 after head `10f4ada74440`, keeping the version boundary agreed in
 discussion: peer-observed hash ring is a non-authoritative rejoin hint only, not a local routing/placement view.
 
+Follow-up issue for deferred routing correction and performance items: #925
+https://gitcode.com/openeuler/yuanrong-datasystem/issues/925
+
 CodeGraph:
 
 | Command | Status | Notes |

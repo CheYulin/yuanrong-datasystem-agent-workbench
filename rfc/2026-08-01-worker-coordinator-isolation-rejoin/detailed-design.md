@@ -203,6 +203,8 @@ No public SDK API, deployment parameter, environment variable, RPC, or protobuf 
 
 ### 6.1 Current-Version Disclaimer
 
+Follow-up issue: #925 https://gitcode.com/openeuler/yuanrong-datasystem/issues/925
+
 This version does not install or use a peer-observed newer hash ring as a local routing or placement view. Peer
 `GetHashRing` remains a non-authoritative signal: it can show that another Worker has observed a newer version and can
 tell this Worker that its own member is missing or `FAILED`, which triggers cold rejoin. Coordinator exact topology read
