@@ -48,3 +48,19 @@ The rerun-failed section left three active failures:
 
 - The first two ST attempts failed before business logic because the CMake fallback resolved `mock_obs_service.py` to `/tests/...`; setting `TEST_SRCDIR` and `TEST_WORKSPACE=.` made the ST locate the source-tree script.
 - No full-file formatting was kept, to avoid review noise from pre-existing style drift.
+
+## CodeCheck Follow-up
+
+Export file: `openeuler_yuanrong-datasystem_全量导出（未解决）_20260802152130.xlsx`
+
+| Rule | Location | Action |
+| --- | --- | --- |
+| `G.FMT.06-CPP` function call parameter indentation | `src/datasystem/worker/worker_oc_server.cpp:1335` | Replaced inline builder lambda with a local callback variable to avoid chained-call indentation noise. |
+| `G.FMT.06-CPP` function call parameter indentation | `src/datasystem/worker/worker_oc_server.cpp:1359` | Replaced inline builder lambda with a local callback variable to avoid chained-call indentation noise. |
+| `G.FUN.01-CPP` function parameter count | `src/datasystem/worker/worker_oc_server.cpp:500` | Introduced a small `PeerHashRingRefreshContext` parameter object; this keeps behavior unchanged and avoids broad refactoring. |
+| `G.NAM.03-CPP` static variable naming | `src/datasystem/worker/worker_oc_server.cpp:488` | Renamed `SHA256_HEX_SIZE` to `sha256HexSize`. |
+| `G.FUN.01-CPP` function size | `src/datasystem/coordinator/topology_recovery_manager.cpp:954` | Not modified per request; `MaybeFinalize` is 52 non-comment lines and should be handled by shielding/suppression if gate requires it. |
+
+Validation must run only on `tiantiyun-80c128`. A local tmux build was started briefly by mistake and stopped before
+completion; do not use that partial local log as verification evidence. Remote validation should use
+`/home/ds-thirdparty-cache`, `BUILD_WITH_URMA_MOCK=on`, and `-j80`.
