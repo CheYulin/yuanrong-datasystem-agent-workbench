@@ -66,5 +66,16 @@ Minimal sequence:
 
 ## CodeGraph
 
+Latest check:
+
 `timeout 30s /home/t14s/.local/bin/codegraph status /home/t14s/workspace/git-repos/yuanrong-datasystem/.codegraph`
-failed with `unable to open database file`; exact-head source inspection and build rules are used as fallback.
+
+Result: up to date, 2,159 files, 53,469 nodes, 157,732 edges. Use CodeGraph for discovery and exact-head source/build
+evidence for final conclusions.
+
+## Validation Log
+
+| Time | Host | Commit | Command | Result |
+|---|---|---|---|---|
+| 2026-08-02 17:25 CST | `tiantiyun-80c128g` | `d04c3b3015d56d4065c4689af1719e0ebe1b5cf4` | `DS_OPENSOURCE_DIR=/home/ds-thirdparty-cache bash build.sh -b cmake -t build -U on -X off -P off -s off -j 80 -u 80 -i on` | PASS, `BUILD_SH_RC=0`; CMake configured with URMA mock. |
+| 2026-08-02 17:33 CST | `tiantiyun-80c128g` | `d04c3b3015d56d4065c4689af1719e0ebe1b5cf4` | `TEST_SRCDIR=$(pwd) TEST_WORKSPACE=. ./build/tests/st/ds_st_coordinator_backend_manual --gtest_filter=CoordinatorBackendClusterTest.SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` | PASS, `TEST_RC=0`; 1 ST case, 24.031 s. |
