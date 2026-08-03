@@ -176,13 +176,16 @@ Commits:
 |---|---|
 | `0e334ecc4` | Keep `membershipRejoinRequired_` across consecutive authoritative snapshots that still miss the local worker. |
 | `f1cb5c0d4` | Clarify short worker-coordinator blink ST semantics and strengthen cleanup-gate UT evidence. |
+| `c4b30fd12` | Retry stored authority adoption after an empty read, with TDD coverage for the #941 stored-authority latch gap. |
 
 Final diff size:
 
 | Area | Files | Delta |
 |---|---|---|
 | Source | `src/datasystem/cluster/runtime/topology_engine.cpp` | Minimal logic change, 3 lines touched. |
+| Source | `src/datasystem/coordinator/topology_recovery_manager.cpp` | Resets `storedAuthorityChecked` after an empty stored-authority read when the same context is still recovering. |
 | UT | `tests/ut/cluster/topology_engine_test.cpp`, `tests/ut/cluster/ds_coordination_backend_session_test.cpp` | Added 3 focused cases or assertions. |
+| UT | `tests/ut/coordinator/topology_recovery_manager_test.cpp` | Added 1 stored-authority retry regression and reran 2 adjacent authority cases. |
 | ST | `tests/st/worker/object_cache/coordinator_backend_cluster_test.cpp` | Adjusted 1 short-blink case. |
 
 Review severity handling included in the PR description:
@@ -192,8 +195,9 @@ Review severity handling included in the PR description:
 | Serious | `182982980` / `#940` | Fixed | Consecutive authoritative snapshots that still miss the local worker keep `membershipRejoinRequired_` true. |
 | Warning | `182983982` / `#943` | Modified | The short-blink ST now injects a 1s worker-coordinator RPC blink, bounded below `node_timeout_s=2`. |
 | Suggestion | `182983990` / `#943` | Evidence strengthened | Cleanup gate UT verifies no Range/Put membership side effects before cleanup readiness. |
+| Serious / Warning | `#941` stored authority | Fixed | An empty stored-authority read no longer permanently latches `storedAuthorityChecked`; later membership activity can adopt newly stored authority. |
 | Warning | `#940` cleanup performance/concurrency items | Follow-up | Lock scope, metadata scan deadline, and object-table concurrency boundaries need a separate concurrency design. |
-| Serious / Warning | `#941` | Follow-up | Coordinator recovery scheduling, stored authority, and shutdown boundedness are coordinator HA policy changes. |
+| Serious / Warning | `#941` recovery/shutdown | Follow-up | Coordinator recovery scheduling and shutdown boundedness are coordinator HA policy changes. |
 | Warning / Suggestion | `#942` | Follow-up | Peer refresh budget, response trimming, and exception defense remain non-authoritative optimization work. |
 | Build suggestion | `#945` | Follow-up | Bazel `-t build` tools packaging lacks `hashring_parser`; source build was validated with `-t off`. |
 
@@ -207,9 +211,18 @@ Validation evidence:
 | `ds-pr-review prepare` | PASS, 4 files, 77 changed lines, 0 comments, no warnings | N/A |
 | `ds-pr-review publish --dry-run` | PASS, 0 findings, 0 comments, no warnings | N/A |
 | CMake build with URMA mock and 80 jobs | PASS | source 465s, example 5s |
+| CMake incremental build with URMA mock and 40 jobs on final SHA `c4b30fd12` | PASS | total 487s |
 | Target UT | PASS, 3 cases, 0 failed | 0.29s total |
+| Final target UT on `c4b30fd12` | PASS, 6 cases, 0 failed | 0.54s total |
 | Target ST | PASS, 2 cases, 0 failed | 22.237s and 37.557s |
 | Bazel source build with URMA mock and 80 jobs | PASS | source 400s, total 424s |
+
+TDD evidence for #941 stored authority:
+
+| Phase | Case | Result | Runtime |
+|---|---|---|---|
+| RED | `TopologyRecoveryManagerTest.StoredAuthorityEmptyReadDoesNotLatchAgainstLaterAuthority` before production fix | FAIL as expected: `DriveUntil(... READY)` returned false | 2.08s |
+| GREEN | same case on `c4b30fd12` | PASS | 0.07s |
 
 Target UT cases:
 
@@ -218,6 +231,9 @@ Target UT cases:
 | `DsCoordinationBackendSessionTest.RecreatedMembershipIsBlockedUntilCleanupGatePasses` | PASS | 0.06s |
 | `DsCoordinationBackendSessionTest.EnsuredMembershipIsBlockedUntilCleanupGatePasses` | PASS | 0.05s |
 | `TopologyEngineTest.ConsecutiveMissingLocalMemberSnapshotsKeepRejoinRequired` | PASS | 0.06s |
+| `TopologyRecoveryManagerTest.ReturningMemberReusesCurrentProcessTopologyAuthority` | PASS | 0.08s |
+| `TopologyRecoveryManagerTest.StoredAuthorityEmptyReadDoesNotLatchAgainstLaterAuthority` | PASS | 0.07s |
+| `TopologyRecoveryManagerTest.StaleStoredAuthorityReadCannotPublishIntoRecreatedContext` | PASS | 0.08s |
 
 Target ST cases:
 
