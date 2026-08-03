@@ -192,6 +192,8 @@ Validation evidence:
 | CodeGraph shared index | PASS, up to date, 2159 files, 53469 nodes, 157732 edges | N/A |
 | `git diff --check` | PASS | N/A |
 | `git clang-format --diff` on touched files | PASS | N/A |
+| `ds-pr-review prepare` | PASS, 4 files, 77 changed lines, 0 comments, no warnings | N/A |
+| `ds-pr-review publish --dry-run` | PASS, 0 findings, 0 comments, no warnings | N/A |
 | CMake build with URMA mock and 80 jobs | PASS | source 465s, example 5s |
 | Target UT | PASS, 3 cases, 0 failed | 0.29s total |
 | Target ST | PASS, 2 cases, 0 failed | 22.237s and 37.557s |
