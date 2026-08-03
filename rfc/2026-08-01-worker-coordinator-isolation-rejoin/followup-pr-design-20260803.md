@@ -185,6 +185,18 @@ Final diff size:
 | UT | `tests/ut/cluster/topology_engine_test.cpp`, `tests/ut/cluster/ds_coordination_backend_session_test.cpp` | Added 3 focused cases or assertions. |
 | ST | `tests/st/worker/object_cache/coordinator_backend_cluster_test.cpp` | Adjusted 1 short-blink case. |
 
+Review severity handling included in the PR description:
+
+| Severity | Review / Issue | PR Handling | Notes |
+|---|---|---|---|
+| Serious | `182982980` / `#940` | Fixed | Consecutive authoritative snapshots that still miss the local worker keep `membershipRejoinRequired_` true. |
+| Warning | `182983982` / `#943` | Modified | The short-blink ST now injects a 1s worker-coordinator RPC blink, bounded below `node_timeout_s=2`. |
+| Suggestion | `182983990` / `#943` | Evidence strengthened | Cleanup gate UT verifies no Range/Put membership side effects before cleanup readiness. |
+| Warning | `#940` cleanup performance/concurrency items | Follow-up | Lock scope, metadata scan deadline, and object-table concurrency boundaries need a separate concurrency design. |
+| Serious / Warning | `#941` | Follow-up | Coordinator recovery scheduling, stored authority, and shutdown boundedness are coordinator HA policy changes. |
+| Warning / Suggestion | `#942` | Follow-up | Peer refresh budget, response trimming, and exception defense remain non-authoritative optimization work. |
+| Build suggestion | `#945` | Follow-up | Bazel `-t build` tools packaging lacks `hashring_parser`; source build was validated with `-t off`. |
+
 Validation evidence:
 
 | Gate | Result | Runtime |
