@@ -469,3 +469,81 @@ Post-fix evidence:
 - Failure topology commits with failed member state and `batch_type=FAILURE`.
 - Failure callback runs `ProcessWorkerTimeout` for the stopped worker and finishes OK.
 - The final Get observes the worker disconnected and reads from L2, then the ST passes.
+
+## 15. PR1798 13 Unresolved Review Comments: PR1821 Status Refresh
+
+Date: 2026-08-04 CST.
+
+Current boundary:
+
+- PR1821 remains a Measure 2 follow-up bugfix/hardening PR.
+- It must not change peer hash-ring routing correction semantics.
+- It must not change coordinator topology arbitration semantics without a separate design.
+- It can fix local correctness bugs, defensive exception handling, bounded per-attempt waits, tests, and build packaging gaps.
+
+CodeGraph and source check:
+
+- CodeGraph query used first: `TopologyRecoveryManager Shutdown pendingRecoveryWork shutdownCv recoveryPool`.
+- Exact PR1821 head checked locally: `28752be6feee2867bbb57fd78d44e7159e0e035d`.
+- Remote safety checked: push remote `origin` is the yche-huawei fork; upstream `main` is openeuler and remains push-forbidden.
+
+13-comment status matrix now reflected in PR1821 description:
+
+| Comment | Issue | Priority | Status | Reason |
+|---|---|---|---|---|
+| `182982978` | `#941` | Serious, livelock / HA | Fixed in PR1821 follow-up | Incomplete evidence now backs off expired delayed-reconcile retries by one `discoveryWindow`; new evidence and non-expired deadlines keep existing behavior. |
+| `182982980` | `#940` | Serious, correctness | Fixed | Consecutive missing-local-member topologies keep `membershipRejoinRequired_` true. |
+| `182982981` | `#940` | Serious, latency | Partially fixed | Object clear deadline is now enforced; metadata scan deadline and write-lock scope remain follow-up concurrency work. |
+| `182982983` | `#941` | Warning, correctness | Follow-up | Ensure-post leader recheck window needs membership pending-confirmation or retry semantics. |
+| `182982988` | `#942` | Warning, performance | Partially fixed | Per-peer RPC budget is bounded; session reuse remains follow-up optimization. |
+| `182982993` | `#942` | Warning, performance | Follow-up | Same-version response is already trimmed; different-version incremental/compact response needs RPC contract design. |
+| `182982997` | `#941` | Warning, HA | Follow-up | This comment is about discovery-window stored-authority policy; current PR only fixes the empty-read latch gap. |
+| `182982998` | `#940` | Warning, concurrency | Follow-up | Metadata manager lock scope requires lifecycle/concurrency boundary design. |
+| `182983002` | `#940` | Warning, concurrency / memory | Follow-up | Object table traversal and batch cleanup need object-table API/concurrency design. |
+| `182983004` | `#941` | Suggestion, reliability | Follow-up, treated as HA risk | Shutdown can wait forever on `pendingRecoveryWork_`; simple wait timeout is insufficient because `ThreadPool` still joins running tasks and closures capture manager `this`. |
+| `182983006` | `#942` | Suggestion, coredump | Fixed | `RefreshPeerTopology()` catches callback exceptions and drops only the non-authoritative peer hint. |
+| `182983982` | `#943` | Warning, ST semantics | Fixed | Blink ST is now under `node_timeout_s`, covering worker-coordinator RPC blink while other workers stay healthy. |
+| `182983990` | `#943` | Warning, test evidence | Evidence strengthened | Cleanup gate is pinned by UT; cold-rejoin ST avoids long keepalive-failure oscillation. |
+
+`#941 recovery/shutdown` assessment:
+
+- The review concern is real even though the original label was suggestion-level: if a recovery task blocks in Store RPC or network retry, coordinator shutdown or failover can wait indefinitely.
+- A naive `shutdownCv_.wait_for(...)` patch would not close the risk. After the wait times out, `ThreadPool` destruction still joins running tasks; skipping destruction while closures capture `this` would risk use-after-free.
+- A real fix needs a small coordinator-recovery shutdown design: pass cancellation/deadline into recovery closures, define timeout return semantics, and prove manager ownership remains valid until tasks observe cancellation.
+- Therefore PR1821 keeps this as `#941` follow-up rather than mixing a coordinator HA policy change into a Measure 2 worker bugfix PR.
+
+## 16. Rebase Conflict and Serious #941 Delayed-Reconcile Backoff Fix
+
+Date: 2026-08-04 CST.
+
+Rebase status:
+
+- Fetched upstream `main/master` at `5f169d7840b385d548cbda854e472780d6393500`.
+- Backup branch before rebase: `backup/pr1821-before-rebase-20260804-164105`.
+- Conflict file: `tests/st/worker/object_cache/coordinator_backend_cluster_test.cpp`.
+- Resolution: keep the current PR semantics for `RealFailedWorkerColdRejoinsWithoutSuicide`: real `KillWorker(1)`, wait worker1 removed, verify worker0 remains alive, then `StartWorkerAndWaitReady({1})`; do not revert to keepalive/witness injection style.
+
+Design decision:
+
+- The serious review issue `182982978/#941` is a valid HA risk: after delayed reconcile reads empty authority and evidence is still incomplete, the old code re-queues with an already expired `discoveryDeadline`, causing immediate repeated recovery work.
+- Keep the fix minimal and within Measure 2 semantics. Do not change topology arbitration, peer hash-ring routing correction, or recovery ownership model.
+- Fix point: `TopologyRecoveryManager::ScheduleDelayedReconcileLocked`. When an expired deadline is re-queued, move it to `clock_->Now() + options_.discoveryWindow`; if the deadline is still in the future, leave it unchanged.
+
+TDD evidence:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| RED | `TopologyRecoveryManagerTest.DelayedReconcileRetriesAreBackedOffWhenEvidenceIsIncomplete` on tiantiyun `ds_ut` before production fix | FAIL as expected: inject count grew from 3 to 150 in the 20ms observation window | 75ms |
+| GREEN | Same new UT after production fix | PASS: one stored-authority read, no retry inside the 20ms observation window | 76ms |
+| Regression | `TopologyRecoveryManagerTest.AcceptedPayloadInstallsAfterDiscoveryWindowWithoutNewReport` | PASS | included in 211ms total |
+| Regression | `TopologyRecoveryManagerTest.DelayedReconcileTimerDoesNotBlockPayloadValidationWorker` | PASS | included in 211ms total |
+| Regression | `TopologyRecoveryManagerTest.ShutdownCancelsDelayedReconcile` | PASS | included in 211ms total |
+| Static | `git diff --check` | PASS | local |
+| Static | `git clang-format --diff HEAD -- src/datasystem/coordinator/topology_recovery_manager.cpp tests/ut/coordinator/topology_recovery_manager_test.cpp` | PASS: no formatting changes | local |
+
+Remote validation environment:
+
+- Host: `tiantiyun-80c128g`.
+- Build mode: CMake with `BUILD_WITH_URMA_MOCK=on`.
+- Parallelism: `-j80`.
+- Third-party cache/temp: `/home/ds-thirdparty-cache`, with compiler temp redirected through `/home/ds-thirdparty-cache/tmp`.
