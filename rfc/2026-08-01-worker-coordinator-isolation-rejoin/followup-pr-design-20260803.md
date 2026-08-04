@@ -395,3 +395,40 @@ CodeGraph note:
 
 - Sandbox run returned `unable to open database file`.
 - Elevated read-only `codegraph status /home/t14s/workspace/git-repos/yuanrong-datasystem` succeeded: 2159 files, 53469 nodes, 157732 edges, DB size 2571.96 MB, index up to date.
+
+## 13. CodeCheck Function-Size Follow-up
+
+Latest gate context:
+
+- Jenkins trigger: `yuanrong-datasystem/8941`.
+- CodeCheck report: `MR_aa294719381d41328442ee3b555c47bc/24cdaf8e0e24ed8d6116ff3ee8d8d404`.
+- Result: one remaining CodeCheck issue.
+
+Issue classification:
+
+| Rule | File | Location | Severity | Decision |
+|---|---|---|---|---|
+| `G.FUN.01-CPP 函数功能要单一--函数大小` | `src/datasystem/coordinator/topology_recovery_manager.cpp` | `TopologyRecoveryManager::AdoptStoredAuthorityIfPresent`, line 1112 | Minor / level 2 | Fix with a small equivalent refactor |
+
+Fix:
+
+- Extracted `ResetStoredAuthorityCheckIfCurrentLocked`.
+- The helper only wraps the duplicated locked predicate used by both the Range-error path and the empty-read path.
+- Measure 2 semantics are unchanged: Range errors still return the Store status; empty reads still return OK and allow a later stored-authority read only when the same round, generation, and recovering context remain current.
+- `AdoptStoredAuthorityIfPresent` reduced from the CodeCheck-reported 52 lines to 44 nonblank/noncomment lines.
+
+Validation:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| Static | `git clang-format --diff HEAD -- src/datasystem/coordinator/topology_recovery_manager.cpp src/datasystem/coordinator/topology_recovery_manager.h` | PASS: no formatting changes | local |
+| Static | `git diff --check` | PASS | local |
+| Build | `cmake --build build-pr1821-codecheck --target ds_ut -j80` on `tiantiyun-80c128g`, third-party cache `/home/ds-thirdparty-cache` | PASS: `INCREMENTAL_BUILD_RC=0` | 3.6s |
+| Regression | `TopologyRecoveryManagerTest.ReturningMemberReusesCurrentProcessTopologyAuthority` | PASS | 10ms |
+| Regression | `TopologyRecoveryManagerTest.StoredAuthorityEmptyReadDoesNotLatchAgainstLaterAuthority` | PASS | 5ms |
+| Regression | `TopologyRecoveryManagerTest.StaleStoredAuthorityReadCannotPublishIntoRecreatedContext` | PASS | 5ms |
+
+Notes:
+
+- Full CMake build was launched in tmux with `build.sh -b cmake -B build-pr1821-codecheck -o output-pr1821-codecheck -t build -U on -X off -J off -G off -P off -j 80 -u 80 -i on`; build source phase reached `Build source: 480 seconds` and produced `build-pr1821-codecheck/tests/ut/ds_ut`.
+- Focused UT gtest total runtime: 22ms.
