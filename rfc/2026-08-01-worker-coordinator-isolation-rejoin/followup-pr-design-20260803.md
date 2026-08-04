@@ -547,3 +547,41 @@ Remote validation environment:
 - Build mode: CMake with `BUILD_WITH_URMA_MOCK=on`.
 - Parallelism: `-j80`.
 - Third-party cache/temp: `/home/ds-thirdparty-cache`, with compiler temp redirected through `/home/ds-thirdparty-cache/tmp`.
+
+## 17. PR1821 Scope Narrowing After Latest Review Comments
+
+Date: 2026-08-04 CST.
+
+Review-driven scope decision:
+
+- `#945` hashring parser/build packaging changes are not part of Measure 2 worker-coordinator isolation bugfix scope. The PR branch withdraws `build.sh`, `tests/st/CMakeLists.txt`, and `tests/st/hashring_parser.cpp` related changes.
+- `#942` per-peer refresh timeout splitting is a performance/fairness optimization. The PR branch withdraws `peer_hash_ring_refresh_timeout.h` and related test/callsite changes; it keeps only the `RefreshPeerTopology()` exception guard.
+- `#940` final object-clear deadline was withdrawn because the partial timeout path can return rejoin failure without a convergence/retry path. This remains a follow-up item together with cleanup convergence and lock-scope design.
+
+Current PR1821 source boundary after narrowing:
+
+- Production files: `topology_controller.cpp`, `topology_engine.cpp`, `topology_recovery_manager.cpp`, `topology_recovery_manager.h`.
+- Test files: coordinator-backend ST plus four focused UT files.
+- Net diff vs `main/master`: 9 files, 273 insertions, 48 deletions.
+- No peer routing correction, no hashring parser packaging, no final-clear deadline semantics.
+
+Latest test adjustment:
+
+- `TopologyRecoveryManagerTest.DelayedReconcileRetriesAreBackedOffWhenEvidenceIsIncomplete` now verifies the positive backoff/retry behavior instead of relying on a fragile short negative sleep window.
+- `TopologyRecoveryManagerTest.StoredAuthorityEmptyReadDoesNotLatchAgainstLaterAuthority` clears the empty-read injection and advances the mock discovery window before driving the second stored-authority read.
+
+Latest validation on `tiantiyun-80c128g`:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| Build | `cmake --build build-pr1821-narrow --target ds_ut cluster_topology_contract_ut ds_st_kv_cache -j80` | PASS | targets built |
+| UT | 7-case `ds_ut` recovery-manager filter covering stored authority retry/ABA, delayed reconcile, shutdown | PASS | 258ms gtest; summary wall time 1s |
+| UT | 6-case `cluster_topology_contract_ut` filter covering rejoin gate, peer refresh exception, direct-probe failure | PASS | 51ms gtest; summary wall time <1s |
+| ST | `KVClientWorkerTimeoutStorage.LEVEL1_WorkerTimeoutAndMetaGetFromEtcd` | PASS | 17.420s gtest; summary wall time 17s |
+
+Comment handling plan:
+
+- Resolve comments about withdrawn `#945`/hashring parser and unrelated build/test changes by pointing to the scope withdrawal.
+- Resolve comments about withdrawn `#942` per-peer timeout/header/unit changes by pointing to the follow-up split.
+- Resolve comments about withdrawn `#940` final-clear deadline partial fix by acknowledging the no-convergence risk and leaving it to the follow-up issue.
+- Reply to remaining test-purpose comments with the exact guard each UT/ST provides.
