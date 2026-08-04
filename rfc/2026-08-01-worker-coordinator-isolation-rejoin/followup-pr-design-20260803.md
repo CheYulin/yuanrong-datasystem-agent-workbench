@@ -25,7 +25,8 @@ The PR must preserve the original Measure 2 semantics:
 | Issue | Review comments | Category | Include in this PR | Reason |
 |---|---|---|---|---|
 | `#940` | `182982980` | Serious correctness | Yes | Consecutive missing snapshots can clear `membershipRejoinRequired_`; this directly violates the cleanup gate contract. |
-| `#940` | `182982981`, `182982998`, `182983002` | Cleanup performance/concurrency | No | Valid, but shortening locks and changing object-table traversal requires a separate concurrency design. |
+| `#940` | `182982981` | Cleanup performance/concurrency | Yes, minimal fix | Valid: `CleanupLocalStateForRejoin` held `reconFlag_` while metadata and object-table cleanup ran. The minimal fix releases the write lock immediately after ordinary RPC drain; local metadata cleanup and object-table cleanup run outside the lock. |
+| `#940` | `182982998`, `182983002` | Cleanup performance/concurrency | No | Valid, but metadata-manager traversal redesign and broader cleanup scheduling remain follow-up work. |
 | `#941` | `182982978` | Serious coordinator HA | No | Valid, but delayed reconcile backoff changes coordinator recovery scheduling policy. |
 | `#941` | `182982983`, `182982997`, `182983004` | Coordinator recovery edge cases | No | Related to recovery manager policy and shutdown boundedness, not the minimal Worker rejoin contract. |
 | `#942` | `182982988`, `182982993`, `182983006` | Peer refresh performance/defense | Partial | Per-peer RPC boundedness is a safe local fix; response trimming remains out of scope because peer data is still non-authoritative in v1. |
@@ -114,7 +115,7 @@ ST should remain a process-level smoke test only. Do not add a large matrix or l
 | Issue | Why Excluded From This PR | Expected Follow-up |
 |---|---|---|
 | `#941` delayed reconcile livelock | Needs a coordinator recovery scheduling design: backoff, retry budget, and wake-up rules. | Separate design + PR. |
-| `#940` cleanup lock/deadline/concurrency | Requires object-table and metadata-manager concurrency boundary analysis. | Separate cleanup safety PR. |
+| `#940` metadata cleanup traversal/deadline | Requires metadata-manager traversal and cleanup scheduling analysis beyond the minimal object-table cleanup lock shrink. | Separate cleanup safety PR. |
 | `#942` peer refresh budget/full response/exception guard | Performance and defense-in-depth; not required to restore Measure 2 correctness. | Separate optimization PR. |
 
 ## 5. Commit Plan
@@ -148,7 +149,46 @@ Required evidence:
 | Format | `clang-format` only on touched files to avoid unrelated noise. |
 | Static | `clang-tidy` or codecheck triage for touched files; do not churn function-size-only findings. |
 
-## 7. PR Description Requirements
+## 7. Additional #940 Lock-scope Fix
+
+Review comment `182982981` pointed out that rejoin cleanup held the worker ordinary-RPC exclusion lock while doing local cleanup work.
+The agreed simplified boundary is:
+
+- The worker is already in rejoin cleanup and ordinary business has been stopped by admission and `reconFlag_`.
+- `reconFlag_` only needs to prove ordinary RPCs have drained.
+- Local metadata cleanup and object table cleanup are local data-structure operations and should not keep the ordinary-RPC write lock held.
+- This PR does not introduce batching, retry state, or a new cleanup state machine.
+
+Minimal implementation:
+
+- `WorkerOCServiceImpl::CleanupLocalStateForRejoin` keeps `CloseIncomingMigrationAdmissionAndWait(deadline)`.
+- It acquires and immediately releases `reconFlag_` once ordinary RPCs are drained.
+- It checks the deadline once more, then runs `localMetadataCleanupForRejoin_()` and `clearDataFlow_->ClearLocalObjectsForRejoin()` outside `reconFlag_`.
+
+TDD evidence:
+
+| Phase | Case | Result |
+|---|---|---|
+| RED | `WorkerOcServiceImplTest.CleanupLocalStateForRejoinReleasesReconFlagBeforeMetadataCleanup` on old code | Failed as expected because `probe.TryLockIfUnlocked()` returned false while metadata cleanup was blocked. |
+| GREEN | Same case after the minimal lock-scope fix | Passed, proving `reconFlag_` is released before metadata cleanup proceeds. |
+
+Rebase validation:
+
+- Rebased onto `main/master@ac6b8edd3c4c627bffac886b35f3f01cda1365bd`.
+- Remote host: `tiantiyun-80c128g`.
+- Third-party cache: `/home/ds-thirdparty-cache`.
+- CMake target build with 80 jobs: PASS, `rc=0`, 9s for the final no-op target rebuild.
+- Focused UT: 19 cases PASS.
+- Focused ST: 1 historical failed case PASS.
+
+| Gate | Cases | Result | Runtime |
+|---|---:|---|---:|
+| `ds_ut_object` focused Worker OC UT | 6 | PASS | 589 ms |
+| `ds_ut` focused topology recovery UT | 7 | PASS | 207 ms |
+| `cluster_topology_contract_ut` focused topology contract UT | 6 | PASS | 51 ms |
+| `ds_st_kv_cache` `KVClientWorkerTimeoutStorage.LEVEL1_WorkerTimeoutAndMetaGetFromEtcd` | 1 | PASS | 16.323 s |
+
+## 8. PR Description Requirements
 
 The follow-up PR description must include:
 
@@ -160,7 +200,7 @@ The follow-up PR description must include:
   - short worker-coordinator blink does not imply whole-cluster degradation.
 - UT/ST case count and runtime table with line wrapping friendly Markdown.
 
-## 8. Integration Result
+## 9. Integration Result
 
 Created follow-up PR:
 
