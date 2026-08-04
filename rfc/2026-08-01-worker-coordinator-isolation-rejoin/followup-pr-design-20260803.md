@@ -298,7 +298,7 @@ Potential follow-up commits:
 | `#945` Bazel tools packaging | Not a simple missing BUILD target. Exact source search found only `BUILD.bazel` and `scripts/build_bazel.sh` references; no `hashring_parser` source exists in the current tree, and CMake ST explicitly excludes `hashring_parser.cpp`. | Discuss whether the tool is still required. If yes, define the parser contract first; if no, remove the package target and update `build.sh` expectations with a Bazel analysis/build RED first. |
 | `#942` peer refresh boundedness | Real peer loop is `RefreshPeerHashRing` in `worker_oc_server.cpp`, not `TopologyEngine::RefreshPeerTopology()` alone. Per-peer budget can be fixed locally by sharing the remaining deadline across remaining peers; response trimming still requires RPC/protobuf contract discussion. | Add a focused RED around "one peer RPC timeout is capped by remaining deadline / remaining peers"; keep peer evidence non-authoritative and defer response trimming. |
 | `#941` recovery scheduling/shutdown | Stored-authority empty-read gap is fixed. Remaining delayed reconcile backoff, shutdown boundedness, and ensure-after-recheck behavior are coordinator HA policy changes. | Keep out of this PR until retry budget, cancellation, and shutdown semantics are explicitly agreed. |
-| `#940` cleanup lock/deadline/concurrency | Rejoin gate correctness is fixed. Remaining cleanup lock scope/deadline/objectTable concurrency affects worker cleanup critical path. | Requires concurrency boundary design before code; do not convert write-lock + sleep / cleanup traversal opportunistically in this PR. |
+| `#940` cleanup lock/deadline/concurrency | Rejoin gate correctness is fixed. Deadline propagation through the final object clear stage is safe and local. Lock scope, object-table traversal concurrency, and condition-variable conversion remain higher-risk. | Add a focused RED around expired rejoin object-clear deadline. Do not convert write-lock + sleep or redesign cleanup traversal in this PR. |
 
 ## 10. #945 Bazel Tools Packaging Fix
 
@@ -352,3 +352,44 @@ Implementation notes:
 - New helper: `src/datasystem/worker/peer_hash_ring_refresh_timeout.h`.
 - Call site: `RefreshPeerHashRing()` now computes remaining peers from the iterator and caps the per-peer init/RPC attempt.
 - The helper is pure calculation, so the UT has no sleeps and no real RPC.
+
+## 12. #940 Rejoin Object Cleanup Deadline Propagation
+
+Decision:
+
+- Keep the existing `WriteLock + sleep_for` ordinary RPC drain behavior in this PR. Converting it to a condition variable touches the `reconFlag_` ownership and ordinary RPC admission boundary, so it remains follow-up design work.
+- Keep the existing object-table snapshot and synchronous clear flow. This commit only propagates the already-existing `CleanupLocalStateForRejoin(deadline)` budget into `WorkerOcServiceClearDataFlow::ClearLocalObjectsForRejoin(deadline)`.
+- Check the deadline before collecting object ids and before each local object clear. If the deadline expires, return `K_RPC_DEADLINE_EXCEEDED` so the membership recreate gate remains closed.
+- Extract `ClearOneObject` so the ordinary `ClearObject(vector)` path keeps its previous void/continue-on-error behavior without adding per-object temporary vectors.
+
+TDD evidence for `#940` deadline propagation:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| RED | CMake build with only `WorkerOcServiceImplTest.ClearLocalObjectsForRejoinRespectsExpiredDeadline` added | FAIL as expected: no matching `ClearLocalObjectsForRejoin(deadline)` overload | build failed at `ds_ut_object` compile |
+| GREEN | CMake incremental build with URMA mock, 80 jobs, third-party cache | PASS: `build datasystem success` | total 203s |
+| GREEN | `WorkerOcServiceImplTest.ClearLocalObjectsForRejoinRespectsExpiredDeadline` | PASS | gtest 3ms, process 0.05s |
+| Regression | 6 focused rejoin cleanup UT cases | PASS | gtest 27ms, process 0.08s |
+
+Regression cases:
+
+| Case | Result | Runtime |
+|---|---|---|
+| `WorkerOcServiceImplTest.CleanupLocalStateForRejoinClearsLocalObjects` | PASS | 2ms |
+| `WorkerOcServiceImplTest.CleanupLocalStateForRejoinRespectsExpiredDeadline` | PASS | 0ms |
+| `WorkerOcServiceImplTest.ClearLocalObjectsForRejoinRespectsExpiredDeadline` | PASS | 0ms |
+| `WorkerOcServiceImplTest.CleanupLocalStateForRejoinDoesNotRebuildRefs` | PASS | 0ms |
+| `WorkerOcServiceImplTest.CleanupLocalStateForRejoinStopsWhenMetadataCleanupFails` | PASS | 0ms |
+| `WorkerOcServiceImplTest.CleanupLocalStateForRejoinWaitsForOrdinaryRpcDrain` | PASS | 21ms |
+
+Still deferred:
+
+- `WriteLock + sleep_for` to condition-variable conversion.
+- Cleanup traversal lock shortening and object-table concurrency redesign.
+- Cleanup retry/backoff state machine.
+- Coordinator delayed reconcile retry budget, shutdown cancellation, and `EnsureLeaderMembership` post-write HA policy.
+
+CodeGraph note:
+
+- Sandbox run returned `unable to open database file`.
+- Elevated read-only `codegraph status /home/t14s/workspace/git-repos/yuanrong-datasystem` succeeded: 2159 files, 53469 nodes, 157732 edges, DB size 2571.96 MB, index up to date.
