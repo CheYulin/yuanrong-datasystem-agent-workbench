@@ -177,6 +177,7 @@ Commits:
 | `0e334ecc4` | Keep `membershipRejoinRequired_` across consecutive authoritative snapshots that still miss the local worker. |
 | `f1cb5c0d4` | Clarify short worker-coordinator blink ST semantics and strengthen cleanup-gate UT evidence. |
 | `c4b30fd12` | Retry stored authority adoption after an empty read, with TDD coverage for the #941 stored-authority latch gap. |
+| `295b46959` | Align the old cold-rejoin ST with upstream witness semantics: short worker-coordinator RPC isolation is protected from removal, while real worker failure still exercises removal and cold rejoin without suicide. |
 
 Final diff size:
 
@@ -211,11 +212,19 @@ Validation evidence:
 | `ds-pr-review prepare` | PASS, 4 files, 77 changed lines, 0 comments, no warnings | N/A |
 | `ds-pr-review publish --dry-run` | PASS, 0 findings, 0 comments, no warnings | N/A |
 | CMake build with URMA mock and 80 jobs | PASS | source 465s, example 5s |
-| CMake incremental build with URMA mock and 40 jobs on final SHA `c4b30fd12` | PASS | total 487s |
+| CMake build with URMA mock and 80 jobs on final SHA `295b46959` | PASS | source 465s, example 5s, total 586s |
 | Target UT | PASS, 3 cases, 0 failed | 0.29s total |
-| Final target UT on `c4b30fd12` | PASS, 6 cases, 0 failed | 0.54s total |
-| Target ST | PASS, 2 cases, 0 failed | 22.237s and 37.557s |
+| Final target UT on `295b46959` | PASS, 6 cases, 0 failed | 0.56s total |
+| Target ST on `295b46959` | PASS, 2 cases, 0 failed | 60.119s total |
 | Bazel source build with URMA mock and 80 jobs | PASS | source 400s, total 424s |
+
+Remote validation note:
+
+- Host: `tiantiyun-80c128g`.
+- Worktree: `/home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1821-295b469-validate`.
+- Third-party cache: `/home/ds-thirdparty-cache`.
+- Remote tmux session: `pr1821_295b_validate`, completed and exited.
+- Build log includes non-blocking `objcopy` debuglink warnings during strip, but the build continued through example and focused test validation successfully.
 
 TDD evidence for #941 stored authority:
 
@@ -232,15 +241,21 @@ Target UT cases:
 | `DsCoordinationBackendSessionTest.EnsuredMembershipIsBlockedUntilCleanupGatePasses` | PASS | 0.05s |
 | `TopologyEngineTest.ConsecutiveMissingLocalMemberSnapshotsKeepRejoinRequired` | PASS | 0.06s |
 | `TopologyRecoveryManagerTest.ReturningMemberReusesCurrentProcessTopologyAuthority` | PASS | 0.08s |
-| `TopologyRecoveryManagerTest.StoredAuthorityEmptyReadDoesNotLatchAgainstLaterAuthority` | PASS | 0.07s |
+| `TopologyRecoveryManagerTest.StoredAuthorityEmptyReadDoesNotLatchAgainstLaterAuthority` | PASS | 0.08s |
 | `TopologyRecoveryManagerTest.StaleStoredAuthorityReadCannotPublishIntoRecreatedContext` | PASS | 0.08s |
 
 Target ST cases:
 
 | Case | Result | Runtime |
 |---|---|---|
-| `CoordinatorBackendClusterTest.SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` | PASS | 22.237s |
-| `CoordinatorBackendClusterTest.IsolatedWorkerRemovedThenColdRejoinsWithoutSuicide` | PASS | 37.557s |
+| `CoordinatorBackendClusterTest.SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` | PASS | 22.348s |
+| `CoordinatorBackendClusterTest.RealFailedWorkerColdRejoinsWithoutSuicide` | PASS | 37.771s |
+
+Cold-rejoin ST semantic correction:
+
+- RED evidence: direct run of the old `IsolatedWorkerRemovedThenColdRejoinsWithoutSuicide` failed because worker1 remained `ACTIVE` after only `CoordinationBackend.KeepAlive.returnError` was injected. This matches the latest upstream witness gate: direct worker liveness proves the worker is still reachable, so a worker-coordinator RPC-only blink must not be removed.
+- SDD alignment: measures-two short-blink isolation is covered by `SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` and upstream witness cases. Cold rejoin should validate true worker failure removal followed by restart/rejoin, not single-link RPC isolation removal.
+- GREEN validation: direct-run `CoordinatorBackendClusterTest.SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` and `CoordinatorBackendClusterTest.RealFailedWorkerColdRejoinsWithoutSuicide` on tiantiyun with URMA mock build. Both cases passed on final SHA `295b46959`.
 
 Known non-PR blocker:
 
