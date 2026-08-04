@@ -299,3 +299,30 @@ Potential follow-up commits:
 | `#942` peer refresh boundedness | Real peer loop is `RefreshPeerHashRing` in `worker_oc_server.cpp`, not `TopologyEngine::RefreshPeerTopology()` alone. Per-peer budget/fail-fast changes are possible but need a test seam around `WorkerRemoteWorkerOCApi` or a small extraction; response trimming may require RPC/protobuf contract discussion. | Start with a focused RED around "first slow peer must not starve later healthy peer" only if the API seam can stay local and non-authoritative. Defer response trimming and broad exception policy unless separately designed. |
 | `#941` recovery scheduling/shutdown | Stored-authority empty-read gap is fixed. Remaining delayed reconcile backoff, shutdown boundedness, and ensure-after-recheck behavior are coordinator HA policy changes. | Keep out of this PR until retry budget, cancellation, and shutdown semantics are explicitly agreed. |
 | `#940` cleanup lock/deadline/concurrency | Rejoin gate correctness is fixed. Remaining cleanup lock scope/deadline/objectTable concurrency affects worker cleanup critical path. | Requires concurrency boundary design before code; do not convert write-lock + sleep / cleanup traversal opportunistically in this PR. |
+
+## 10. #945 Bazel Tools Packaging Fix
+
+Decision:
+
+- Preserve the documented `-t build` tools contract instead of deleting `hashring_parser_file` from root Bazel packaging.
+- Restore `tests/st:hashring_parser` as a standalone `ClusterTopologyPb` json/binary converter. The old historical tool parsed legacy `HashRingPb`, which no longer exists after topology runtime integration; the new tool keeps the install name but updates the message contract to current `ClusterTopologyPb`.
+- Keep the ST cluster Bazel fix declarative: remove one redundant `common.h` include from `external_cluster.cpp`, add direct Bazel deps for the headers it actually uses, and open `static_coordinator_discovery` visibility only to `tests/st/cluster`.
+
+TDD evidence for `#945`:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| RED | Bazel `build.sh -b bazel -t build -U on -X off -J off -G off -P off -j 80 -u 80 -i on` on PR head before fix | FAIL as expected: root `//:hashring_parser_file` references missing `//tests/st:hashring_parser` | 5.064s |
+| RED follow-up | Same gate after restoring parser target | FAIL: `tests/st/cluster:st_cluster` exposed missing Bazel direct inputs/deps (`common.h`, then topology/coordinator headers) | 38s-177s per iteration |
+| GREEN | Same Bazel gate with URMA mock, 80 jobs, third-party cache | PASS: `build datasystem (bazel) success` | source 129s, total 150s |
+| GREEN | CMake `build.sh -b cmake -t build -U on -X off -J off -G off -P off -j 80 -u 80 -i on` with URMA mock, 80 jobs, third-party cache | PASS: `hashring_parser`, `ds_st`, `ds_ut`, examples built; `build datasystem success` | third-party 6s, source 473s, total 617s |
+| Smoke | `hashring_parser` encode/decode/help on `ClusterTopologyPb` sample | PASS | <1s |
+
+Validation notes:
+
+- Host: `tiantiyun-80c128g`.
+- Third-party cache: `/home/ds-thirdparty-cache`.
+- Bazel command includes `--config=urma_mock --config=test --jobs=80`.
+- CMake build produced `build/tests/st/hashring_parser` and installed `output/tools/hashring_parser`.
+- Parser smoke encoded `{"clusterHasInit":true,"version":"1","schemaVersion":"1"}` to binary, decoded it back to json, and verified installed tool help output.
+- CMake strip emitted repeated `objcopy: ... debuglink section already exists` lines during install, but build.sh continued through example build and ended with `build datasystem success`.
