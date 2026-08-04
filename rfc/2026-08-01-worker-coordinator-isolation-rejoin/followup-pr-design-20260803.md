@@ -262,3 +262,20 @@ Known non-PR blocker:
 - `build.sh -b bazel -t build` fails on the current upstream BUILD graph because `//:hashring_parser_file` references `//tests/st:hashring_parser`, while `tests/st/BUILD.bazel` does not declare that target.
 - This PR does not change BUILD files and validates Bazel source build with `-t off`.
 - Tracking issue: `#945` for the tools packaging gap.
+
+## 9. Next-Issue Triage After `295b46959`
+
+Pre-edit checks:
+
+- Branch `pr1798-followup-integrated` is aligned with the fork branch and is 4 commits ahead of upstream `main/master`.
+- Shared CodeGraph index is available and up to date: 2159 files, 53469 nodes, 157732 edges.
+- PR1821 currently has no unresolved review discussion; `ds-pr-review prepare` sees only bot/CLA comments.
+
+Potential follow-up commits:
+
+| Issue | Current assessment | TDD/SDD next step |
+|---|---|---|
+| `#945` Bazel tools packaging | Not a simple missing BUILD target. Exact source search found only `BUILD.bazel` and `scripts/build_bazel.sh` references; no `hashring_parser` source exists in the current tree, and CMake ST explicitly excludes `hashring_parser.cpp`. | Discuss whether the tool is still required. If yes, define the parser contract first; if no, remove the package target and update `build.sh` expectations with a Bazel analysis/build RED first. |
+| `#942` peer refresh boundedness | Real peer loop is `RefreshPeerHashRing` in `worker_oc_server.cpp`, not `TopologyEngine::RefreshPeerTopology()` alone. Per-peer budget/fail-fast changes are possible but need a test seam around `WorkerRemoteWorkerOCApi` or a small extraction; response trimming may require RPC/protobuf contract discussion. | Start with a focused RED around "first slow peer must not starve later healthy peer" only if the API seam can stay local and non-authoritative. Defer response trimming and broad exception policy unless separately designed. |
+| `#941` recovery scheduling/shutdown | Stored-authority empty-read gap is fixed. Remaining delayed reconcile backoff, shutdown boundedness, and ensure-after-recheck behavior are coordinator HA policy changes. | Keep out of this PR until retry budget, cancellation, and shutdown semantics are explicitly agreed. |
+| `#940` cleanup lock/deadline/concurrency | Rejoin gate correctness is fixed. Remaining cleanup lock scope/deadline/objectTable concurrency affects worker cleanup critical path. | Requires concurrency boundary design before code; do not convert write-lock + sleep / cleanup traversal opportunistically in this PR. |
