@@ -28,7 +28,7 @@ The PR must preserve the original Measure 2 semantics:
 | `#940` | `182982981`, `182982998`, `182983002` | Cleanup performance/concurrency | No | Valid, but shortening locks and changing object-table traversal requires a separate concurrency design. |
 | `#941` | `182982978` | Serious coordinator HA | No | Valid, but delayed reconcile backoff changes coordinator recovery scheduling policy. |
 | `#941` | `182982983`, `182982997`, `182983004` | Coordinator recovery edge cases | No | Related to recovery manager policy and shutdown boundedness, not the minimal Worker rejoin contract. |
-| `#942` | `182982988`, `182982993`, `182983006` | Peer refresh performance/defense | No | Mostly optimization or defense-in-depth; current v1 peer data remains non-authoritative as designed. |
+| `#942` | `182982988`, `182982993`, `182983006` | Peer refresh performance/defense | Partial | Per-peer RPC boundedness is a safe local fix; response trimming remains out of scope because peer data is still non-authoritative in v1. |
 | `#943` | `182983982` | ST semantic gap | Yes | The short-blink case must prove worker-coordinator RPC blink only, with other workers healthy. |
 | `#943` | `182983990` | Cleanup gate evidence gap | Yes, preferably UT first | Measures the required cleanup-before-recreate contract without adding a slow ST matrix. |
 
@@ -201,7 +201,7 @@ Review severity handling included in the PR description:
 | Serious / Warning | `#941` stored authority | Fixed | An empty stored-authority read no longer permanently latches `storedAuthorityChecked`; later membership activity can adopt newly stored authority. |
 | Warning | `#940` cleanup performance/concurrency items | Follow-up | Lock scope, metadata scan deadline, and object-table concurrency boundaries need a separate concurrency design. |
 | Serious / Warning | `#941` recovery/shutdown | Follow-up | Coordinator recovery scheduling and shutdown boundedness are coordinator HA policy changes. |
-| Warning / Suggestion | `#942` | Partially fixed | Peer refresh exception containment is fixed; peer refresh budget and response trimming remain non-authoritative optimization work. |
+| Warning / Suggestion | `#942` | Partially fixed | Peer refresh exception containment and per-peer RPC boundedness are fixed; response trimming remains non-authoritative optimization work. |
 | Build suggestion | `#945` | Follow-up | Bazel `-t build` tools packaging lacks `hashring_parser`; source build was validated with `-t off`. |
 
 Validation evidence:
@@ -296,7 +296,7 @@ Potential follow-up commits:
 | Issue | Current assessment | TDD/SDD next step |
 |---|---|---|
 | `#945` Bazel tools packaging | Not a simple missing BUILD target. Exact source search found only `BUILD.bazel` and `scripts/build_bazel.sh` references; no `hashring_parser` source exists in the current tree, and CMake ST explicitly excludes `hashring_parser.cpp`. | Discuss whether the tool is still required. If yes, define the parser contract first; if no, remove the package target and update `build.sh` expectations with a Bazel analysis/build RED first. |
-| `#942` peer refresh boundedness | Real peer loop is `RefreshPeerHashRing` in `worker_oc_server.cpp`, not `TopologyEngine::RefreshPeerTopology()` alone. Per-peer budget/fail-fast changes are possible but need a test seam around `WorkerRemoteWorkerOCApi` or a small extraction; response trimming may require RPC/protobuf contract discussion. | Start with a focused RED around "first slow peer must not starve later healthy peer" only if the API seam can stay local and non-authoritative. Defer response trimming and broad exception policy unless separately designed. |
+| `#942` peer refresh boundedness | Real peer loop is `RefreshPeerHashRing` in `worker_oc_server.cpp`, not `TopologyEngine::RefreshPeerTopology()` alone. Per-peer budget can be fixed locally by sharing the remaining deadline across remaining peers; response trimming still requires RPC/protobuf contract discussion. | Add a focused RED around "one peer RPC timeout is capped by remaining deadline / remaining peers"; keep peer evidence non-authoritative and defer response trimming. |
 | `#941` recovery scheduling/shutdown | Stored-authority empty-read gap is fixed. Remaining delayed reconcile backoff, shutdown boundedness, and ensure-after-recheck behavior are coordinator HA policy changes. | Keep out of this PR until retry budget, cancellation, and shutdown semantics are explicitly agreed. |
 | `#940` cleanup lock/deadline/concurrency | Rejoin gate correctness is fixed. Remaining cleanup lock scope/deadline/objectTable concurrency affects worker cleanup critical path. | Requires concurrency boundary design before code; do not convert write-lock + sleep / cleanup traversal opportunistically in this PR. |
 
@@ -326,3 +326,29 @@ Validation notes:
 - CMake build produced `build/tests/st/hashring_parser` and installed `output/tools/hashring_parser`.
 - Parser smoke encoded `{"clusterHasInit":true,"version":"1","schemaVersion":"1"}` to binary, decoded it back to json, and verified installed tool help output.
 - CMake strip emitted repeated `objcopy: ... debuglink section already exists` lines during install, but build.sh continued through example build and ended with `build datasystem success`.
+
+## 11. #942 Peer Refresh Per-Peer Boundedness Fix
+
+Decision:
+
+- Keep the Measure 2 v1 boundary: peer topology remains non-authoritative evidence and does not correct routing.
+- Fix only the worker-side peer refresh budget: each peer attempt receives `remaining_deadline / remaining_peer_count` across stub initialization and `GetHashRing`, instead of giving the first peer the whole remaining scope deadline.
+- This prevents the first slow peer from consuming the full peer-refresh deadline and starving later healthy peers.
+- Keep the total scope deadline unchanged and keep stale-version/missing-local/failed-local handling unchanged.
+- Defer response trimming because that changes the peer RPC payload contract and is not required for the worker-coordinator isolation contract.
+
+TDD evidence for `#942` boundedness:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| RED | Bazel `//tests/ut/worker:worker_worker_oc_api_test` with only `PeerHashRingRefreshRpcTimeoutIsSharedAcrossRemainingPeers` added | FAIL as expected: missing `peer_hash_ring_refresh_timeout.h` / helper | 275.992s wall, 0 tests executed |
+| GREEN | Same focused Bazel UT with URMA mock, 80 jobs, third-party cache | PASS: `WorkerWorkerOcApiTest.PeerHashRingRefreshRpcTimeoutIsSharedAcrossRemainingPeers` | 39.008s wall, test 4.1s |
+| GREEN | CMake source build with URMA mock, 80 jobs, third-party cache | PASS: `build datasystem success` | source 476s, total 620s |
+| GREEN | CMake focused UT binary `ds_ut_object` | PASS: `WorkerWorkerOcApiTest.PeerHashRingRefreshRpcTimeoutIsSharedAcrossRemainingPeers` | 0ms gtest, 0.056s process |
+| GREEN | Bazel source build with URMA mock, 80 jobs, third-party cache | PASS: `build datasystem (bazel) success` | source 387s, total 409s |
+
+Implementation notes:
+
+- New helper: `src/datasystem/worker/peer_hash_ring_refresh_timeout.h`.
+- Call site: `RefreshPeerHashRing()` now computes remaining peers from the iterator and caps the per-peer init/RPC attempt.
+- The helper is pure calculation, so the UT has no sleeps and no real RPC.
