@@ -432,3 +432,40 @@ Notes:
 
 - Full CMake build was launched in tmux with `build.sh -b cmake -B build-pr1821-codecheck -o output-pr1821-codecheck -t build -U on -X off -J off -G off -P off -j 80 -u 80 -i on`; build source phase reached `Build source: 480 seconds` and produced `build-pr1821-codecheck/tests/ut/ds_ut`.
 - Focused UT gtest total runtime: 22ms.
+
+## 14. AArch64 Gate Follow-up: Direct Probe Error Must Not Reset Missing Budget
+
+Gate context:
+
+- Jenkins trigger: `yuanrong-datasystem/8943`.
+- AArch64 downstream: `yuanrong-datasystem/9010`.
+- Failed case: `KVClientWorkerTimeoutStorage.LEVEL1_WorkerTimeoutAndMetaGetFromEtcd`.
+
+Root cause:
+
+- The case shuts down worker0, waits for the dead budget, then reads the object from worker1.
+- In the failing run, worker1 observed worker0 missing and reached `absence_timeout`, but the direct probe to worker0 returned `K_RPC_PEER_DEAD`.
+- `BuildFailedProbeResult` attached an `UNKNOWN` observation for non-retryable RPC errors. `TopologyController::ConfirmMissingMembersUnreachable` treated any observation as transport reachability evidence, reset the missing budget, and logged `direct_probe_inconclusive`.
+- The missing budget restarted before the failure topology and failure callback could commit, so worker1 queried metadata while worker0 was still the selected location and the read failed with `GetObjectRemote -> RPC peer dead`.
+
+Fix:
+
+- Treat a direct probe observation as reachability proof only when `ControlBackendProbeOutcome::RESPONSE`.
+- Probe `ERROR`, `UNAVAILABLE`, `DEADLINE_EXCEEDED`, or `CANCELLED` are no-response evidence even if the result object carries diagnostic `UNKNOWN` observation data.
+- Added `TopologyControllerTest.DirectProbeErrorWithUnknownObservationCommitsFailure` to pin the exact failing branch.
+
+Validation:
+
+| Phase | Command / Case | Result | Runtime |
+|---|---|---|---|
+| Build | `cmake --build build-pr1821-codecheck --target cluster_topology_contract_ut -j80` on `tiantiyun-80c128g` | PASS | 22.5s including build + UT run |
+| Regression | `TopologyControllerTest.OneCompleteDirectProbeWithoutResponseCommitsFailure` | PASS | included in 6ms gtest total |
+| Regression | `TopologyControllerTest.DirectProbeErrorWithUnknownObservationCommitsFailure` | PASS | included in 6ms gtest total |
+| ST | `TEST_SRCDIR=$PWD TEST_WORKSPACE=. ./build-pr1821-codecheck/tests/st/ds_st_kv_cache --gtest_filter=KVClientWorkerTimeoutStorage.LEVEL1_WorkerTimeoutAndMetaGetFromEtcd` | PASS | 15.352s |
+
+Post-fix evidence:
+
+- Direct probe failure is logged as `direct_probe_no_response probe_result=error`, then `direct_probe_unreachable membership_exact_read=absent`.
+- Failure topology commits with failed member state and `batch_type=FAILURE`.
+- Failure callback runs `ProcessWorkerTimeout` for the stopped worker and finishes OK.
+- The final Get observes the worker disconnected and reads from L2, then the ST passes.
