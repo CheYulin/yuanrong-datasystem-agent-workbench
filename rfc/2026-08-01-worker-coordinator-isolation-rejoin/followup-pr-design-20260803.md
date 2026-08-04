@@ -178,12 +178,14 @@ Commits:
 | `f1cb5c0d4` | Clarify short worker-coordinator blink ST semantics and strengthen cleanup-gate UT evidence. |
 | `c4b30fd12` | Retry stored authority adoption after an empty read, with TDD coverage for the #941 stored-authority latch gap. |
 | `295b46959` | Align the old cold-rejoin ST with upstream witness semantics: short worker-coordinator RPC isolation is protected from removal, while real worker failure still exercises removal and cold rejoin without suicide. |
+| `33dc550de` | Guard peer topology refresh exceptions so a thrown peer hint callback cannot terminate the Engine state thread. |
 
 Final diff size:
 
 | Area | Files | Delta |
 |---|---|---|
 | Source | `src/datasystem/cluster/runtime/topology_engine.cpp` | Minimal logic change, 3 lines touched. |
+| Source | `src/datasystem/cluster/runtime/topology_engine.cpp` | Adds exception containment around non-authoritative peer topology refresh. |
 | Source | `src/datasystem/coordinator/topology_recovery_manager.cpp` | Resets `storedAuthorityChecked` after an empty stored-authority read when the same context is still recovering. |
 | UT | `tests/ut/cluster/topology_engine_test.cpp`, `tests/ut/cluster/ds_coordination_backend_session_test.cpp` | Added 3 focused cases or assertions. |
 | UT | `tests/ut/coordinator/topology_recovery_manager_test.cpp` | Added 1 stored-authority retry regression and reran 2 adjacent authority cases. |
@@ -199,7 +201,7 @@ Review severity handling included in the PR description:
 | Serious / Warning | `#941` stored authority | Fixed | An empty stored-authority read no longer permanently latches `storedAuthorityChecked`; later membership activity can adopt newly stored authority. |
 | Warning | `#940` cleanup performance/concurrency items | Follow-up | Lock scope, metadata scan deadline, and object-table concurrency boundaries need a separate concurrency design. |
 | Serious / Warning | `#941` recovery/shutdown | Follow-up | Coordinator recovery scheduling and shutdown boundedness are coordinator HA policy changes. |
-| Warning / Suggestion | `#942` | Follow-up | Peer refresh budget, response trimming, and exception defense remain non-authoritative optimization work. |
+| Warning / Suggestion | `#942` | Partially fixed | Peer refresh exception containment is fixed; peer refresh budget and response trimming remain non-authoritative optimization work. |
 | Build suggestion | `#945` | Follow-up | Bazel `-t build` tools packaging lacks `hashring_parser`; source build was validated with `-t off`. |
 
 Validation evidence:
@@ -215,6 +217,8 @@ Validation evidence:
 | CMake build with URMA mock and 80 jobs on final SHA `295b46959` | PASS | source 465s, example 5s, total 586s |
 | Target UT | PASS, 3 cases, 0 failed | 0.29s total |
 | Final target UT on `295b46959` | PASS, 6 cases, 0 failed | 0.56s total |
+| Peer refresh exception UT on `33dc550de` | PASS, 1 case, 0 failed | 0.043s |
+| Peer refresh regression UT on `33dc550de` | PASS, 4 cases, 0 failed | 0.131s total |
 | Target ST on `295b46959` | PASS, 2 cases, 0 failed | 60.119s total |
 | Bazel source build with URMA mock and 80 jobs | PASS | source 400s, total 424s |
 
@@ -256,6 +260,22 @@ Cold-rejoin ST semantic correction:
 - RED evidence: direct run of the old `IsolatedWorkerRemovedThenColdRejoinsWithoutSuicide` failed because worker1 remained `ACTIVE` after only `CoordinationBackend.KeepAlive.returnError` was injected. This matches the latest upstream witness gate: direct worker liveness proves the worker is still reachable, so a worker-coordinator RPC-only blink must not be removed.
 - SDD alignment: measures-two short-blink isolation is covered by `SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` and upstream witness cases. Cold rejoin should validate true worker failure removal followed by restart/rejoin, not single-link RPC isolation removal.
 - GREEN validation: direct-run `CoordinatorBackendClusterTest.SingleWorkerCoordinatorBlinkRecoversWithoutClusterDegrade` and `CoordinatorBackendClusterTest.RealFailedWorkerColdRejoinsWithoutSuicide` on tiantiyun with URMA mock build. Both cases passed on final SHA `295b46959`.
+
+TDD evidence for #942 peer refresh exception containment:
+
+| Phase | Case | Result | Runtime |
+|---|---|---|---|
+| RED | `TopologyEngineTest.PeerTopologyRefreshExceptionDoesNotTerminateStateThread` before production fix | FAIL as expected: unhandled `std::runtime_error` terminates the UT process | build target completed, test aborted |
+| GREEN | same case on `33dc550de` | PASS | 0.043s |
+
+Peer refresh regression cases on `33dc550de`:
+
+| Case | Result | Runtime |
+|---|---|---|
+| `TopologyEngineTest.PeerHashRingRefreshAcceptsNewerVersionOnly` | PASS | 0.044s |
+| `TopologyEngineTest.PeerTopologyRefreshExceptionDoesNotTerminateStateThread` | PASS | 0.042s |
+| `TopologyEngineTest.PeerHashRingRefreshMissingLocalMemberRequiresRejoin` | PASS | 0.022s |
+| `TopologyEngineTest.PeerHashRingRefreshFailedLocalMemberRequiresRejoin` | PASS | 0.022s |
 
 Known non-PR blocker:
 
