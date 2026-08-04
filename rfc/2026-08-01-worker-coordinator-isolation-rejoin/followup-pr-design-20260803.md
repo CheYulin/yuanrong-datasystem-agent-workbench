@@ -179,6 +179,7 @@ Commits:
 | `c4b30fd12` | Retry stored authority adoption after an empty read, with TDD coverage for the #941 stored-authority latch gap. |
 | `295b46959` | Align the old cold-rejoin ST with upstream witness semantics: short worker-coordinator RPC isolation is protected from removal, while real worker failure still exercises removal and cold rejoin without suicide. |
 | `33dc550de` | Guard peer topology refresh exceptions so a thrown peer hint callback cannot terminate the Engine state thread. |
+| `72bd287bb` | Propagate the rejoin cleanup deadline into final local object cleanup and keep the membership recreate gate closed if the object-clear stage times out. |
 
 Final diff size:
 
@@ -370,6 +371,7 @@ TDD evidence for `#940` deadline propagation:
 | GREEN | CMake incremental build with URMA mock, 80 jobs, third-party cache | PASS: `build datasystem success` | total 203s |
 | GREEN | `WorkerOcServiceImplTest.ClearLocalObjectsForRejoinRespectsExpiredDeadline` | PASS | gtest 3ms, process 0.05s |
 | Regression | 6 focused rejoin cleanup UT cases | PASS | gtest 27ms, process 0.08s |
+| Build | Bazel source build with URMA mock, 80 jobs, third-party cache, `/home` output root | PASS: 9 targets, 5471 actions | elapsed 454.122s |
 
 Regression cases:
 
