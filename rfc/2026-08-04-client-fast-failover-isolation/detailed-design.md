@@ -225,17 +225,17 @@ sequenceDiagram
     participant T as "TopologyController"
     participant R as "Topology/Hashring"
 
-    RPC->>B: RecordPeerRpcFailure(target)
-    B->>B: failedCount>=3 && 持续>=1.5s
-    B->>B: ConsumeImmediateReportSignal()=true
-    B->>P: KeepAlive(key, failed_targets=[target])
-    P->>S: KeepAliveReq.failed_targets
-    S->>S: store_->KeepAlive()
-    S->>H: RecordWorkerFailureSummaries(reporter, [target])
-    H->>H: target->reporter->receiveTimeMs
-    H->>T: SubmitCoordinationEvent(RESET)
-    T->>H: activeFailureCandidateProvider(latest, memberships, now)
-    H-->>T: candidates=[target]
+    RPC->>B: record peer rpc failure
+    B->>B: failure count and duration hit threshold
+    B->>B: immediate report signal becomes true
+    B->>P: keepalive carries failed target
+    P->>S: request has failed targets
+    S->>S: refresh lease
+    S->>H: record reporter failed target
+    H->>H: update target reporter time
+    H->>T: submit reset event
+    T->>H: ask active failure candidates
+    H-->>T: return failed target
     T->>T: 合入 confirmedFailure
     T->>R: CommitConfirmedFailures / BuildFailureStartOrReplan
 ```
@@ -258,13 +258,13 @@ sequenceDiagram
     participant H as "TopologyControlHost"
     participant T as "TopologyController"
 
-    RPC->>B: RecordPeerRpcFailure(target)
+    RPC->>B: record peer rpc failure
     B->>B: 记录失败状态
-    RPC->>B: RecordPeerRpcSuccess(target)
-    B->>B: erase(target)
-    B->>P: KeepAlive(key, failed_targets=[])
-    P->>S: KeepAliveReq.failed_targets empty
-    S->>S: store_->KeepAlive()
+    RPC->>B: record peer rpc success
+    B->>B: erase target
+    B->>P: keepalive has no failed target
+    P->>S: request has empty failed target
+    S->>S: refresh lease
     H->>T: 无主动 candidate
 ```
 
@@ -282,12 +282,12 @@ sequenceDiagram
     participant H as "TopologyControlHost"
     participant T as "TopologyController"
 
-    S->>H: RecordWorkerFailureSummaries(reporterA, [target])
+    S->>H: record reporter failed target
     H->>H: 保存 receiveTimeMs
-    Note over H: 超过 node_timeout_s 未刷新
-    T->>H: activeFailureCandidateProvider(...)
-    H->>H: PurgeExpired(now)
-    H-->>T: candidates=[]
+    H->>H: report is not refreshed before timeout
+    T->>H: ask active failure candidates
+    H->>H: purge expired reports
+    H-->>T: return empty candidates
 ```
 
 reset 时机：

@@ -29,6 +29,7 @@
 
 | 日期 | RFC | Status | 落地位置（datasystem） |
 |------|-----|--------|-----------------------|
+| 2026-08-04 | [2026-08-04-client-fast-failover-isolation/](2026-08-04-client-fast-failover-isolation/README.md) | **In-Progress** | PR [!1840](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/1840)：Worker 失败 summary 上报 + Coordinator 汇总触发 3s 主动隔离；见 [detailed-design](2026-08-04-client-fast-failover-isolation/detailed-design.md)、[implementation-log](2026-08-04-client-fast-failover-isolation/results/implementation-log.md) |
 | 2026-07-15 | [2026-07-15-worker-isolation-self-healing/](2026-07-15-worker-isolation-self-healing/README.md) | **Draft** | Worker 网络隔离不自杀与自愈：分析 `auto_del_dead_node` 自杀路径，设计 `WorkerRuntimeState`、服务准入、metadata/slot recovery 与对账；见 [story](2026-07-15-worker-isolation-self-healing/design-and-story.md) |
 | 2026-07-12 | [2026-07-12-ssd-hbm-direct/](2026-07-12-ssd-hbm-direct/README.md) | **Draft** | 三事项：①模块+mock / ②IPC穿刺 / ③SSD→HBM穿刺；见 [WBS](2026-07-12-ssd-hbm-direct/work-breakdown.md)、[decisions](2026-07-12-ssd-hbm-direct/decisions.md) |
 | 2026-07-12 | [2026-07-12-ub-data-plane-quarantine/](2026-07-12-ub-data-plane-quarantine/README.md) | **Draft** | UB data-plane 故障隔离：client-worker / worker-worker 读写、迁移、Rebalance 隔离与恢复设计；见 [story](2026-07-12-ub-data-plane-quarantine/design-and-story.md)、[design](2026-07-12-ub-data-plane-quarantine/design.md)、[flow-analysis](2026-07-12-ub-data-plane-quarantine/flow-analysis.md) |

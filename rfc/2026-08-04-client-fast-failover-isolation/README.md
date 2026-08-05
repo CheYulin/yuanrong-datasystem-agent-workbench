@@ -1,7 +1,14 @@
-# Client 秒级切流与 3s 隔离概要设计
+# Client 秒级切流与 3s 隔离 RFC
 
-基线：`yuanrong-datasystem@e63f4270`，PR1804 witness：`62744bcd`。  
-场景：商用 Coordinator 路径，`enableLocalCache=false`。
+| 项目 | 内容 |
+|---|---|
+| Status | **In-Progress** |
+| RFC | `2026-08-04-client-fast-failover-isolation` |
+| datasystem PR | [openeuler/yuanrong-datasystem!1840](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/1840) |
+| branch | `feat/fast-failover-isolation-20260804` |
+| base | `main/master@ac6b8edd3c4c627bffac886b35f3f01cda1365bd` |
+| commit | `d90da667f60992c3ced5da14e7416de9669f85bc` |
+| 场景 | 商用 Coordinator 路径，`enableLocalCache=false` |
 
 ## 1. 功能域概述
 
@@ -94,6 +101,7 @@ validReporterCount >= min(max(totalWorkerCount * 5%, 5), totalWorkerCount - 1)
 - worker-coordinator 闪断：witness 保活，不主动隔离。
 - 单 worker 报错：不隔离。
 - 多 worker metadata/connectivity 报错：主动隔离。
+- Bazel 全包构建：修复 stale `hashring_parser_file` 和 `st_cluster` 头依赖后通过。
 
 ## 7. DFX 约束
 
