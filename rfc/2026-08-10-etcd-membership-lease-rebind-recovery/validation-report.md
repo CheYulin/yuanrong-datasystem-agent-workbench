@@ -74,4 +74,6 @@ iptables/TCP 黑洞测试。未改变 peer hashring 路由纠偏、拓扑仲裁�
 | Exact-HEAD coordinator ST | 3/3 PASS，31.78s / 17.31s / 33.32s |
 | Exact-HEAD Bazel | 2/2 targets PASS，19s |
 
-PR 创建及门禁链接在 GitCode 提交后补充。
+PR：https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/1981
+
+Issue #1027 已回填根因、修复方案和验证数据；PR 创建时已提交 `/retest`，门禁结果以后续 CI 回执为准。
