@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 创建 | 2026-08-10（测试日志与源码分析） |
-| 修改 | 2026-08-10（按措施二复核重建设计） |
+| 修改 | 2026-08-11（补充 voluntary-exit 并发与超时边界） |
 | 阶段 | P1 缺陷修复设计 |
 | 前置 | 措施二 / PR #1821 / Issue #1027 |
 | 源码基线 | 起点 `v0.9.2.rc12` (`00c31da53a08`)；已 rebase 最新 `master` (`604b00b52d2a`) |
@@ -236,6 +236,13 @@ flowchart LR
 - cleanup/READY 失败时保持 true。
 - 只有后续权威 topology 再次包含本地有效身份时，沿用现有逻辑清除。
 
+#### `membershipTransitionMutex_`
+
+- 类型：`std::timed_mutex`，仅串行化 voluntary exit intent 与 destructive cold-rejoin cleanup gate。
+- 退出先获得 mutex：先锁存 EXITING intent，cold rejoin 不再启动 cleanup。
+- cold rejoin 先获得 mutex：完成本地 cleanup 后释放；`MarkExiting(timeoutMs)` 最多等待到调用方 deadline。
+- membership RPC 不在 mutex 内执行；等待 mutex 的耗时从传给 backend 的剩余预算中扣除。
+
 ### 4.6 组件接口设计
 
 | 接口 | 输入 | 输出 | 语义 |
@@ -282,6 +289,7 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 | C3 | cleanup 成功必须先于 READY | 旧身份本地状态可能污染新身份 |
 | C4 | READY 后仍需正常 scale-out 到 ACTIVE | membership 存在不等于可服务 |
 | C5 | EXITING/voluntary exit 不得进入 cold rejoin | 正常退出节点可能被重新加入 |
+| C6 | `MarkExiting(timeoutMs)` 的预算必须覆盖 rejoin 串行等待和 backend write | graceful exit 可能突破调用方 deadline |
 
 ### 风险
 
@@ -297,7 +305,7 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 
 | PR/提交 | 内容 | 阶段 |
 |---|---|---|
-| Commit 1 | TDD：新增 Controller/Engine UT 与外部 ETCD cluster ST，确认 missing-local 恢复失败 | Red |
+| Commit 1 | TDD：新增 Controller/Engine UT、exit 并发 UT 与外部 ETCD cluster ST | Red |
 | Commit 2 | SDD：接入 missing-local rejoin handler，复用 cleanup gate，保持 RECOVERING 隔离 | Green |
 | Commit 3 | 历史措施二 UT/ST、CMake/Bazel 与 Tiantiyun 回归 | Refactor/verify |
 | 最终提交 | review 后按需要 squash；PR 描述记录源码/测试意图、case 数量和逐 case/总时长 | Delivery |
@@ -313,6 +321,7 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 |---|---|---|
 | `TopologyControllerTest.MissingLocalRecoveringMembershipColdRejoinsBeforeScaleOut` | RECOVERING + local missing | 调用 rejoin handler，不调用 local recovery；成功后 exact resync，再进入既有 scale-out |
 | `TopologyEngineTest.ColdRejoinCleansWhileIsolatedBeforePublishingReady` | Engine 顺序与失败重试 | admission callback、rejoin flag 与隔离先于 gate；首次 `K_NOT_READY` 保持 RECOVERING；重试成功后才发布 READY |
+| `TopologyEngineTest.ColdRejoinSerializesVoluntaryExitWithinTimeout` | rejoin/exit 并发与聚合 timeout | cleanup gate 阻塞时 `MarkExiting(20ms)` 按 deadline 返回；释放 gate 后可正常发布 EXITING |
 
 ### 8.2 新增 ST
 
@@ -342,7 +351,7 @@ Set/Get，证明不是整集群降级；等待权威 topology 删除 Worker1 后
 |---|---|
 | Red-UT | missing-local RECOVERING 直接返回，rejoin handler 未调用 |
 | Red-ST | Worker1 重绑后卡在 RECOVERING/ROLE_ISOLATED，无法重新 ACTIVE |
-| Green | 2 条新增 UT、1 条新增 ST 及既有回归全部通过 |
+| Green | 3 条新增 UT、1 条新增 ST 及既有回归全部通过 |
 
 ### 8.5 构建与回归
 
