@@ -43,11 +43,12 @@ witness probe 在 membership TTL 缺失后启动，但目前只在 `node_dead_ti
 仅补强两 Worker 场景：
 
 1. 单个有效 Worker summary 将目标标记为 suspect，不直接隔离。
-2. Coordinator 复用 `memberLivenessProbe` 对 suspect 发起直接 bRPC probe。
-3. Worker 视角和 Coordinator 视角均不可达，才加入 `confirmedFailure`。
-4. Coordinator probe 可达、返回异常或无匹配结果时保留目标，不更新 hashring。
-5. 两个 Worker 同时成为 candidate 时证据有歧义，全部保留，禁止探测和隔离。
-6. 大于两个 Worker 的现有多 reporter 阈值保持不变。
+2. Coordinator 立即直探，至少间隔 500ms 连续两次不可达才确认。
+3. 确认前重读 candidate；仍只有同一目标才加入 `confirmedFailure`。
+4. probe 可达、返回异常或无匹配结果时保留目标。
+5. 两个 candidate 时证据有歧义，全部保留并清空探测进度。
+6. Worker 成功后立即上报空 summary，Coordinator 清理旧证据。
+7. 大于两个 Worker 的现有阈值保持不变。
 
 不新增 gflag。仍使用：
 
@@ -69,8 +70,10 @@ sequenceDiagram
     W-xD: CreateMeta fails continuously
     W->>H: keepalive + failed target (about 1.5s)
     H->>T: one-reporter suspect (two-worker only)
-    T-xD: Coordinator direct bRPC probe
-    T->>T: worker report + probe unreachable
+    T-xD: direct probe #1: unreachable
+    T-xD: direct probe #2: unreachable (>=500ms)
+    T->>H: re-read candidate
+    T->>T: one candidate + two unreachable
     T->>R: confirm failure and commit ring
     R-->>C: topology refresh
 ```
@@ -80,7 +83,8 @@ sequenceDiagram
 | 文件 | 修改 |
 |---|---|
 | `topology_control_host.cpp` | 两 Worker 时允许 1 份有效 report 形成 candidate；打印 reporter/threshold。 |
-| `topology_controller.cpp` | 单 candidate 经 direct probe 确认；双 candidate 直接保留。 |
+| `topology_controller.cpp` | 单 candidate 连续两次直探；确认前重读；双 candidate 保留。 |
+| `coordinator_service_impl.cpp` | 空 keepalive summary 也同步到 Host。 |
 | `ds_coordination_backend.cpp` | 将 summary 首次命中、成功 reset 提升为 V=0 可见的状态转换日志。 |
 | `topology_control_host_test.cpp` | 看护两 Worker candidate 和大集群阈值不变。 |
 | `topology_controller_test.cpp` | 看护 probe 不可达才隔离、probe 可达不隔离。 |
@@ -98,6 +102,7 @@ sequenceDiagram
 | 确认隔离 | `CLUSTER_FAILURE_DETECT action=active_summary_confirmed` |
 | hashring 提交 | `CLUSTER_RING status=cas_committed` |
 | 链路恢复清零 | `CLUSTER_FAILURE_OBSERVE action=success_reset` |
+| Coordinator 清旧证据 | `CLUSTER_FAILURE_REPORT action=summary_cleared` |
 
 逐请求失败仍保留在 `VLOG(1)`，避免 V=0 日志风暴。
 
@@ -110,9 +115,9 @@ Tiantiyun、CMake、URMA Mock、`-j40`：
 | `cluster_topology_contract_ut` | 361/361 PASS |
 | `TopologyControlHostTest.*` | 19/19 PASS |
 | 5 个关联 disabled ST | 5/5 PASS |
-| 两 Worker单 reporter | 首次失败 22ms；最后失败 1540ms；隔离 1561ms；读写恢复 1635ms |
-| 七 Worker双 Kill | 两目标隔离 1583/1584ms；流量恢复 1713ms |
-| 原始 client Set/Get | 最后 Set 失败 1553ms；隔离 1625ms；Get 恢复 1675ms |
-| 停止后恢复加入 | 隔离 1660ms；rejoin 3432ms |
+| 两 Worker单 reporter | 首次失败 21ms；最后失败 2225ms；隔离 2246ms；读写恢复 2320ms |
+| 七 Worker双 Kill | 两目标隔离 1612/1612ms；流量恢复 1746ms |
+| 原始 client Set/Get | 最后 Set 失败 1558ms；隔离 1630ms；Get 恢复 1678ms |
+| 停止后恢复加入 | 隔离 1640ms；rejoin 10172ms |
 
-UT 额外看护：probe 可达不隔离、不可达才隔离、双 candidate 不探测不隔离。两秒闪断 5 轮和无请求 30s 租约兜底本轮未执行，仍由既有机制覆盖，需在门禁矩阵单列。
+UT 额外看护：单次不可达不隔离、双 candidate 不隔离、空 summary 清理旧证据。两秒闪断 5 轮和无请求 30s 租约兜底本轮未执行，需在门禁矩阵单列。
