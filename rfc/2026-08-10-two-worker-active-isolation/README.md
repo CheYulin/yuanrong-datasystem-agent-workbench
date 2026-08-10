@@ -2,6 +2,8 @@
 
 **Status: In-Progress**
 
+Tracking issue: [yuanrong-datasystem#1028](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1028)
+
 ## 1. 问题
 
 两 Worker 集群 Kill 一个元数据 owner 后：
