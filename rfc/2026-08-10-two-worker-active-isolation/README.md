@@ -1,6 +1,6 @@
 # 两 Worker 主动隔离补强
 
-**Status: In-Progress**
+**Status: Validated**
 
 Tracking issue: [yuanrong-datasystem#1028](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1028)
 
@@ -46,7 +46,8 @@ witness probe 在 membership TTL 缺失后启动，但目前只在 `node_dead_ti
 2. Coordinator 复用 `memberLivenessProbe` 对 suspect 发起直接 bRPC probe。
 3. Worker 视角和 Coordinator 视角均不可达，才加入 `confirmedFailure`。
 4. Coordinator probe 可达、返回异常或无匹配结果时保留目标，不更新 hashring。
-5. 大于两个 Worker 的现有多 reporter 阈值保持不变。
+5. 两个 Worker 同时成为 candidate 时证据有歧义，全部保留，禁止探测和隔离。
+6. 大于两个 Worker 的现有多 reporter 阈值保持不变。
 
 不新增 gflag。仍使用：
 
@@ -79,7 +80,7 @@ sequenceDiagram
 | 文件 | 修改 |
 |---|---|
 | `topology_control_host.cpp` | 两 Worker 时允许 1 份有效 report 形成 candidate；打印 reporter/threshold。 |
-| `topology_controller.cpp` | 两 Worker candidate 必须经过 Coordinator direct probe；打印 probe 决策。 |
+| `topology_controller.cpp` | 单 candidate 经 direct probe 确认；双 candidate 直接保留。 |
 | `ds_coordination_backend.cpp` | 将 summary 首次命中、成功 reset 提升为 V=0 可见的状态转换日志。 |
 | `topology_control_host_test.cpp` | 看护两 Worker candidate 和大集群阈值不变。 |
 | `topology_controller_test.cpp` | 看护 probe 不可达才隔离、probe 可达不隔离。 |
@@ -93,6 +94,7 @@ sequenceDiagram
 | Coordinator 收到新关系 | `CLUSTER_FAILURE_REPORT action=summary_received` |
 | Candidate 达标 | `CLUSTER_FAILURE_DETECT action=active_summary_candidate` |
 | Coordinator 探测 | `CLUSTER_FAILURE_DETECT action=active_summary_direct_probe` |
+| 双 candidate 保留 | `CLUSTER_FAILURE_DETECT action=active_summary_ambiguous` |
 | 确认隔离 | `CLUSTER_FAILURE_DETECT action=active_summary_confirmed` |
 | hashring 提交 | `CLUSTER_RING status=cas_committed` |
 | 链路恢复清零 | `CLUSTER_FAILURE_OBSERVE action=success_reset` |
@@ -101,19 +103,16 @@ sequenceDiagram
 
 ## 8. 验证
 
-### UT
+Tiantiyun、CMake、URMA Mock、`-j40`：
 
-- 两 Worker + 1 reporter 生成 suspect candidate。
-- 大集群仍满足原有 5%/最少 5 reporter 规则。
-- direct probe unavailable/deadline：确认隔离。
-- direct probe response/error/cancelled：不隔离。
-- 成功 RPC 清理 Worker 失败状态。
+| 验证 | 结果 |
+|---|---|
+| `cluster_topology_contract_ut` | 361/361 PASS |
+| `TopologyControlHostTest.*` | 19/19 PASS |
+| 5 个关联 disabled ST | 5/5 PASS |
+| 两 Worker单 reporter | 首次失败 22ms；最后失败 1540ms；隔离 1561ms；读写恢复 1635ms |
+| 七 Worker双 Kill | 两目标隔离 1583/1584ms；流量恢复 1713ms |
+| 原始 client Set/Get | 最后 Set 失败 1553ms；隔离 1625ms；Get 恢复 1675ms |
+| 停止后恢复加入 | 隔离 1660ms；rejoin 3432ms |
 
-### ST
-
-- 两 Worker：Kill 元数据 owner，随机 key 持续 Set，3s 内隔离并恢复新数据读写。
-- 七 Worker：Kill 两个 owner，5 个 reporter 同时覆盖两个目标，均在 3s 内隔离。
-- 两秒闪断重复 5 轮：不隔离；成功后历史失败状态清零。
-- 无业务请求：30s 租约兜底仍生效，witness 可保护可达节点。
-
-验收同时记录 Kill、首次失败、summary、probe、ring commit、最后失败、连续成功时间点。
+UT 额外看护：probe 可达不隔离、不可达才隔离、双 candidate 不探测不隔离。两秒闪断 5 轮和无请求 30s 租约兜底本轮未执行，仍由既有机制覆盖，需在门禁矩阵单列。
