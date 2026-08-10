@@ -6,7 +6,7 @@
 | 修改 | 2026-08-10（按措施二复核重建设计） |
 | 阶段 | P1 缺陷修复设计 |
 | 前置 | 措施二 / PR #1821 / Issue #1027 |
-| 源码基线 | `v0.9.2.rc12` (`00c31da53a08`)；`main/master` (`d0de0540fcda`) 同样存在缺口 |
+| 源码基线 | 起点 `v0.9.2.rc12` (`00c31da53a08`)；已 rebase 最新 `master` (`604b00b52d2a`) |
 
 ## §1 需求背景与目标
 
@@ -144,8 +144,6 @@ src/datasystem/cluster/runtime/
 tests/ut/cluster/
   topology_controller_test.cpp            # controller branch and retry ordering
   topology_engine_test.cpp                # gate before READY and failure semantics
-tests/st/common/kvstore/
-  etcd_store_test.cpp                     # rebind remains RECOVERING focused ST
 tests/st/client/kv_cache/
   kv_client_etcd_dfx_test.cpp              # single-Worker ETCD fault cluster ST
 ```
@@ -292,7 +290,7 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 | R1 | cleanup callback 被重复调用 | 复用措施二幂等 cleanup，并用失败重试 UT 看护 |
 | R2 | Controller tick 被长时间阻塞 | cleanup 是本地数据结构操作；保持既有 deadline，`K_NOT_READY` 后退出本 tick |
 | R3 | callback 复制改变 Coordinator backend 生命周期 | Builder 构建期复制 `std::function`；两个 backend 分支分别使用，补现有 backend UT 回归 |
-| R4 | 动态注入只阻断 keepalive，不等价于所有 TCP 报文 | 它稳定构造 lease 失效；Tiantiyun 再补单 Worker 真实网络隔离验证 |
+| R4 | 动态注入不等价于系统级断网 | 同时阻断 Worker1 的 ETCD lease 与 peer `GetClusterState`，稳定构造日志中的单 Worker TCP 隔离和权威剔除；Worker0 不注入故障 |
 | R5 | 误把旧数据恢复作为验收 | cluster ST 只验证恢复后新业务；旧身份数据不复用符合措施二 v1 |
 
 ## §7 落地步骤
@@ -301,7 +299,7 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 |---|---|---|
 | Commit 1 | TDD：新增 Controller/Engine UT 与外部 ETCD cluster ST，确认 missing-local 恢复失败 | Red |
 | Commit 2 | SDD：接入 missing-local rejoin handler，复用 cleanup gate，保持 RECOVERING 隔离 | Green |
-| Commit 3 | focused ST、历史措施二 UT/ST、CMake/Bazel 与 Tiantiyun 回归 | Refactor/verify |
+| Commit 3 | 历史措施二 UT/ST、CMake/Bazel 与 Tiantiyun 回归 | Refactor/verify |
 | 最终提交 | review 后按需要 squash；PR 描述记录源码/测试意图、case 数量和逐 case/总时长 | Delivery |
 
 实施采用 TDD + SDD。构建复用 `/home/ds-thirdparty-cache`，开启 `URMA_MOCK`；独占时 `-j80`，有其他任务时
@@ -313,19 +311,14 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 
 | UT | 覆盖点 | 核心断言 |
 |---|---|---|
-| `TopologyControllerTest.MissingLocalRecoveringMembershipRunsColdRejoinBeforeScaleOut` | RECOVERING + local missing | 调用 rejoin handler，不调用 local recovery；成功后 exact resync，再进入既有 scale-out |
-| `TopologyControllerTest.FailedColdRejoinKeepsRecoveringAndRetries` | cleanup/READY 失败 | 不启动 scale-out；后续 tick 重试；其他已就绪仲裁不被永久冻结 |
-| `TopologyEngineTest.LocalMissingRejoinClosesAdmissionAndRunsCleanupBeforeReady` | Engine 顺序 | rejoin flag 与隔离先于 gate；gate 成功后才调用 READY 更新 |
-| `TopologyEngineTest.LocalMissingRejoinCleanupFailureNeverPublishesReady` | cleanup 安全边界 | gate 失败时不更新 READY，rejoin flag 保持 true |
-
-实现时若 Controller 两个场景可用参数化 helper 简洁表达，可合并测试夹具代码，但不能合并关键断言。
+| `TopologyControllerTest.MissingLocalRecoveringMembershipColdRejoinsBeforeScaleOut` | RECOVERING + local missing | 调用 rejoin handler，不调用 local recovery；成功后 exact resync，再进入既有 scale-out |
+| `TopologyEngineTest.ColdRejoinCleansWhileIsolatedBeforePublishingReady` | Engine 顺序与失败重试 | admission callback、rejoin flag 与隔离先于 gate；首次 `K_NOT_READY` 保持 RECOVERING；重试成功后才发布 READY |
 
 ### 8.2 新增 ST
 
 | ST | 层级 | 故障注入 | 关键断言 | 目标时长 |
 |---|---|---|---|---|
-| `EtcdStoreTest.LeaseRebindPublishesRecoveringAfterReady` | focused ST | 缩短 lease，令 keepalive 发送失败至超时后清除 | rebind 后为 RECOVERING，证明隔离语义未被修复破坏 | 单 case 尽量 `<6s` |
-| `KVClientEtcdDfxTest.LEVEL1_SingleWorkerEtcdReconnectColdRejoinsAndRestoresMetadata` | cluster ST | 只对 Worker1 注入 keepalive unavailable，等待剔除后清除 | Worker0 持续可用；Worker1 被移除、清理、重新 ACTIVE；恢复后 peer metadata Set/Get 成功 | 先保证稳定，目标 `<=30s` |
+| `KVClientEtcdSingleWorkerReconnectTest.LEVEL1_WorkerEtcdReconnectColdRejoinsAndRestoresMetadataAccess` | cluster ST | Worker1 lease unavailable + peer `GetClusterState` unavailable，等待剔除后清除 | Worker0 持续可用；Worker1 被移除、清理、重新 ACTIVE；恢复后 peer metadata Set/Get 成功 | 先保证稳定，目标 `<=30s` |
 
 Cluster ST 使用两个 Worker，不能关闭整个 ETCD 集群。故障前确认两个 ACTIVE；故障期间持续从 Worker0 做轻量
 Set/Get，证明不是整集群降级；等待权威 topology 删除 Worker1 后清除注入；恢复后等待两个 ACTIVE，再用新 key
@@ -349,14 +342,14 @@ Set/Get，证明不是整集群降级；等待权威 topology 删除 Worker1 后
 |---|---|
 | Red-UT | missing-local RECOVERING 直接返回，rejoin handler 未调用 |
 | Red-ST | Worker1 重绑后卡在 RECOVERING/ROLE_ISOLATED，无法重新 ACTIVE |
-| Green | 4 条新增 UT、2 条新增 ST 及既有回归全部通过 |
+| Green | 2 条新增 UT、1 条新增 ST 及既有回归全部通过 |
 
 ### 8.5 构建与回归
 
 | 类型 | 要求 |
 |---|---|
 | CMake | `URMA_MOCK=ON`，复用 `/home/ds-thirdparty-cache`，构建对应 ST/UT target |
-| Bazel | 保证修改源码及 `etcd_store_test`、`kv_client_etcd_dfx_test` target 通过构建 |
+| Bazel | 保证修改源码及 `kv_client_etcd_dfx_test` target 通过构建 |
 | 远端 | Tiantiyun；tmux 后台执行，保存 exit marker、逐 case elapsed time 和总时长 |
 | 格式 | 仅格式化修改行，避免 `topology_controller_test.cpp` 等历史格式噪声 |
 | 静态检查 | clang-tidy 检查修改文件；不因历史告警扩大修改范围 |
