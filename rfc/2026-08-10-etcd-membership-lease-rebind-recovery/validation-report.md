@@ -76,5 +76,19 @@ iptables/TCP 黑洞测试。未改变 peer hashring 路由纠偏、拓扑仲裁�
 
 PR：https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/1981
 
-Issue #1027 已回填根因、修复方案和验证数据；PR 创建时已提交 `/retest`，CI bot 已接受并启动
-[门禁任务 9459](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/trigger/job/yuanrong-datasystem/9459/console)。
+Issue #1027 已回填根因、修复方案和验证数据。
+
+## 8. PR 门禁结果
+
+| 门禁项 | 结果 | 证据 |
+|---|---|---|
+| 总任务 | PASS | [trigger #9459](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/trigger/job/yuanrong-datasystem/9459/console)，1637.77s |
+| x86_64 | PASS | [x86 #9594](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/x86-64/job/yuanrong-datasystem/9594/console)，191.458s |
+| aarch64 | PASS | [aarch64 #9530](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/aarch64/job/yuanrong-datasystem/9530/console)，1444.692s |
+| Bazel x86 | PASS | `Test_Datasystem_Bazel_x86 #5483` |
+| code/license/SCA | PASS | trigger #9459 三项均为 SUCCESS |
+
+aarch64 门禁的 4433 条 LLT 全部通过；171 条 level1 ST 首轮有 1 条既有 Stream ST
+`StreamDfxTopoTest.TestWorkerRestartThenClosePubSub` 失败，同一门禁自动单例重跑 27.35s 通过，最终任务成功。
+本 PR 新增 `KVClientEtcdSingleWorkerReconnectTest.WorkerEtcdReconnectColdRejoinsAndRestoresMetadataAccess`
+首轮通过，耗时 23.37s。该 Stream ST 不在本 PR 修改文件与调用路径内，且单例重跑通过，因此未为其扩大修改范围。
