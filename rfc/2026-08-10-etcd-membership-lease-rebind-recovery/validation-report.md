@@ -35,7 +35,7 @@
 | Topology/coordination UT | 116 | 116 PASS | 1.37s 总墙钟 |
 | 新增 ETCD recovery ST | 1 | 1 PASS | 22.16s |
 | Coordinator regression ST | 3 | 3 PASS | 28.88s / 17.00s / 33.63s，79.65s 总墙钟 |
-| Bazel source + ST target | 2 targets | PASS | 首次 684s；最终增量结果待补 |
+| Bazel source + ST target | 2 targets | PASS | 首次 684s；pre-squash 增量 54s |
 | clang-format | 7 changed files | PASS | 仅检查/格式化修改行，`git diff --check` PASS |
 | clang-tidy | 2 production `.cpp` | PASS | clang 22；抑制 compile DB 的 linker-only 参数后无本次源码错误 |
 
@@ -63,4 +63,15 @@ iptables/TCP 黑洞测试。未改变 peer hashring 路由纠偏、拓扑仲裁�
 
 ## 7. 最终交付
 
-最终 squash commit、精确 HEAD CMake/Bazel 复验和 PR 门禁链接在 squash 后补充。
+| 项目 | 结果 |
+|---|---|
+| Pre-squash backup | `codex/backup-etcd-recovery-1027-pre-squash-20260811` |
+| Squash commit | `d74c327ad339bdb60f4160ece64a178bcb17100a`，相对 `master` 恰好 1 commit |
+| Tree 一致性 | squash commit 与 backup tree 均为 `4375a02a3e2ac8f822aaea758a001d83c995a51b` |
+| Exact-HEAD CMake | PASS，6s |
+| Exact-HEAD UT | 116/116 PASS，1.38s |
+| Exact-HEAD feature ST | 1/1 PASS，21.45s |
+| Exact-HEAD coordinator ST | 3/3 PASS，31.78s / 17.31s / 33.32s |
+| Exact-HEAD Bazel | 2/2 targets PASS，19s |
+
+PR 创建及门禁链接在 GitCode 提交后补充。
