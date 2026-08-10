@@ -43,12 +43,13 @@ witness probe 在 membership TTL 缺失后启动，但目前只在 `node_dead_ti
 仅补强两 Worker 场景：
 
 1. 单个有效 Worker summary 将目标标记为 suspect，不直接隔离。
-2. Coordinator 立即直探，至少间隔 500ms 连续两次不可达才确认。
-3. 确认前重读 candidate；仍只有同一目标才加入 `confirmedFailure`。
-4. probe 可达、返回异常或无匹配结果时保留目标。
-5. 两个 candidate 时证据有歧义，全部保留并清空探测进度。
-6. Worker 成功后立即上报空 summary，Coordinator 清理旧证据。
-7. 大于两个 Worker 的现有阈值保持不变。
+2. Coordinator 立即直探；探测超时 100ms，至少间隔 750ms 连续两次不可达才确认。
+3. 第二次探测按 deadline 主动唤醒，不依赖 1s reconcile tick。
+4. 最终提交在 summary 锁内重算唯一 candidate，并用 membership reservation 阻止并发身份变更。
+5. probe 可达、返回异常或无匹配结果时保留目标。
+6. 两个 candidate 时证据有歧义，全部保留并清空探测进度。
+7. Worker 成功后立即上报空 summary，Coordinator 清理旧证据。
+8. 大于两个 Worker 的现有阈值保持不变。
 
 不新增 gflag。仍使用：
 
@@ -71,9 +72,9 @@ sequenceDiagram
     W->>H: keepalive + failed target (about 1.5s)
     H->>T: one-reporter suspect (two-worker only)
     T-xD: direct probe #1: unreachable
-    T-xD: direct probe #2: unreachable (>=500ms)
-    T->>H: re-read candidate
-    T->>T: one candidate + two unreachable
+    T-xD: direct probe #2: unreachable (>=750ms)
+    T->>H: fenced candidate recheck
+    H->>H: reserve membership mutation
     T->>R: confirm failure and commit ring
     R-->>C: topology refresh
 ```
@@ -82,8 +83,8 @@ sequenceDiagram
 
 | 文件 | 修改 |
 |---|---|
-| `topology_control_host.cpp` | 两 Worker 时允许 1 份有效 report 形成 candidate；打印 reporter/threshold。 |
-| `topology_controller.cpp` | 单 candidate 连续两次直探；确认前重读；双 candidate 保留。 |
+| `topology_control_host.cpp` | 两 Worker单 report 形成 candidate；最终重算和 membership reservation。 |
+| `topology_controller.cpp` | 两次直探、750ms deadline 唤醒、双 candidate 保留。 |
 | `coordinator_service_impl.cpp` | 空 keepalive summary 也同步到 Host。 |
 | `ds_coordination_backend.cpp` | 将 summary 首次命中、成功 reset 提升为 V=0 可见的状态转换日志。 |
 | `topology_control_host_test.cpp` | 看护两 Worker candidate 和大集群阈值不变。 |
@@ -113,11 +114,11 @@ Tiantiyun、CMake、URMA Mock、`-j40`：
 | 验证 | 结果 |
 |---|---|
 | `cluster_topology_contract_ut` | 361/361 PASS |
-| `TopologyControlHostTest.*` | 19/19 PASS |
+| `TopologyControlHostTest.*` + `CoordinatorServiceImplTest.*` | 24/24 PASS |
 | 5 个关联 disabled ST | 5/5 PASS |
-| 两 Worker单 reporter | 首次失败 21ms；最后失败 2225ms；隔离 2246ms；读写恢复 2320ms |
+| 两 Worker单 reporter | 首次失败 20ms；最后失败 2282ms；隔离 2303ms；读写恢复 2380ms |
 | 七 Worker双 Kill | 两目标隔离 1612/1612ms；流量恢复 1746ms |
-| 原始 client Set/Get | 最后 Set 失败 1558ms；隔离 1630ms；Get 恢复 1678ms |
-| 停止后恢复加入 | 隔离 1640ms；rejoin 10172ms |
+| 原始 client Set/Get | 最后 Set 失败 1551ms；隔离 1622ms；Get 恢复 1673ms |
+| 停止后恢复加入 | 隔离 1661ms；rejoin 3304ms |
 
-UT 额外看护：单次不可达不隔离、双 candidate 不隔离、空 summary 清理旧证据。两秒闪断 5 轮和无请求 30s 租约兜底本轮未执行，需在门禁矩阵单列。
+UT 额外看护：单次不可达不隔离、双 candidate 不隔离、deadline 自动唤醒、提交 fence 拒绝陈旧证据、空 summary 清理。两秒 peer-RPC 闪断 5 轮和无请求 30s 租约兜底本轮未执行，需在门禁矩阵单列。
