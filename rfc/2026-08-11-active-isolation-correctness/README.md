@@ -30,10 +30,11 @@ sequenceDiagram
 ```
 
 1. topology 发布不再调用 `RecordPeerRpcSuccess`。
-2. failure summary 只由同一目标的真实 metadata RPC 成功清理；无新失败时按 active window 过期。
-3. Worker 将真实 metadata RPC 最终失败标记为 `K_METADATA_OWNER_UNAVAILABLE`。
-4. Client 只触发约 3s 的强制 ring 刷新，不淘汰健康 ingress Worker，不重放结果未知的 Publish。
+2. failure summary 只由同一目标的真实 metadata RPC 成功清理；同地址新实例才丢弃旧证据，无新失败时按 active window 过期。
+3. Worker 仅将 metadata RPC 的 `UNAVAILABLE / DEADLINE_EXCEEDED / PEER_DEAD` 标记为 `K_METADATA_OWNER_UNAVAILABLE`，Set/MSet 一致。
+4. Client 合并重复信号，只触发一组约 3s 的强制 ring 刷新；不淘汰健康 ingress Worker，不重放结果未知的 Publish。
 5. local-cache Client 不持有 ring，继续依赖 ingress Worker 的 topology 收敛。
+6. Coordinator 提交前重新校验 reporter、target incarnation 与 leader epoch，失效则保留节点。
 
 ## 3. Reporter 故障
 
@@ -45,22 +46,22 @@ sequenceDiagram
 
 | 用例 | 关键结果 |
 |---|---|
-| topology publish UT | topology 版本变化后 failure summary 保留 |
-| 客户读写 ST | metadata 隔离 `1648ms`；SET 最后失败 `1580ms`；GET 恢复 `1695ms` |
-| 两 Worker 单来源 ST | 隔离 `2289ms`；连续恢复 `2361ms` |
-| 双节点同时 kill | `1853ms / 1835ms` 隔离；最后隔离后 `175ms` 恢复 |
-| 双节点间隔 1s kill | `1858ms / 1950ms` 隔离；最后隔离后 `179ms` 恢复 |
-| 双节点间隔 2s kill | `1861ms / 2088ms` 隔离；最后隔离后 `179ms` 恢复 |
+| topology publish UT | 普通版本变化保留证据；同地址新实例清理旧证据 |
+| 客户读写 ST | metadata 隔离 `1615ms`；SET 最后失败 `1547ms`；GET 恢复 `1666ms` |
+| 两 Worker 单来源 ST | 隔离 `2298ms`；连续恢复 `2369ms` |
+| 双节点同时 kill | `1925ms / 1908ms` 隔离；最后隔离后 `174ms` 恢复 |
+| 双节点间隔 1s kill | `1915ms / 2008ms` 隔离；最后隔离后 `172ms` 恢复 |
+| 双节点间隔 2s kill | `1859ms / 2072ms` 隔离；最后隔离后 `174ms` 恢复 |
 | metadata publish ST | local cache false 触发刷新；true 继续使用健康 ingress；均不重放 |
 | reporter 故障 UT | 6 个来源中 1 个失效，剩余 5 个仍形成候选 |
-| 构建 | CMake 全包，URMA Mock ON，`-j40`，PASS |
+| 构建 | CMake `all`，URMA Mock ON，`-j80`，PASS |
 
 ## 5. 代码落点
 
 | 模块 | 修改 |
 |---|---|
-| `TopologyEngine` | 删除 topology 发布伪成功清理 |
-| `WorkerOcServicePublishImpl` | 标记下游 metadata owner RPC 失败 |
-| `ObjectClientImpl` | 接收标记并触发 bounded ring refresh |
-| `TopologyControlHost` UT | 验证 reporter 故障后的 quorum |
+| `TopologyEngine` | 删除 topology 发布伪成功清理；识别新 incarnation |
+| `WorkerOcServicePublishImpl` | 标记 Set/MSet 下游 metadata owner RPC 失败 |
+| `ObjectClientImpl` | 接收标记并触发合并后的 bounded ring refresh |
+| `TopologyControlHost` | 汇总 reporter，并在 authority fence 内二次校验 |
 | Coordinator active-failure ST | 验证 3s 隔离和隔离后 1s 内停止失败 |
