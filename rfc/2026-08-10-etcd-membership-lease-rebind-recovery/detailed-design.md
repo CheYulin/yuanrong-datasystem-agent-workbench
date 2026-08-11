@@ -3,8 +3,8 @@
 | 属性 | 值 |
 |---|---|
 | 创建 | 2026-08-10（测试日志与源码分析） |
-| 修改 | 2026-08-11（补充 voluntary-exit 并发与超时边界） |
-| 阶段 | P1 缺陷修复已验证，PR #1981 已提交 |
+| 修改 | 2026-08-11（补充 OS 进程挂起/恢复 ST 设计） |
+| 阶段 | P1 缺陷修复已验证；OS 故障样例加固待实施 |
 | 前置 | 措施二 / PR #1821 / Issue #1027 |
 | 源码基线 | 起点 `v0.9.2.rc12` (`00c31da53a08`)；已 rebase 最新 `master` (`604b00b52d2a`) |
 
@@ -76,7 +76,7 @@ STARTING/RESTARTING 后把后续重绑状态置为 RECOVERING，目的是在重�
 ```mermaid
 flowchart LR
     U["KV Client"] -->|Set/Get| M["DataSystem cluster"]
-    F["Fault injector"] -->|one Worker ETCD link down/up| M
+    F["OS SIGSTOP/SIGCONT"] -->|one Worker becomes unresponsive and resumes| M
     M -->|available or temporary not-ready| U
 ```
 
@@ -107,7 +107,7 @@ flowchart LR
 
 | UseCase | 使用者 | 场景 | 需要什么 | 设计响应 | 验收 |
 |---|---|---|---|---|---|
-| UC1 | KV Client / 运维测试 | 单 Worker ETCD TCP down/up 且已被删除 | 清理后重新加入并恢复远端访问 | missing-local rejoin handler | 两个 ACTIVE，peer Get 成功 |
+| UC1 | KV Client / 运维测试 | OS 挂起单 Worker，lease 过期且被权威 topology 删除后恢复进程 | 挂起期间拒绝请求；恢复后清理并重新加入 | missing-local rejoin handler | 请求有界失败；两个 ACTIVE；peer Get 成功 |
 | UC2 | Worker lifecycle | 短闪断且未被删除 | 原身份安全恢复 | 保留现有 ACTIVE local recovery | 无重加，恢复 READY |
 
 ## §4 方案设计
@@ -298,7 +298,7 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 | R1 | cleanup callback 被重复调用 | 复用措施二幂等 cleanup，并用失败重试 UT 看护 |
 | R2 | Controller tick 被长时间阻塞 | cleanup 是本地数据结构操作；保持既有 deadline，`K_NOT_READY` 后退出本 tick |
 | R3 | callback 复制改变 Coordinator backend 生命周期 | Builder 构建期复制 `std::function`；两个 backend 分支分别使用，补现有 backend UT 回归 |
-| R4 | 动态注入不等价于系统级断网 | 同时阻断 Worker1 的 ETCD lease 与 peer `GetClusterState`，稳定构造日志中的单 Worker TCP 隔离和权威剔除；Worker0 不注入故障 |
+| R4 | `SIGSTOP` 不等价于仅网络断开 | 该方式从 OS 侧冻结 Worker1，同时阻断业务、ETCD lease 和 peer RPC，更直接看护“进程存活但不响应”；Worker0 不注入故障 |
 | R5 | 误把旧数据恢复作为验收 | cluster ST 只验证恢复后新业务；旧身份数据不复用符合措施二 v1 |
 
 ## §7 落地步骤
@@ -327,11 +327,14 @@ TopologyEngine::Builder &SetMembershipRecreateGate(std::function<Status()> gate)
 
 | ST | 层级 | 故障注入 | 关键断言 | 目标时长 |
 |---|---|---|---|---|
-| `KVClientEtcdSingleWorkerReconnectTest.LEVEL1_WorkerEtcdReconnectColdRejoinsAndRestoresMetadataAccess` | cluster ST | Worker1 lease unavailable + peer `GetClusterState` unavailable，等待剔除后清除 | Worker0 持续可用；Worker1 被移除、清理、重新 ACTIVE；恢复后 peer metadata Set/Get 成功 | 先保证稳定，目标 `<=30s` |
+| `KVClientEtcdSingleWorkerReconnectTest.LEVEL1_WorkerEtcdReconnectColdRejoinsAndRestoresMetadataAccess` | cluster ST | `SIGSTOP` Worker1，等待剔除后 `SIGCONT` | Worker1 请求在 2s budget 内失败；Worker0 持续可用；Worker1 被移除、清理、重新 ACTIVE；恢复后 peer metadata Set/Get 成功 | 先保证稳定，目标 `<=30s` |
 
-Cluster ST 使用两个 Worker，不能关闭整个 ETCD 集群。故障前确认两个 ACTIVE；故障期间持续从 Worker0 做轻量
-Set/Get，证明不是整集群降级；等待权威 topology 删除 Worker1 后清除注入；恢复后等待两个 ACTIVE，再用新 key
-从 Worker1 Set、Worker0 Get。旧 key 是否保留不作为断言。
+Cluster ST 使用两个 Worker，不能关闭整个 ETCD 集群。故障前确认两个 ACTIVE，并使用带 2s request timeout
+的 Worker1 客户端完成一次基线访问。向 Worker1 子进程发送 `SIGSTOP` 后、权威 topology 尚未剔除它时，使用
+映射到 Worker1 的新 key 发起 Set，断言请求失败且耗时受 request timeout 约束；随后等待权威 topology 删除
+Worker1，并从 Worker0 做轻量 Set/Get，证明不是整集群降级。发送 `SIGCONT` 后等待两个 ACTIVE，再用新 key
+从 Worker1 Set、Worker0 Get。fixture 记录挂起状态，并在 `TearDown()` 中兜底发送 `SIGCONT`，避免断言失败留下
+不可回收的暂停进程。旧 key 是否保留不作为断言。
 
 ### 8.3 必须回归的既有 UT/ST
 
