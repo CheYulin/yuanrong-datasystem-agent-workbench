@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| Status | **In-Progress** |
+| Status | **Review** |
 | Issue | [openeuler/yuanrong-datasystem#1032](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1032) |
 | 场景 | Coordinator 路径，`node_timeout_s=3` |
 
@@ -22,11 +22,11 @@ sequenceDiagram
     participant M as Metadata Owner
     participant O as Coordinator
     M--xW: CreateMeta/UpdateMeta 失败
+    W-->>C: K_METADATA_OWNER_UNAVAILABLE
+    C->>C: bounded ForceRefresh
     W->>O: keepalive failure summary
     O->>O: 多 reporter 汇总并隔离
     O-->>W: topology 更新
-    W-->>C: K_METADATA_OWNER_UNAVAILABLE
-    C->>C: bounded ForceRefresh
 ```
 
 1. topology 发布不再调用 `RecordPeerRpcSuccess`。
@@ -46,11 +46,14 @@ sequenceDiagram
 | 用例 | 关键结果 |
 |---|---|
 | topology publish UT | topology 版本变化后 failure summary 保留 |
-| 双节点同时 kill | `2046ms / 2026ms` 隔离 |
-| 双节点间隔 1s kill | `1954ms / 2095ms` 隔离 |
-| 双节点间隔 2s kill | `1927ms / 1821ms` 隔离 |
+| 客户读写 ST | metadata 隔离 `1648ms`；SET 最后失败 `1580ms`；GET 恢复 `1695ms` |
+| 两 Worker 单来源 ST | 隔离 `2289ms`；连续恢复 `2361ms` |
+| 双节点同时 kill | `1853ms / 1835ms` 隔离；最后隔离后 `175ms` 恢复 |
+| 双节点间隔 1s kill | `1858ms / 1950ms` 隔离；最后隔离后 `179ms` 恢复 |
+| 双节点间隔 2s kill | `1861ms / 2088ms` 隔离；最后隔离后 `179ms` 恢复 |
 | metadata publish ST | local cache false 触发刷新；true 继续使用健康 ingress；均不重放 |
 | reporter 故障 UT | 6 个来源中 1 个失效，剩余 5 个仍形成候选 |
+| 构建 | CMake 全包，URMA Mock ON，`-j40`，PASS |
 
 ## 5. 代码落点
 
@@ -61,4 +64,3 @@ sequenceDiagram
 | `ObjectClientImpl` | 接收标记并触发 bounded ring refresh |
 | `TopologyControlHost` UT | 验证 reporter 故障后的 quorum |
 | Coordinator active-failure ST | 验证 3s 隔离和隔离后 1s 内停止失败 |
-
