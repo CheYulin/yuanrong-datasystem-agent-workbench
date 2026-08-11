@@ -92,3 +92,34 @@ aarch64 门禁的 4433 条 LLT 全部通过；171 条 level1 ST 首轮有 1 条�
 `StreamDfxTopoTest.TestWorkerRestartThenClosePubSub` 失败，同一门禁自动单例重跑 27.35s 通过，最终任务成功。
 本 PR 新增 `KVClientEtcdSingleWorkerReconnectTest.WorkerEtcdReconnectColdRejoinsAndRestoresMetadataAccess`
 首轮通过，耗时 23.37s。该 Stream ST 不在本 PR 修改文件与调用路径内，且单例重跑通过，因此未为其扩大修改范围。
+
+## 9. OS 挂起/恢复 ST 加固验收
+
+2026-08-11 将原 inject-point 故障替换为真实 Worker 子进程 `SIGSTOP`/`SIGCONT`。验证基线为
+`main/master` `a222c258897725588962f33a1239855b4e2f5e35`；修复提交 rebase 后为 `ab8d19afd`，测试改动未提交时
+分别同步到独立 RED/GREEN worktree。Tiantiyun 构建复用 `/home/ds-thirdparty-cache`，启用 `-U on`
+（URMA Mock），发现同机有其他任务后统一使用 `-j40`，所有长任务由 tmux 执行并保存 exit marker。
+
+| 验证项 | 数量 | 结果 | 墙钟/逐 Case |
+|---|---:|---|---|
+| RED CMake full test build | 目标全集 | PASS | `-j40` 增量收敛 129s |
+| RED focused ST | 1 | 预期失败 | 34.87s；挂起请求错误、`<6s` 和进程存活断言通过，恢复后 Worker 持续 `Not ready` |
+| GREEN CMake full test build | 目标全集 | PASS | 652s，`-j40` |
+| GREEN focused ST | 1 | 1 PASS | 24.86s（CTest 24.95s） |
+| 新增特性 UT | 3 | 3 PASS | 0.07s / 0.06s / 0.08s；总墙钟 0.41s |
+| 相邻 ETCD DFX ST | 6 | 5 PASS / 1 基线同现 | 100.70s；失败项见下文 |
+| Bazel source build | 7 targets / 5429 actions | PASS | build 421s，总计 443s，`-j40` |
+| clang-format / diff check | 1 个 ST 文件 | PASS | 无历史文件格式扩散 |
+
+focused ST 覆盖以下链路：Worker1 基线 Set/Get 成功；`SIGSTOP` 后进程仍存活但面向 Worker1 的新请求在
+2,000ms request timeout 约束下返回错误，断言上限为 6s；权威 topology 删除 Worker1 后 Worker0 仍可
+Set/Get；`SIGCONT` 后 Worker1 完成本地清理、重新 READY/ACTIVE，并恢复 Worker1 Set、Worker0 Get。
+`TearDown()` 在异常退出路径兜底发送 `SIGCONT`，避免残留暂停进程。
+
+相邻回归中 `KVClientEtcdDfxTestAdjustNodeTimeout.TestRestartDuringEtcdCrash` 在修复分支连续两次失败，耗时
+41.36s / 43.88s；在纯 `main/master` RED worktree 同样于第 346 行失败，耗时 44.01s。三次均为
+`StartWorkerAndWaitReady({1})` 的 health 文件等待窗口耗尽，日志显示 Worker 的 reconciliation 在测试发送
+SIGTERM 后才收敛。该问题在无本 PR 源码的基线同现，因此本次不通过放宽既有测试时序扩大修改范围。
+
+覆盖边界：`SIGSTOP` 会同时冻结 Worker 业务、ETCD lease 与 peer RPC，比仅 TCP 黑洞更宽；本 case 证明
+“进程存活但完全不响应”可恢复，不单独证明仅某一条网络链路故障的行为。
