@@ -32,7 +32,7 @@ sequenceDiagram
 1. topology 发布不再调用 `RecordPeerRpcSuccess`。
 2. failure summary 只由同一目标的真实 metadata RPC 成功清理；同地址新实例才丢弃旧证据，无新失败时按 active window 过期。
 3. Worker 仅将 metadata RPC 的 `UNAVAILABLE / DEADLINE_EXCEEDED / PEER_DEAD` 标记为 `K_METADATA_OWNER_UNAVAILABLE`，Set/MSet 一致。
-4. Client 合并重复信号，只触发一组约 3s 的强制 ring 刷新；不淘汰健康 ingress Worker，不重放结果未知的 Publish。
+4. Client 合并重复信号，只触发一组约 4s 的强制 ring 刷新（500ms 一次）；中间 ring 变化不提前结束，不淘汰健康 ingress Worker，不重放结果未知的 Publish。
 5. local-cache Client 不持有 ring，继续依赖 ingress Worker 的 topology 收敛。
 6. Coordinator 提交前重新校验 reporter、target incarnation 与 leader epoch，失效则保留节点。
 
@@ -52,8 +52,13 @@ sequenceDiagram
 | 双节点同时 kill | `1925ms / 1908ms` 隔离；最后隔离后 `174ms` 恢复 |
 | 双节点间隔 1s kill | `1915ms / 2008ms` 隔离；最后隔离后 `172ms` 恢复 |
 | 双节点间隔 2s kill | `1859ms / 2072ms` 隔离；最后隔离后 `174ms` 恢复 |
+| 12 Worker、3 节点同时 kill | `1961ms / 1913ms / 1894ms` 隔离；末次 kill 后最后失败 `1898ms`；最后隔离后 `253ms` 恢复 |
+| 12 Worker、4 节点间隔 500ms kill | `1788ms / 1731ms / 1728ms / 1757ms` 隔离；末次 kill 后最后失败 `1735ms`；最后隔离后 `151ms` 恢复 |
+| delayed-isolation refresh UT | 中间 ring 变化后继续刷新，约 `3503ms` 获取隔离版本 |
 | metadata publish ST | local cache false 触发刷新；true 继续使用健康 ingress；均不重放 |
 | reporter 故障 UT | 6 个来源中 1 个失效，剩余 5 个仍形成候选 |
+| 本特性 ST | `9/9 PASS`；全部为 `DISABLED_LEVEL1_/LEVEL2_`，默认门禁不运行 |
+| 关联 UT | `70/70 PASS`；HashRingRefresher `14/14 PASS` |
 | 构建 | CMake `all`，URMA Mock ON，`-j80`，PASS |
 
 ## 5. 代码落点
@@ -64,4 +69,4 @@ sequenceDiagram
 | `WorkerOcServicePublishImpl` | 标记 Set/MSet 下游 metadata owner RPC 失败 |
 | `ObjectClientImpl` | 接收标记并触发合并后的 bounded ring refresh |
 | `TopologyControlHost` | 汇总 reporter，并在 authority fence 内二次校验 |
-| Coordinator active-failure ST | 验证 3s 隔离和隔离后 1s 内停止失败 |
+| Coordinator active-failure ST | 验证单/多节点 3s 隔离、误隔离与隔离后恢复；默认门禁禁用 |
