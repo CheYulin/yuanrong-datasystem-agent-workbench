@@ -4,7 +4,7 @@
 
 本轮以 [Issue #1032](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1032) 为需求来源，以
 `53c2548301bca4ade95586d838e14b14dae8e3cd` 为已知可恢复实现，rebase 到当前
-`main/master@f0584da50d6e828790f628942b0ffec76a04dd79`，在独立分支完成验证并新建 PR。
+`main/master@d897aee13b7f20b58a60f81e1b31e094964c996d`，在独立分支完成验证并新建 PR。
 
 必须同时闭环三个独立问题：
 
@@ -25,8 +25,10 @@
 |---|---|
 | 旧父提交 | `888f2073e67d2873f6f4dcb47f284e3099cbd4a1` |
 | 功能提交 | `53c2548301bca4ade95586d838e14b14dae8e3cd` |
-| 新父提交 | `main/master@f0584da50d6e828790f628942b0ffec76a04dd79` |
-| 53c2 rebase 提交 | `c45757e28b0be4dd670d61aeeea6aad7a2071fd9` |
+| 新父提交 | `main/master@d897aee13b7f20b58a60f81e1b31e094964c996d` |
+| 53c2 rebase 提交 | `ee037795d` |
+| local-cache peer-dead 切换提交 | `c30b59fb4` |
+| 有界刷新与并发加固提交 | `cf338e05b` |
 | DataSystem worktree | `.worktrees/active-isolation-53c2-rebase` |
 | DataSystem 分支 | `codex/active-isolation-53c2-main` |
 | 交付形式 | 新 GitCode PR，不覆盖 PR1997 |
@@ -126,15 +128,18 @@ metadata-owner failure 路径负责。切换不得在请求线程同步等待，
 
 - 正常成功请求热路径不新增 RPC、持久化、参数、全局锁或同步 IO。
 - failure summary 继续由 topology/coordination 所有者管理；锁内不得增加 RPC、sleep 或阻塞 IO。
-- Client 重复失败合并到一个有界刷新窗口，不为每次失败创建线程或刷新任务。
+- Client 重复 failure refresh 合并到一个有界刷新窗口；direct peer-dead 切换按 Worker API 实例去重，使旧
+  Worker 的排队任务不会吞掉新绑定 Worker 的切换请求，也不为同一实例的每次失败创建任务。
 - `HashRingRefresher::Stop` 必须与 condition-variable 的 wait/wakeup 和 deadline 更新正确同步。
+- 后台 HashRing RPC 单次 250ms、每轮最多探测 4 个 Worker；可达但未更新的 Worker 不能遮蔽后续节点上的新
+  ring。Coordinator summary 清理按 reporter 反向索引执行，主动直探每轮最多 32 个目标并公平轮转。
 - 3s 内允许故障窗口中的短暂失败，但新 ring 收敛后必须持续成功，不能只以一次 Set 成功作为恢复证据。
 - 验收使用随机新 key；旧数据副本丢失、容量不足、20ms 大对象预算或 URMA fallback limiter 错误单独归因，
   不得混入主动隔离结论。
 
 ## 6. Tiantiyun 验证矩阵
 
-验证环境为 80C/128G Tiantiyun，CMake Release、`-j80`、复用第三方缓存、
+验证环境为 80C/128G Tiantiyun，CMake Release、`-j16`、复用第三方缓存、
 `BUILD_WITH_URMA_MOCK=ON`。长构建和测试必须保留明确 exit marker；共享端口/集群 ST 串行执行。
 
 ### 6.1 构建目标
@@ -194,29 +199,30 @@ metadata-owner failure 路径负责。切换不得在请求线程同步等待，
 完成前执行 DataSystem 的 `$ds-self-verify`，检查 hot path、共享状态、恢复语义、测试覆盖、构建闭包和
 `.repo_context` 新鲜度。验证通过后核验 fork URL，push 新分支并创建新 PR；未经单独授权不触发 `/retest`。
 
-## 8. 2026-08-14 CMake 验证记录
+## 8. 2026-08-15 CMake 验证记录
 
 验证主机：`tiantiyun-80c128g`；源码目录：
 `/home/worktrees/active-isolation-53c2-main/datasystem`；构建目录：`build-cmake-urma-mock`；配置为 Release、
 `WITH_TESTS=ON`、`BUILD_WITH_URMA_MOCK=ON`，第三方缓存为 `/home/cache/ds-thirdparty-cache`。
 
-- CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache` 成功。
-- `ds_ut` focused：HashRingRefresher、TopologyControlHost、CoordinatorServiceImpl 和 Worker ring 相关共 58 条
-  通过。
-- `cluster_topology_contract_ut` focused：summary/reset/wake、TopologyController、TopologyEngine 隔离/ring
-  相关共 20 条通过。
-- `KVClientTransportSetTest.MetadataOwnerFailureRefreshesRingWithoutEvictingIngress` 通过。
-- 新增 `KVCacheClientMmapSwitchTest.PeerDeadGetTriggersWorkerSwitchBeforeHeartbeatTimeout`：旧代码在 5s 内不
-  切换而失败；修复后在 heartbeat=30s 条件下通过（9.9s 总用例时间）。
-- `ClientSetAndGetRecoverAfterKilledWorker` 的原 3,000ms 门限存在 750ms failure-summary 采样相位抖动；实测
-  一次 3,162ms。门限调整为 4,000ms（3s node timeout + 一个采样周期/调度余量）后连续 5 轮通过，Set/Get
-  恢复观测范围 2,385–3,364ms，仍显著低于 9s SLO。
-- 单 Client、两 Worker 单 reporter、Kill 3 场景在同一轮通过。Kill 4 场景串行运行时有一次 worker 在正式
-  故障注入前因 Coordinator routing deadline 启动失败；隔离用例单独重跑通过（26.0s 总用例时间），归类为
-  setup/resource 抖动而非隔离断言失败。
-- mmap switch 既有两条用例与 local-cache enabled dead-peer 用例通过。local-cache disabled dead-peer 用例在
-  URMA Mock 组合下失败于 `UrmaHandshakeRspPb has no hand_shake`，与本次 local-cache direct Get 修改路径无关，
-  保留为环境/Mock 限制，不计作通过。
-
-CMake 编译当前 main 时还命中 `urma_manager.cpp` 的 signed/unsigned compare `-Werror`；远端仅为验证临时把
-`const auto nowMs` 显式写为 `const uint64_t nowMs`。该无关改动不进入本 PR，PR diff 与本地源码均不包含它。
+- 在最终 rebase 头 `cf338e05b` 上，CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache`
+  全部成功；未使用 Bazel。
+- `ds_ut` focused 51/51 通过：20 条 HashRingRefresher、30 条 TopologyControlHost、1 条 Coordinator
+  active-failure 配置用例。新增覆盖“首节点 unchanged、后续节点 changed”、250ms timeout 传递和 Stop
+  最多等待一个在途 RPC。
+- `cluster_topology_contract_ut` focused 43/43 通过，覆盖 DsCoordinationBackend session、active-failure
+  Controller/Engine；新增 70 个候选场景验证每轮最多 32 个直探且轮转无饥饿。
+- Client ST 5/5 通过：mmap switch 3/3（新增
+  `LEVEL1_PeerDeadGetTriggersWorkerSwitchBeforeHeartbeatTimeout` 总耗时 10.1s）以及 metadata-owner refresh、
+  ambiguous Publish 不重放各 1 条。首次直接运行 mmap 三条在 SetUp 阶段因未设置 CMake 的
+  `TEST_SRCDIR/TEST_WORKSPACE` 而找不到 mock OBS 脚本；补齐测试环境后 3/3 通过，未发生产品断言失败。
+- disabled 主动隔离 ST 9 个场景中，串行首轮 8/9 通过；Gap2000ms 场景在正式 kill 前有一个 Worker 因
+  `Coordinator routing deadline exceeded` 启动失败，单独重跑通过（27.1s），归类为 setup/resource 抖动。
+- 单 Worker stop/resume 的隔离与访问恢复分别为 2,374ms、2,359ms；rejoin 为 3,368ms。Client kill 场景
+  Set 恢复 3,130ms，local-cache true/false Get 恢复 3,181/3,267ms。两 Worker单 reporter 隔离 2,284ms，
+  Client 恢复 2,359ms。
+- Kill 2/3/4 的目标相对自身 kill 的隔离耗时范围 2,452–2,839ms（Kill 4 为 2,520–2,595ms）；所有存活
+  Worker ring 相对最后一次 kill 的收敛范围 2,486–2,873ms（Kill 4 为 2,625ms）。全部低于 4,000ms
+  断言门限并显著低于 9s SLO。
+- 本轮 rebase 已包含 upstream 对 `urma_manager.cpp` signed/unsigned `-Werror` 的修复，远端源码无需任何
+  验证专用补丁；验证目录与 PR 源码一致。
