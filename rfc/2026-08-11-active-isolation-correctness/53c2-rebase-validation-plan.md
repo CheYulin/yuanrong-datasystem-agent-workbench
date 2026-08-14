@@ -30,7 +30,9 @@
 | local-cache peer-dead 切换提交 | `c30b59fb4` |
 | 有界刷新与并发加固提交 | `cf338e05b` |
 | 最终格式整理提交 | `ea907ab5b` |
-| PR 最终 squash 提交 | `7b0f4cbed`，与 `ea907ab5b` tree 完全一致 |
+| PR 初始 squash 提交 | `7b0f4cbed` |
+| PR review 生命周期/规模补强 | switch pool drain；128 候选分页与 sweep 快照 |
+| PR 最终提交 | `0dd856c7f3431971be7d35230b8160d1e4b3cbae` |
 | DataSystem worktree | `.worktrees/active-isolation-53c2-rebase` |
 | DataSystem 分支 | `codex/active-isolation-53c2-main` |
 | 交付形式 | 新 GitCode PR !2056，不覆盖 PR1997 |
@@ -207,21 +209,21 @@ metadata-owner failure 路径负责。切换不得在请求线程同步等待，
 `/home/worktrees/active-isolation-53c2-main/datasystem`；构建目录：`build-cmake-urma-mock`；配置为 Release、
 `WITH_TESTS=ON`、`BUILD_WITH_URMA_MOCK=ON`，第三方缓存为 `/home/cache/ds-thirdparty-cache`。
 
-- 语义实现固定在 `cf338e05b`；在仅包含仓库格式整理的验证头 `ea907ab5b` 上，CMake 构建 `ds_ut`、
-  `cluster_topology_contract_ut`、`ds_st_kv_cache` 全部成功；未使用 Bazel。创建 PR 时按仓库流程 squash 为
-  `7b0f4cbed`，其 Git tree 与验证头一致。
-- `ds_ut` focused 51/51 通过：20 条 HashRingRefresher、30 条 TopologyControlHost、1 条 Coordinator
-  active-failure 配置用例。新增覆盖“首节点 unchanged、后续节点 changed”、250ms timeout 传递和 Stop
-  最多等待一个在途 RPC。
+- 最终 PR 头 `0dd856c7f` 上，CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache` 全部
+  成功；未使用 Bazel。
+- `ds_ut` focused 52/52 通过：20 条 HashRingRefresher、30 条 TopologyControlHost、1 条 Coordinator
+  active-failure 配置和 1 条 switch pool shutdown 生命周期用例。新增覆盖“首节点 unchanged、后续节点
+  changed”、250ms timeout 传递、Stop 最多等待一个在途 RPC，以及真实 peer-dead/URMA 排队任务的 drain。
 - `cluster_topology_contract_ut` focused 43/43 通过，覆盖 DsCoordinationBackend session、active-failure
-  Controller/Engine；新增 70 个候选场景验证每轮最多 32 个直探且轮转无饥饿。
-- 最终格式整理提交后再次执行上述 focused UT，`ds_ut` 51/51、`cluster_topology_contract_ut` 43/43 通过。
+  Controller/Engine；270 个候选场景验证 128/128/14 分页、轮转无饥饿、每批不超过 128，且 provider 每个
+  sweep 只调用一次。
 - Client ST 5/5 通过：mmap switch 3/3（新增
   `LEVEL1_PeerDeadGetTriggersWorkerSwitchBeforeHeartbeatTimeout` 总耗时 10.1s）以及 metadata-owner refresh、
   ambiguous Publish 不重放各 1 条。首次直接运行 mmap 三条在 SetUp 阶段因未设置 CMake 的
   `TEST_SRCDIR/TEST_WORKSPACE` 而找不到 mock OBS 脚本；补齐测试环境后 3/3 通过，未发生产品断言失败。
-- disabled 主动隔离 ST 9 个场景中，串行首轮 8/9 通过；Gap2000ms 场景在正式 kill 前有一个 Worker 因
-  `Coordinator routing deadline exceeded` 启动失败，单独重跑通过（27.1s），归类为 setup/resource 抖动。
+- 最终 disabled 主动隔离 ST 9 个场景中，串行首轮 8/9 通过；Gap1000ms 场景在正式 kill 前有一个 Worker
+  因 `Coordinator routing deadline exceeded` 启动失败，单独重跑通过（26.1s），归类为 setup/resource
+  抖动。此前同一最终语义版本也完成过一次 9/9 串行通过。
 - 单 Worker stop/resume 的隔离与访问恢复分别为 2,374ms、2,359ms；rejoin 为 3,368ms。Client kill 场景
   Set 恢复 3,130ms，local-cache true/false Get 恢复 3,181/3,267ms。两 Worker单 reporter 隔离 2,284ms，
   Client 恢复 2,359ms。
