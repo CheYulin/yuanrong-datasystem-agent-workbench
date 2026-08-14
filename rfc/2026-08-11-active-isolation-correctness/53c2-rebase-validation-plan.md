@@ -4,14 +4,17 @@
 
 本轮以 [Issue #1032](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1032) 为需求来源，以
 `53c2548301bca4ade95586d838e14b14dae8e3cd` 为已知可恢复实现，rebase 到当前
-`main/master@9473a28456f474b7ae17b4b38a4620e49408116a`，在独立分支完成验证并新建 PR。
+`main/master@f0584da50d6e828790f628942b0ffec76a04dd79`，在独立分支完成验证并新建 PR。
 
-必须同时闭环两个独立问题：
+必须同时闭环三个独立问题：
 
 1. **failure summary 被误清**：topology 发布不能把仍为 ACTIVE 的 peer 当成真实 RPC 成功，覆盖或清除
    metadata RPC 失败证据。
 2. **Client HashRing 刷新滞后**：Worker 必须把已确认的下游 metadata owner 故障与 ingress Worker 故障
    区分开，使非 local-cache Client 能及时强制刷新 ring，而不是最多再等待一个 5s 周期。
+3. **local-cache Client 直连故障 Worker 后未及时重绑定**：同机 SHM Get 收到明确的
+   `K_RPC_PEER_DEAD` 后，必须异步切换当前绑定 Worker，不能等待 Client heartbeat/service discovery 兜底
+   后才停止访问已移除 Worker。
 
 目标配置为 `node_timeout_s=3`，并分别覆盖 `node_dead_timeout_s=5` 与 `30` 的验收边界。3s 主动隔离来自
 业务 RPC failure summary；租约/被动缩容只负责无业务证据时的兜底，不参与主动隔离判定。
@@ -22,9 +25,10 @@
 |---|---|
 | 旧父提交 | `888f2073e67d2873f6f4dcb47f284e3099cbd4a1` |
 | 功能提交 | `53c2548301bca4ade95586d838e14b14dae8e3cd` |
-| 新父提交 | `main/master@9473a28456f474b7ae17b4b38a4620e49408116a` |
+| 新父提交 | `main/master@f0584da50d6e828790f628942b0ffec76a04dd79` |
+| 53c2 rebase 提交 | `c45757e28b0be4dd670d61aeeea6aad7a2071fd9` |
 | DataSystem worktree | `.worktrees/active-isolation-53c2-rebase` |
-| DataSystem 分支 | `codex/active-isolation-53c2-rebase` |
+| DataSystem 分支 | `codex/active-isolation-53c2-main` |
 | 交付形式 | 新 GitCode PR，不覆盖 PR1997 |
 
 - 生产代码只以 53c2 patch 为功能来源；`f8b8732b`、`b7726fdd` 只用于回归诊断和测试清单参考。
@@ -72,8 +76,37 @@ Worker 只在真实 metadata RPC 最终失败并满足 failure qualification 后
 Issue #1032 将其描述为“约 3s 的 bounded refresh”；53c2 精确源码使用 6s 窗口，以覆盖 3s 隔离目标及发布
 余量。验收指标仍是 3s 内隔离与业务收敛，6s 是刷新持续上限，不是允许的恢复时延。
 
-`local_cache=true` Client 不持有 ring，不调用 Client `ForceRefresh`；它继续访问健康 ingress Worker，并依赖
-该 Worker 收到新 topology 后恢复。两种模式都必须恢复，但不能用“走同一 Client ring 刷新路径”描述。
+`local_cache=true` Client 在启用 cross-node routing 后同样持有 ring，但同机 key 会优先走绑定 Worker 的 SHM
+直连。PR1997 当前实现中，这条路径遇到明确的 `K_RPC_PEER_DEAD` 会直接返回，不会进入 metadata failure
+handler，也不会调用 `ForceRefresh` 或 `SwitchWorkerNode`。因此需要同时完成两件事：淘汰/刷新故障路由，且在
+后台切走已经死亡的当前绑定 Worker。这个本地直连分支不负责刷新 metadata ring；ring 刷新仍由 routed
+metadata-owner failure 路径负责。切换不得在请求线程同步等待，也不得自动重放结果不确定的写请求。
+
+### 3.3 PR1997 当前归档的剩余问题证据
+
+`errCollect.tar.gz` 与 `isolation-key-logs(2).tar.gz` 对应运行提交
+`b7726fdd29d95847e87fa6ad059219638123b8e4`。本次双 Worker 故障的关键时间线如下：
+
+| 事件 | 时间 | 相对首次 Client 失败 |
+|---|---:|---:|
+| 首次 Client 访问失败 | 15:36:22.266 | 0 ms |
+| Coordinator 收到首份 qualified summary | 15:36:23.751 | 1,485 ms |
+| 第一个/第二个目标确认主动隔离 | 15:36:24.078 / 15:36:24.087 | 1,812 / 1,821 ms |
+| 最终 v6 commit，两个目标均移除 | 15:36:24.383 | 2,116 ms |
+| 10 个存活 Worker 首次发布 v6 | 15:36:24.417–15:36:24.471 | 2,150–2,204 ms |
+| local-cache Client 最后一次直连已移除 Worker | 15:36:25.656 | 3,389 ms |
+
+该运行证明 summary 没有在最终 commit 前被覆盖，且存活 Worker ring 已快速一致收敛；它不能证明 Client 已
+及时收敛。三个 `K_RPC_PEER_DEAD` Get 位于 15:36:25.638–25.656，目标均为已经从 v6 移除的
+`192.168.235.186:31501`，与精确源码中的直连 Get 缺口一致。
+
+归档的 328 个错误必须分开解释：196 个 code 6 是共享内存容量不足，100 个 code 1001 主要是 8 MiB Get
+在约 20 ms API 预算内超时，24 个 code 2005 是旧对象无可用副本，2 个 code 1004 是 URMA wait timeout
+后 8 MiB TCP fallback 被 1 MiB limiter 拒绝，5 个 code 1011 中只有故障窗口内的 3 个属于上述绑定 Worker
+收敛缺口，1 个 code 39 是故障窗口内的 metadata owner unavailable。不得把前四类计入主动隔离时延。
+
+运行配置还存在 Coordinator `node_timeout_s=60`、Worker `node_timeout_s=3` 的不一致；新 PR 验收必须明确
+核对 Coordinator 与 Worker 均为目标配置，避免配置漂移掩盖源码结论。
 
 ## 4. rebase 冲突策略
 
@@ -122,11 +155,16 @@ Issue #1032 将其描述为“约 3s 的 bounded refresh”；53c2 精确源码�
 - `K_METADATA_OWNER_UNAVAILABLE` 仅在 qualified metadata failure 后产生；Set/MSet 一致；
 - HashRing 强制刷新 coalescing、重复失败续窗、500ms cadence、deadline/wait/Stop 竞争；
 - metadata owner 失败不淘汰 ingress，不重放 ambiguous Publish；
-- local cache false 触发刷新，true 继续使用健康 ingress。
+- local cache false 的 metadata owner 失败触发刷新；
+- local cache true 的同机 SHM Get 收到 `K_RPC_PEER_DEAD` 后触发合并的异步绑定 Worker 切换；
+- 并发多个 Get 只合并为一次切换，不阻塞请求线程，不因旧切换任务覆盖新 current worker；
+- 明确 peer-dead 与 deadline/cancelled 分流：瞬时超时不能误切健康 Worker，写请求不能因切换而自动重放。
 
 ### 6.3 focused 与历史 ST
 
 - 原始双 Client Set/Get，kill metadata owner，覆盖 local cache false/true 与随机新 key；
+- local cache true Client 与被 kill Worker 同机绑定，把 Client heartbeat 拉长到 30s，确认 peer-dead Get
+  在 5s 内触发 `SwitchWorkerNode`；
 - stop/resume 同地址 Worker：隔离、ACTIVE rejoin、旧证据清理、恢复后访问；
 - 两 Worker 单 reporter：保留两轮直探并在 3s 内收敛；
 - Coordinator keepalive 中断 2s、连续五轮，local cache false/true 均不得误隔离，恢复后读写正常；
@@ -155,3 +193,30 @@ Issue #1032 将其描述为“约 3s 的 bounded refresh”；53c2 精确源码�
 
 完成前执行 DataSystem 的 `$ds-self-verify`，检查 hot path、共享状态、恢复语义、测试覆盖、构建闭包和
 `.repo_context` 新鲜度。验证通过后核验 fork URL，push 新分支并创建新 PR；未经单独授权不触发 `/retest`。
+
+## 8. 2026-08-14 CMake 验证记录
+
+验证主机：`tiantiyun-80c128g`；源码目录：
+`/home/worktrees/active-isolation-53c2-main/datasystem`；构建目录：`build-cmake-urma-mock`；配置为 Release、
+`WITH_TESTS=ON`、`BUILD_WITH_URMA_MOCK=ON`，第三方缓存为 `/home/cache/ds-thirdparty-cache`。
+
+- CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache` 成功。
+- `ds_ut` focused：HashRingRefresher、TopologyControlHost、CoordinatorServiceImpl 和 Worker ring 相关共 58 条
+  通过。
+- `cluster_topology_contract_ut` focused：summary/reset/wake、TopologyController、TopologyEngine 隔离/ring
+  相关共 20 条通过。
+- `KVClientTransportSetTest.MetadataOwnerFailureRefreshesRingWithoutEvictingIngress` 通过。
+- 新增 `KVCacheClientMmapSwitchTest.PeerDeadGetTriggersWorkerSwitchBeforeHeartbeatTimeout`：旧代码在 5s 内不
+  切换而失败；修复后在 heartbeat=30s 条件下通过（9.9s 总用例时间）。
+- `ClientSetAndGetRecoverAfterKilledWorker` 的原 3,000ms 门限存在 750ms failure-summary 采样相位抖动；实测
+  一次 3,162ms。门限调整为 4,000ms（3s node timeout + 一个采样周期/调度余量）后连续 5 轮通过，Set/Get
+  恢复观测范围 2,385–3,364ms，仍显著低于 9s SLO。
+- 单 Client、两 Worker 单 reporter、Kill 3 场景在同一轮通过。Kill 4 场景串行运行时有一次 worker 在正式
+  故障注入前因 Coordinator routing deadline 启动失败；隔离用例单独重跑通过（26.0s 总用例时间），归类为
+  setup/resource 抖动而非隔离断言失败。
+- mmap switch 既有两条用例与 local-cache enabled dead-peer 用例通过。local-cache disabled dead-peer 用例在
+  URMA Mock 组合下失败于 `UrmaHandshakeRspPb has no hand_shake`，与本次 local-cache direct Get 修改路径无关，
+  保留为环境/Mock 限制，不计作通过。
+
+CMake 编译当前 main 时还命中 `urma_manager.cpp` 的 signed/unsigned compare `-Werror`；远端仅为验证临时把
+`const auto nowMs` 显式写为 `const uint64_t nowMs`。该无关改动不进入本 PR，PR diff 与本地源码均不包含它。
