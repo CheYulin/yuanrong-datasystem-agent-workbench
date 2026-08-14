@@ -29,6 +29,7 @@
 | 53c2 rebase 提交 | `ee037795d` |
 | local-cache peer-dead 切换提交 | `c30b59fb4` |
 | 有界刷新与并发加固提交 | `cf338e05b` |
+| 最终格式整理提交 | `ea907ab5b` |
 | DataSystem worktree | `.worktrees/active-isolation-53c2-rebase` |
 | DataSystem 分支 | `codex/active-isolation-53c2-main` |
 | 交付形式 | 新 GitCode PR，不覆盖 PR1997 |
@@ -205,13 +206,14 @@ metadata-owner failure 路径负责。切换不得在请求线程同步等待，
 `/home/worktrees/active-isolation-53c2-main/datasystem`；构建目录：`build-cmake-urma-mock`；配置为 Release、
 `WITH_TESTS=ON`、`BUILD_WITH_URMA_MOCK=ON`，第三方缓存为 `/home/cache/ds-thirdparty-cache`。
 
-- 在最终 rebase 头 `cf338e05b` 上，CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache`
-  全部成功；未使用 Bazel。
+- 语义实现固定在 `cf338e05b`；在仅包含仓库格式整理的最终 rebase 头 `ea907ab5b` 上，CMake 构建
+  `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache` 全部成功；未使用 Bazel。
 - `ds_ut` focused 51/51 通过：20 条 HashRingRefresher、30 条 TopologyControlHost、1 条 Coordinator
   active-failure 配置用例。新增覆盖“首节点 unchanged、后续节点 changed”、250ms timeout 传递和 Stop
   最多等待一个在途 RPC。
 - `cluster_topology_contract_ut` focused 43/43 通过，覆盖 DsCoordinationBackend session、active-failure
   Controller/Engine；新增 70 个候选场景验证每轮最多 32 个直探且轮转无饥饿。
+- 最终格式整理提交后再次执行上述 focused UT，`ds_ut` 51/51、`cluster_topology_contract_ut` 43/43 通过。
 - Client ST 5/5 通过：mmap switch 3/3（新增
   `LEVEL1_PeerDeadGetTriggersWorkerSwitchBeforeHeartbeatTimeout` 总耗时 10.1s）以及 metadata-owner refresh、
   ambiguous Publish 不重放各 1 条。首次直接运行 mmap 三条在 SetUp 阶段因未设置 CMake 的
