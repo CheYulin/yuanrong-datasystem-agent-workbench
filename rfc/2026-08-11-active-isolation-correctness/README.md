@@ -2,9 +2,12 @@
 
 | 项目 | 内容 |
 |---|---|
-| Status | **Review** |
+| Status | **In-Progress** |
 | Issue | [openeuler/yuanrong-datasystem#1032](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1032) |
 | 场景 | Coordinator 路径，`node_timeout_s=3` |
+
+本轮以已知可恢复的 `53c254830` rebase 当前 `main/master` 并新建 PR，具体基线、冲突策略、UT/ST 矩阵和
+证据格式见 [53c2 rebase 与新 PR 验证方案](53c2-rebase-validation-plan.md)。
 
 ## 1. 问题
 
@@ -32,7 +35,7 @@ sequenceDiagram
 1. topology 发布不再调用 `RecordPeerRpcSuccess`。
 2. failure summary 只由同一目标的真实 metadata RPC 成功清理；同地址新实例才丢弃旧证据，无新失败时按 active window 过期。
 3. Worker 仅将 metadata RPC 的 `UNAVAILABLE / DEADLINE_EXCEEDED / PEER_DEAD` 标记为 `K_METADATA_OWNER_UNAVAILABLE`，Set/MSet 一致。
-4. Client 合并重复信号，只触发一组约 4s 的强制 ring 刷新（500ms 一次）；中间 ring 变化不提前结束，不淘汰健康 ingress Worker，不重放结果未知的 Publish。
+4. Client 合并重复信号；本轮 53c2 基线使用 6s 强制 ring 刷新窗口（500ms 一次），覆盖 3s 隔离目标与发布余量。中间 ring 变化不提前结束，不淘汰健康 ingress Worker，不重放结果未知的 Publish。6s 是刷新持续上限，隔离和业务收敛验收仍要求 3s 内完成。
 5. local-cache Client 不持有 ring，继续依赖 ingress Worker 的 topology 收敛。
 6. Coordinator 提交前重新校验 reporter、target incarnation 与 leader epoch，失效则保留节点。
 
