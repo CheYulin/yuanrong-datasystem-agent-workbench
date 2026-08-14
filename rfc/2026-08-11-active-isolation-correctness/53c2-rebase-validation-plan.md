@@ -32,7 +32,7 @@
 | 最终格式整理提交 | `ea907ab5b` |
 | PR 初始 squash 提交 | `7b0f4cbed` |
 | PR review 生命周期/规模补强 | switch pool drain；128 候选分页与 sweep 快照 |
-| PR 最终提交 | `0dd856c7f3431971be7d35230b8160d1e4b3cbae` |
+| PR 最终提交 | `c1146242627b1382120e59d4eac48f0f575b9f52`（单 commit） |
 | DataSystem worktree | `.worktrees/active-isolation-53c2-rebase` |
 | DataSystem 分支 | `codex/active-isolation-53c2-main` |
 | 交付形式 | 新 GitCode PR !2056，不覆盖 PR1997 |
@@ -209,21 +209,31 @@ metadata-owner failure 路径负责。切换不得在请求线程同步等待，
 `/home/worktrees/active-isolation-53c2-main/datasystem`；构建目录：`build-cmake-urma-mock`；配置为 Release、
 `WITH_TESTS=ON`、`BUILD_WITH_URMA_MOCK=ON`，第三方缓存为 `/home/cache/ds-thirdparty-cache`。
 
-- 最终 PR 头 `0dd856c7f` 上，CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache` 全部
-  成功；未使用 Bazel。
-- `ds_ut` focused 52/52 通过：20 条 HashRingRefresher、30 条 TopologyControlHost、1 条 Coordinator
-  active-failure 配置和 1 条 switch pool shutdown 生命周期用例。新增覆盖“首节点 unchanged、后续节点
+- 最终 PR 头 `c11462426` 上，CMake 构建 `ds_ut`、`cluster_topology_contract_ut`、`ds_st_kv_cache` 和
+  `ds_st_coordinator_backend_manual` 全部成功；未使用 Bazel。
+- `ds_ut` focused 74/74 通过：覆盖 HashRingRefresher、CoordinatorLeaderRouter、TopologyControlHost、
+  Coordinator active-failure 配置和 switch pool shutdown 生命周期用例。新增覆盖“首节点 unchanged、后续节点
   changed”、250ms timeout 传递、Stop 最多等待一个在途 RPC，以及真实 peer-dead/URMA 排队任务的 drain。
-- `cluster_topology_contract_ut` focused 43/43 通过，覆盖 DsCoordinationBackend session、active-failure
+- `cluster_topology_contract_ut` focused 124/124 通过，覆盖 DsCoordinationBackend session、active-failure
   Controller/Engine；270 个候选场景验证 128/128/14 分页、轮转无饥饿、每批不超过 128，且 provider 每个
   sweep 只调用一次。
 - Client ST 5/5 通过：mmap switch 3/3（新增
   `LEVEL1_PeerDeadGetTriggersWorkerSwitchBeforeHeartbeatTimeout` 总耗时 10.1s）以及 metadata-owner refresh、
   ambiguous Publish 不重放各 1 条。首次直接运行 mmap 三条在 SetUp 阶段因未设置 CMake 的
   `TEST_SRCDIR/TEST_WORKSPACE` 而找不到 mock OBS 脚本；补齐测试环境后 3/3 通过，未发生产品断言失败。
-- 最终 disabled 主动隔离 ST 9 个场景中，串行首轮 8/9 通过；Gap1000ms 场景在正式 kill 前有一个 Worker
-  因 `Coordinator routing deadline exceeded` 启动失败，单独重跑通过（26.1s），归类为 setup/resource
-  抖动。此前同一最终语义版本也完成过一次 9/9 串行通过。
+- 最终 disabled 主动隔离 ST 9 个场景 fresh 串行 9/9 通过，总耗时 211.5s。
+- aarch64 旧门禁暴露的 LeaderRouter deadline 状态覆盖已修复：discovery refresh 耗尽 deadline 时保留已
+  执行候选的业务状态；对应确定性 UT 2/2 通过。全 Worker 重启恢复 ST 在 Tiantiyun 连续 4/4 通过。
+- 上一轮 CodeCheck 的 4 个 minor 已全部闭环；剩余 `PrepareActiveFailureProbeRound` 函数长度拆分
+  control-epoch helper 后，Controller focused UT 84/84 通过，门禁触发 `9789` 报告 `check code pass`。
+- aarch64 全量门禁进一步暴露 membership READY 与 Worker 间 bRPC 首次连接之间的短窗口；恢复 ST 仅对
+  全 Worker 重启后的 Set 使用既有恢复超时重试，其他路径仍保持首次 Set 严格断言，Tiantiyun 4/4、
+  aarch64 #9865 1/1 通过（15.92s）。#9865 最终由历史 `RdmaReconnectTest` 阻断：原测试只等待 5s，短于
+  worker 默认 10s `client_reconnect_wait_s`；最终提交改为 30s deadline 且成功即提前退出。Tiantiyun
+  URMA Mock 配置完成 CMake 编译但不注册 RDMA fixture；final trigger `9790` 中 aarch64 CMake #9866 的
+  `RdmaReconnectTest` 以 21.93s 通过，`AllWorkersRestartWithCoordinatorRunning` 以 16.13s 通过。
+- final trigger `9790` SUCCESS：CodeCheck、License、SCA、ACL 全部通过，x86 CMake #9930 和 aarch64
+  CMake #9866 均 SUCCESS。
 - 单 Worker stop/resume 的隔离与访问恢复分别为 2,374ms、2,359ms；rejoin 为 3,368ms。Client kill 场景
   Set 恢复 3,130ms，local-cache true/false Get 恢复 3,181/3,267ms。两 Worker单 reporter 隔离 2,284ms，
   Client 恢复 2,359ms。
