@@ -14,6 +14,9 @@ publication workflow for analyzing slow/error DataSystem traces.
 - [pr-description.md](pr-description.md): PR body draft.
 - [verification.md](verification.md): self-verification evidence.
 - [downloads.md](downloads.md): yche.me downloadable trace fixture status.
+- [playbooks/](playbooks/): operational playbooks for TopN bottleneck and NUMA/URMA diagnosis.
+- [superpowers/specs/](superpowers/specs/): approved designs for the extended trace-analysis pages.
+- [superpowers/plans/](superpowers/plans/): implementation plans retained outside the DataSystem product PR.
 
 ## Repository implementation
 
@@ -23,6 +26,11 @@ The implementation lives in `yuanrong-datasystem`:
 - `scripts/ds_trace_triage.py`
 - `tests/scripts/test_ds_trace_triage.py`
 - `docs/source_zh_cn/appendix/trace_triage_methodology.md`
+
+The extended bottleneck and NUMA implementations remain in the DataSystem
+repository under `.skills/`, `scripts/`, and `tests/scripts/`. Design history,
+implementation plans, and operational playbooks are archived here so product
+pull requests do not carry `docs/superpowers` artifacts.
 
 ## CI gate
 
