@@ -1,6 +1,6 @@
 # Task 8 final validation record
 
-Validation date: 2026-08-20. Final implementation SHA: `68c48e8007d2704159be3d17f2e452d0facd1500`,
+Validation date: 2026-08-20. Final implementation SHA: `aaef87b2b29e199d56269ea2f6782b66b40ca2c2`,
 based on `master@18bbb2051f2ef7390d0b6c8086d644a53b09284d`.
 All remote configure/build/test commands used `tiantiyun-80c128g`, CMake, `-j80`, and
 `DS_OPENSOURCE_DIR=/home/cache/ds-thirdparty-cache`; sources/builds were isolated. No production edit occurred.
@@ -141,7 +141,7 @@ multi-concurrency, URMA, or HCCS performance claim. Scheduler/cache/environment 
 After the PR was rebased a second time, `git merge-base HEAD main/master` was exactly
 `18bbb2051f2ef7390d0b6c8086d644a53b09284d`; `git rev-list --left-right --count main/master...HEAD` was `0 9`, and
 range-diff showed all nine feature/test/context commits equivalent to the immediately preceding rebase. The final
-fork and PR head both resolve to `68c48e8007d2704159be3d17f2e452d0facd1500`.
+fork and PR head both resolve to `aaef87b2b29e199d56269ea2f6782b66b40ca2c2`.
 
 The preserved Tiantiyun source was synchronized to this exact head. Using CMake, `-j80`, and
 `DS_OPENSOURCE_DIR=/home/cache/ds-thirdparty-cache`, the latest-base required-target rebuilds passed:
@@ -170,3 +170,42 @@ Final CodeGraph `sync .` completed in 5.3s and reported up-to-date: 2,237 files,
 callers and depth-5 impact located the RPC implementation plus TCP/UB callers and focused tests, but still omitted the
 exact-source SHM call; `affected` returned no tests for the changed production file set. These are documented graph
 under-approximations; exact-source, CMake registration, and the executions above remain the acceptance evidence.
+
+## Independent PR review remediation
+
+The six-round exact-source review found one duplicated P1 and three P2 issues. Follow-up commit
+`ae7358bc6a83457adae71aef0663733bcc9a92ca` closes them as follows:
+
+- endpoint generation churn now checks the caller API deadline on every lease reacquisition and yields between
+  `K_TRY_AGAIN` attempts. The tests-first RED exhausted 10,000 injected retries, incorrectly entered the operation,
+  and returned success after 83 ms; the fixed deadline/reset/teardown set passes 3/3 in 0.10s;
+- known capability generations use an atomic steady-state reservation path, while first-probe waiters use bthread
+  mutex/condition-variable primitives;
+- owner-group observability is a lock-free cumulative object counter, replacing the global histogram mutex on every
+  enabled fast-path group; and
+- reservation construction/destruction and reserve/run operations are restricted to the Worker RPC client and its
+  `DataPlaneManager` friend, preventing callers from separating a raw reservation pointer from its owner lifetime.
+
+After these changes the exact final source passed URMA Mock required targets in 2m34.95s and non-URMA required targets
+in 7m13.58s. Focused Client UT passed 33/33 (0.29s), Worker UT 7/7 (0.07s), real-cluster SHM ST 3/3 (22.83s), and the
+non-URMA disabled performance gate 1/1 (8.57s). Its final directional medians were single-key OFF 604.6 versus ON
+1039.5 ops/s (P99 2019.9 versus 1194.8 us), and same-owner eight-key OFF 247.7 versus ON 424.6 ops/s (P99 4717.3
+versus 3076.2 us). The scope limitations above remain unchanged.
+
+The post-fix CodeGraph sync completed and reported 2,237 files, 57,499 nodes and 179,218 edges. The GitCode review
+bundle was re-prepared at the final remote head, but its API patch for `transport_test.cpp` remained truncated
+(bundle +1656/-0 versus exact diff +1685/-29). Reviewers therefore used the bundle for policy/range and exact
+base-to-head source for complete evidence; no finding is published from a missing bundle fragment.
+
+The follow-up concurrency/API re-review then found a second P1 inside `AcquireWorkerQueryAndGetLease`: its internal
+observe-then-validate retry could stay inside the helper and bypass the outer deadline/yield. Commit
+`84ae47d6daec6786f1760c15152738ae146f929e` adds deadline checks and bthread yield only on the failed-validation and
+rebuild retry paths, leaving the steady successful lease path without an added time read or lock. A deterministic
+test-only transporter invalidation between the two validations reproduced the old behavior: after deadline expiry it
+returned success and executed the operation once. The same test is GREEN after the fix. The first version used a
+production inject hook to coordinate the race; review identified its test-build shared-lock cost, so final commit
+`aaef87b2b29e199d56269ea2f6782b66b40ca2c2` removes that hot-path hook and keeps the seam entirely in the fake
+transporter. On the exact final source, incremental
+URMA Mock and non-URMA `ds_ut` builds passed; Client QAG/BatchQAG passed 34/34 in each configuration (0.29s each),
+Worker QAG passed 8/8 (0.07s), and the real same-host SHM ST passed 3/3 (18.09s). Final CodeGraph sync reports 2,237
+files, 57,500 nodes and 179,231 edges; depth-5 impact includes both deadline tests and the reset/teardown tests.

@@ -307,7 +307,9 @@ The default-false gray flag bypasses the new path before dispatch and enables sa
 
 - [ ] **Step 4: Add low-cardinality DFX and run tests GREEN**
 
-Client counters: attempts/completed, owner-group histogram, phase2 single/batch, fallback enum and actual transport.
+Client counters: attempts/completed, cumulative owner-group objects, phase2 single/batch, fallback enum and actual
+transport. The owner-group signal is a counter so enabled hot-path groups do not contend on the shared histogram mutex;
+average objects per dispatched group can be derived from the cumulative object and attempt counters.
 Worker counters: requests, complete/partial, QueryMeta/RemoteGet fanout, returned bytes and ref reconciliation. Labels are
 only enums; never key/client/endpoint/token.
 
