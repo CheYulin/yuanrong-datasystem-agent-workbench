@@ -3,9 +3,11 @@
 | 属性 | 值 |
 |---|---|
 | 创建 | 2026-08-19（基于需求图与现有 Get/QueryAndGet 源码） |
-| 修改 | 2026-08-19（方案 A 首版） |
-| 阶段 | P1 协议与单 Worker 穿刺 / P2 多 key 与异常闭环 / P3 性能验收 |
-| 基线 | DataSystem `main/master` `71fada0780e4f3d5475c7d7a9df1f5ae8e1bd042` |
+| 修改 | 2026-08-20（最终实现与验收边界刷新） |
+| 阶段 | P1/P2/P3 已实现；PR Draft 等待 Maintainer 评审 |
+| 最终基线 | DataSystem `main/master` `18bbb2051f2ef7390d0b6c8086d644a53b09284d` |
+| 最终实现 | DataSystem `aaef87b2b29e199d56269ea2f6782b66b40ca2c2` |
+| 原始需求图 | 见 [source-traceability.md](source-traceability.md) |
 
 ## §1 需求背景与目标
 
@@ -413,10 +415,16 @@ cmake --build build --target ds_ut ds_ut_object ds_st_kv_cache -j80
 | SHM before/after | P50、P99、PMax、TPS、MiB/s | 单 owner P99 至少改善 3% 且吞吐至少改善 5%；报告误差与样本数 |
 | UB Mock | 选择、写入、生命周期、fallback | 功能通过，不宣称实机性能 |
 
-使用现有 `dsbench kv`，固定 1 KiB、128 KiB、512 KiB、8 MiB，batch=1/8/32，1x1 与 8x16 并发；单 owner
-与三 owner、hit 与 50% miss 分开。每组预热后至少 5 轮，固定请求数/时长，交替 AB/BA，报告中位轮次、错误数
-和实际 transport。若远端缺少真实多节点/UB 硬件，只把 SHM 性能作为本次实测门禁；跨节点性能标为硬件
-release gate 待验收，不用 Mock 数据代替。
+本次 PR 的功能/方向性性能门禁使用真实 public `KVClient::Get`：128 KiB、batch=1/8、并发 1、每轮 100 次，
+OFF/ON 交替三轮。它必须同时证明 `localCache=false`、`PREFERRED_META_OWNER`、实际 SHM、每个 owner group
+恰好一条 Worker QAG、Master/phase2 为 0，并报告 TPS、MiB/s、P50、P99 和 PMax。该门禁用于验收本需求明确的
+“本地共享内存一次 RPC”与方向性收益，不外推统计显著性或高并发性能。
+
+扩展规模门禁仍使用 `dsbench kv`，覆盖 1 KiB、128 KiB、512 KiB、8 MiB，batch=1/8/32，1x1 与 8x16；
+单 owner/三 owner、hit/50% miss 分开，至少 5 轮 AB/BA。它是默认开启或硬件 release 前的独立容量/性能门禁，
+不以 URMA Mock 结果代替。按当前 100 请求合同直接做全笛卡尔积约产生 43.5 TiB payload，且
+8 MiB x batch32 x 128 并发理论在途 32 GiB，超过当前 ST 单 Worker 512 MiB SHM 配额；执行前必须按固定时长或
+总字节预算重新制定不降低负载强度的安全计划。本 PR 不声称完成该扩展规模/真实 UB-HCCS 验收。
 
 PR 自动门禁包括 proto/生成代码编译、Client RPC/结果契约 UT、Worker GetRequest/SHM ref UT、非 URMA
 TCP/SHM 聚焦 ST、URMA Mock UB/fallback ST。Tiantiyun 性能为开启 feature gate 前的 required 手工门禁；默认
@@ -430,3 +438,6 @@ CTest、手工 ST、性能结果分别报告，不能合并成一句“CI 通过
 - Tiantiyun CMake URMA Mock `-j80` 使用指定缓存构建并执行聚焦测试；
 - `$ds-self-verify`、触发门禁与 `$ds-pr-review` 意见闭环；
 - Issue 和 PR 只发布到经核验的用户 fork，绝不 push 到 openeuler upstream。
+
+以上完成定义针对本 PR 的快速穿刺和明确的一次 RPC/方向性收益目标。§8.3 的扩展规模矩阵与真实 UB/HCCS
+属于默认开启或硬件 release gate；其未完成状态必须在 PR 和验证报告中保持可见，不得表述为已通过。
