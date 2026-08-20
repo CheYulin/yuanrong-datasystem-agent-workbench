@@ -209,3 +209,41 @@ transporter. On the exact final source, incremental
 URMA Mock and non-URMA `ds_ut` builds passed; Client QAG/BatchQAG passed 34/34 in each configuration (0.29s each),
 Worker QAG passed 8/8 (0.07s), and the real same-host SHM ST passed 3/3 (18.09s). Final CodeGraph sync reports 2,237
 files, 57,500 nodes and 179,224 edges; depth-5 impact includes both deadline tests and the reset/teardown tests.
+
+## Final completion revalidation
+
+On 2026-08-20 the two preserved Tiantiyun build roots were audited before reuse. Their CMake caches still selected
+the required configurations, but twelve post-`f6f5561d` source files differed from final `aaef87b2`. The complete
+tracked final tree was therefore synchronized into both isolated roots. A SHA-256 aggregate over all 41 PR-changed
+files matched the local exact worktree in both roots before building.
+
+Both rebuilds ran on `tiantiyun-80c128g` with CMake, `-j80`, and
+`DS_OPENSOURCE_DIR=/home/cache/ds-thirdparty-cache`:
+
+| Configuration | Required targets | Fresh result |
+|---|---|---|
+| URMA Mock (`BUILD_WITH_URMA_MOCK=on`) | `ds_ut ds_ut_object ds_st_kv_cache` | PASS, 8m42.52s |
+| non-URMA (`BUILD_WITH_URMA_MOCK=off`) | `ds_ut ds_ut_object ds_st_kv_cache` | PASS, 8m44.25s |
+
+Fresh focused executions on the same synchronized source passed:
+
+| Configuration | Focus | Result |
+|---|---|---|
+| URMA Mock | Client QAG/BatchQAG | 34/34, 0.29s |
+| URMA Mock | Worker `QueryAndGet*` | 7/7 |
+| URMA Mock | real-cluster SHM hit, owner miss, partial/multi-owner | 3/3, 21.53s |
+| non-URMA | Client QAG/BatchQAG | 34/34, 0.29s |
+| non-URMA | real SHM correctness before and after performance | 1/1 each |
+| non-URMA | disabled OFF/ON public-Client gate | 1/1, 8.16s |
+
+The fresh performance medians remained directionally positive and exceeded the scoped PR thresholds:
+
+| Workload | OFF ops/s | ON ops/s | Throughput change | OFF P99 | ON P99 | P99 change |
+|---|---:|---:|---:|---:|---:|---:|
+| single key | 766.971 | 946.026 | +23.3% | 1481.579 us | 1229.408 us | -17.0% |
+| same-owner 8-key | 284.478 | 414.024 | +45.5% | 4270.698 us | 3217.938 us | -24.6% |
+
+Every OFF run recorded Worker QAG 0, Master QAG 100, and the matching phase2 count 100. Every ON run recorded
+Worker QAG 100, Master QAG 0, and both phase2 counts 0. This is the required local-cache-disabled,
+metadata-affinity, real same-host SHM one-RPC evidence. It remains a three-run directional gate, not the extended
+scale matrix or a real URMA/HCCS result; those release boundaries are retained in `detailed-design.md` §8.3.
