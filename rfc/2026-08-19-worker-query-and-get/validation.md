@@ -1,6 +1,7 @@
 # Task 8 final validation record
 
-Validation date: 2026-08-20. Implementation SHA: `f6f5561d9adcd50bbe72f3b392e552b082d174bf`.
+Validation date: 2026-08-20. Final implementation SHA: `68c48e8007d2704159be3d17f2e452d0facd1500`,
+based on `master@18bbb2051f2ef7390d0b6c8086d644a53b09284d`.
 All remote configure/build/test commands used `tiantiyun-80c128g`, CMake, `-j80`, and
 `DS_OPENSOURCE_DIR=/home/cache/ds-thirdparty-cache`; sources/builds were isolated. No production edit occurred.
 
@@ -75,7 +76,8 @@ service-ordinal rollback is appropriate after release.
 
 ## Task 8 manual public-Client SHM performance gate
 
-The focused manual gate is in production commit `80fdce9b03b7f4614032e1d844579f9dcfe0d16f` as
+The focused manual gate is in final rebased commit `783f1196d4f21d597efd7487b01e42eaa5d4af9a`
+(range-diff equivalent to pre-rebase commit `80fdce9b03b7f4614032e1d844579f9dcfe0d16f`) as
 `KVClientWorkerQueryAndGetStTest.DISABLED_WorkerQueryAndGetShmOffOnPerformanceGate`. It is a disabled ST, so normal
 CTest/default suites do not run it. The implementation reuses the existing real-cluster QAG ST fixture rather than
 adding a private RPC or synthetic transporter: both writer and reader have `enableLocalCache=false` and
@@ -133,3 +135,38 @@ legacy Master QAG/phase2 call; OFF makes no Worker QAG and observes the legacy M
 single or batch call. The three alternating repetitions are directionally consistent (ON has higher throughput and
 lower mean/P50/P99 for both workloads), but this is not a statistically strong result and does not establish a hardware,
 multi-concurrency, URMA, or HCCS performance claim. Scheduler/cache/environment noise remains unquantified.
+
+## Final latest-master refresh
+
+After the PR was rebased a second time, `git merge-base HEAD main/master` was exactly
+`18bbb2051f2ef7390d0b6c8086d644a53b09284d`; `git rev-list --left-right --count main/master...HEAD` was `0 9`, and
+range-diff showed all nine feature/test/context commits equivalent to the immediately preceding rebase. The final
+fork and PR head both resolve to `68c48e8007d2704159be3d17f2e452d0facd1500`.
+
+The preserved Tiantiyun source was synchronized to this exact head. Using CMake, `-j80`, and
+`DS_OPENSOURCE_DIR=/home/cache/ds-thirdparty-cache`, the latest-base required-target rebuilds passed:
+
+| Configuration | Required targets | Result |
+| --- | --- | --- |
+| URMA Mock | `ds_ut ds_ut_object ds_st_kv_cache` | PASS, 8m38.10s |
+| non-URMA | `ds_ut ds_ut_object ds_st_kv_cache` | PASS, 8m31.21s |
+
+Final focused executions on the same exact source also passed:
+
+| Configuration | Focus | Result |
+| --- | --- | --- |
+| URMA Mock | Client `*WorkerQueryAndGet*:*BatchQueryAndGet*` | 32/32, 0.28s |
+| URMA Mock | Worker `QueryAndGet`/`GetRequest` matrix | 7/7, 0.08s |
+| URMA Mock | real-cluster `KVClientWorkerQueryAndGetStTest` excluding disabled gate | 3/3, 17.94s |
+| non-URMA | disabled OFF/ON performance gate | 1/1, 7.77s |
+
+The final performance rerun kept the same 128 KiB, concurrency-1, 100-call, three-alternating-run contract. Its
+median results were: single key OFF 623.4 versus ON 1129.1 ops/s, P99 1985.8 versus 1150.3 us; same-owner eight-key
+OFF 262.8 versus ON 468.7 ops/s, P99 4322.8 versus 2591.1 us. Every run retained the routing-count contract. An
+independent static review of the exact final performance commit was CLEAN. These remain directional same-host SHM
+figures only, with no statistical-significance, multi-concurrency, URMA/HCCS, or hardware claim.
+
+Final CodeGraph `sync .` completed in 5.3s and reported up-to-date: 2,237 files, 57,497 nodes, 179,209 edges. Query,
+callers and depth-5 impact located the RPC implementation plus TCP/UB callers and focused tests, but still omitted the
+exact-source SHM call; `affected` returned no tests for the changed production file set. These are documented graph
+under-approximations; exact-source, CMake registration, and the executions above remain the acceptance evidence.
