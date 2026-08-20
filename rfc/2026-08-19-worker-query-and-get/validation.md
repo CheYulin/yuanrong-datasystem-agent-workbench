@@ -72,3 +72,64 @@ public-Client benchmark harness. No performance benefit or hardware/URMA claim i
 
 Rollout remains Draft and the gate defaults off. Rollback is `enable_worker_query_and_get=false`; no schema or
 service-ordinal rollback is appropriate after release.
+
+## Task 8 manual public-Client SHM performance gate
+
+The focused manual gate is in production commit `80fdce9b03b7f4614032e1d844579f9dcfe0d16f` as
+`KVClientWorkerQueryAndGetStTest.DISABLED_WorkerQueryAndGetShmOffOnPerformanceGate`. It is a disabled ST, so normal
+CTest/default suites do not run it. The implementation reuses the existing real-cluster QAG ST fixture rather than
+adding a private RPC or synthetic transporter: both writer and reader have `enableLocalCache=false` and
+`PREFERRED_META_OWNER`; owner-write injections prove the selected metadata owner is the data Worker; every measured
+public `KVClient::Get` verifies value/order and asserts actual `SHM` transport.
+
+### TDD and build evidence
+
+All commands below ran only on `tiantiyun-80c128g`, using the isolated non-URMA CMake tree, `-j80`, and
+`DS_OPENSOURCE_DIR=/home/cache/ds-thirdparty-cache`.
+
+| Gate | Command/result |
+| --- | --- |
+| tests-only RED | Added only the disabled test calling the absent measurement helper; `cmake --build build-nourma --target ds_st_kv_cache -j80` failed after 10.03 s with the expected undeclared-helper diagnostic. |
+| Green compile | The same target compiled and linked after the helper was added (17.69 s compilation, 6.80 s link). |
+| Focused correctness before | `TEST_SRCDIR=$PWD TEST_WORKSPACE=. ./build-nourma/tests/st/ds_st_kv_cache --gtest_filter="KVClientWorkerQueryAndGetStTest.SameNodeShmSingleAndBatchUseOneWorkerQueryAndGetWithoutPhase2OrReRegistration"`: 1/1 passed. |
+| Manual performance gate | The same binary with `--gtest_filter="KVClientWorkerQueryAndGetStTest.DISABLED_WorkerQueryAndGetShmOffOnPerformanceGate" --gtest_also_run_disabled_tests`: 1/1 passed. |
+| Focused correctness after | The same focused correctness filter: 1/1 passed. |
+
+The performance process was launched only after a remote process probe found no active `build.sh`, `cmake --build`,
+`make`, `ninja`, or `ctest` job (only unrelated completion-monitor shells). No production source/configuration changed.
+
+### Fixed workload and per-run output
+
+Each workload uses payload `131072` bytes, 100 API calls, concurrency 1, and either one key or eight keys selected to
+the same metadata owner. Objects, metadata route, worker connection and SHM session are warmed before measurements.
+The one binary and cluster switch only `enable_worker_query_and_get`; order is OFF/ON, ON/OFF, OFF/ON.
+
+| Rep | Gate | Workload | elapsed us | ops/s | mean us | P50 us | P99 us | max us | Worker QAG | Master QAG | phase2 single | phase2 batch |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | OFF | single | 162220.884 | 616.443 | 1621.127 | 1621.918 | 1998.516 | 2055.584 | 0 | 100 | 100 | 0 |
+| 1 | OFF | same-owner 8-key | 353794.872 | 282.650 | 3536.755 | 3442.802 | 4338.420 | 4423.236 | 0 | 100 | 0 | 100 |
+| 1 | ON | single | 90456.530 | 1105.503 | 903.856 | 902.059 | 1044.230 | 1080.425 | 100 | 0 | 0 | 0 |
+| 1 | ON | same-owner 8-key | 235042.985 | 425.454 | 2349.640 | 2302.468 | 2907.349 | 2958.043 | 100 | 0 | 0 | 0 |
+| 2 | ON | single | 90397.156 | 1106.229 | 903.323 | 923.366 | 1109.951 | 1119.345 | 100 | 0 | 0 | 0 |
+| 2 | ON | same-owner 8-key | 241451.278 | 414.162 | 2413.670 | 2326.655 | 3084.341 | 3141.268 | 100 | 0 | 0 | 0 |
+| 2 | OFF | single | 158423.843 | 631.218 | 1583.050 | 1646.890 | 2058.134 | 2069.916 | 0 | 100 | 100 | 0 |
+| 2 | OFF | same-owner 8-key | 369153.132 | 270.890 | 3690.223 | 3683.505 | 4381.041 | 4448.072 | 0 | 100 | 0 | 100 |
+| 3 | OFF | single | 130885.813 | 764.025 | 1308.057 | 1307.661 | 1450.457 | 1554.801 | 0 | 100 | 100 | 0 |
+| 3 | OFF | same-owner 8-key | 320726.051 | 311.793 | 3206.169 | 3157.223 | 3867.992 | 4034.091 | 0 | 100 | 0 | 100 |
+| 3 | ON | single | 90855.983 | 1100.643 | 907.847 | 905.170 | 1053.765 | 1054.671 | 100 | 0 | 0 | 0 |
+| 3 | ON | same-owner 8-key | 214392.921 | 466.433 | 2143.017 | 2084.267 | 3269.299 | 4248.477 | 100 | 0 | 0 | 0 |
+
+### Median summary and interpretation
+
+| Gate | Workload | median ops/s | median mean us | median P50 us | median P99 us | median max us |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| OFF | single | 631.218 | 1583.050 | 1621.918 | 1998.516 | 2055.584 |
+| ON | single | 1105.503 | 903.856 | 905.170 | 1053.765 | 1080.425 |
+| OFF | same-owner 8-key | 282.650 | 3536.755 | 3442.802 | 4338.420 | 4423.236 |
+| ON | same-owner 8-key | 425.454 | 2349.640 | 2302.468 | 2907.349 | 3141.268 |
+
+All 12 runs satisfy the routing invariant: ON makes one Worker QAG per same-owner group per public API call and no
+legacy Master QAG/phase2 call; OFF makes no Worker QAG and observes the legacy Master QAG plus the appropriate phase2
+single or batch call. The three alternating repetitions are directionally consistent (ON has higher throughput and
+lower mean/P50/P99 for both workloads), but this is not a statistically strong result and does not establish a hardware,
+multi-concurrency, URMA, or HCCS performance claim. Scheduler/cache/environment noise remains unquantified.
