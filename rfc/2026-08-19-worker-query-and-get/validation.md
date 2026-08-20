@@ -208,4 +208,4 @@ production inject hook to coordinate the race; review identified its test-build 
 transporter. On the exact final source, incremental
 URMA Mock and non-URMA `ds_ut` builds passed; Client QAG/BatchQAG passed 34/34 in each configuration (0.29s each),
 Worker QAG passed 8/8 (0.07s), and the real same-host SHM ST passed 3/3 (18.09s). Final CodeGraph sync reports 2,237
-files, 57,500 nodes and 179,231 edges; depth-5 impact includes both deadline tests and the reset/teardown tests.
+files, 57,500 nodes and 179,224 edges; depth-5 impact includes both deadline tests and the reset/teardown tests.
