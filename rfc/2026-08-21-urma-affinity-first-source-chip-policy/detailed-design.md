@@ -1,4 +1,4 @@
-# 详细设计：URMA 源芯片亲和优先与 RR 消融策略
+# 详细设计：URMA RR 基线上的机会式源芯片亲和策略
 
 ## 1. 背景与问题
 
@@ -14,16 +14,16 @@
 4. `ResolveNumaPostConfig` 同时进入 Client 普通写、Worker 普通写和 Worker GatherWrite 路径；
 5. Worker 通过注册响应把 RR 粒度和阈值下发给 Client，Client 固化首个 Worker 的进程级配置。
 
-问题是：当深度差没有越过阈值时，RR 会主动把 WR 发到非亲和 UB Die。这样虽然能使用两个芯片，
-却可能消耗 CPU 间 HCCS 带宽。需求希望先保留本地亲和，只有本地芯片明显排队时才跨芯片溢出；同时
-保留 RR 作为同负载下的消融对照。
+问题是：纯 RR 在亲和芯片本来更空闲时仍可能把 WR 发到非亲和 UB Die，产生本可避免的 CPU 间 HCCS
+流量；而无条件亲和优先会让同 key 并发读在深度相等时集中到同一芯片，直到硬阈值后才纠偏。本设计
+以 RR 保证基本均衡，只接受不会让预计队列更不均衡的亲和覆盖。
 
 ## 2. 目标与非目标
 
 | 编号 | 目标 | 可验证结果 |
 |---|---|---|
-| G1 | 亲和优先 | 深度差不超过阈值时，候选始终为传入的亲和源芯片 |
-| G2 | 避免饿死 | 亲和芯片比另一芯片多至少 `threshold + 1` 个 inflight WR 时，新 WR 选择另一芯片 |
+| G1 | 保持 RR 均衡基线 | 深度相等或亲和请求放入后会反超时保留 RR 候选 |
+| G2 | 机会式本地命中 | 亲和芯片接收本逻辑写全部预计 WR 后仍不比 RR 候选更忙时覆盖为亲和芯片 |
 | G3 | 可消融与可回滚 | 配置 `0` 精确保留 PR 2095 的 RR 候选与深度覆盖语义 |
 | G4 | Client/Worker 一致 | Worker 下发策略，Client 初始化 URMA Arena 前应用；后续 Worker 配置冲突只告警 |
 | G5 | 热点开销受控 | O(1)，无分配、无锁、无 CAS 预占、无时间读取、无高频成功日志 |
@@ -43,59 +43,62 @@
 
 `ub_numa_src_chip_policy`，类型 `uint32`，默认 `1`。
 
-| 值 | 名称 | 候选芯片 | 深度差超过阈值后的行为 |
+| 值 | 名称 | 阈值内行为 | 深度差超过阈值后的行为 |
 |---|---|---|---|
 | 0 | `ROUND_ROBIN` | 两芯片按原子序列轮询 | 选择低 inflight 芯片 |
-| 1 | `AFFINITY_FIRST` | 传入的内存亲和源芯片 | 若亲和芯片较忙，则选择另一芯片；若亲和芯片本来较空，则保持亲和 |
+| 1 | `ROUND_ROBIN_WITH_AFFINITY` | 先 RR；只有亲和芯片能无损吸收预计 WR 时覆盖 | 选择低 inflight 芯片 |
 
 独立配置的理由：
 
 - `ub_numa_rr_type` 表示选择粒度：`0=disabled`、`1=per logical write`、`2=per post`；它不是候选策略；
 - `ub_numa_inflight_wr_diff_threshold` 表示是否及何时启用深度反馈；它不是候选来源；
-- 三个维度正交后，RR 与亲和优先能在相同粒度、相同阈值下做可信消融。
+- 三个维度正交后，纯 RR 与机会式亲和能在相同粒度、相同阈值下做可信消融。
 
 阈值语义保持严格边界：
 
-- `difference <= threshold`：保留策略候选；
+- `difference <= threshold`：policy 0 保留 RR；policy 1 仅执行无损亲和覆盖；
 - `difference > threshold`：选择低 inflight 芯片；
-- `threshold == 0`：关闭深度反馈，仅使用候选策略。因此 RR 模式为纯 RR，亲和模式为纯亲和；
+- `threshold == 0`：关闭深度纠偏和机会式亲和，两种 policy 都保持纯 RR；
 - `ub_numa_rr_type == 0` 或 NUMA affinity 未生效：直接返回传入芯片，不执行候选策略和深度比较。
 
 Worker 启动时校验策略仅允许 `[0, 1]`。Client 对 Worker 返回的未知策略记录告警并归一化为新版本默认
-`AFFINITY_FIRST`，避免将未来未知值直接带入热点路径。
+`ROUND_ROBIN_WITH_AFFINITY`，避免将未来未知值直接带入热点路径。
 
 ## 4. 选择算法
 
 ```text
-Select(transmitted_chip, affinity_enabled):
+Select(transmitted_chip, affinity_enabled, logical_write_wr_count):
     if !affinity_enabled or rr_type == disabled:
         return transmitted_chip
 
-    if policy == affinity_first:
-        candidate = transmitted_chip
-    else:
-        candidate = next_round_robin_chip()
+    candidate = next_round_robin_chip()
 
     if threshold == 0:
         return candidate
 
     chip1 = relaxed_load(chip1_inflight)
     chip2 = relaxed_load(chip2_inflight)
-    if abs(chip1 - chip2) <= threshold:
-        return candidate
-    return chip1 < chip2 ? chip1_id : chip2_id
+    if abs(chip1 - chip2) > threshold:
+        return chip1 < chip2 ? chip1_id : chip2_id
+
+    if policy == round_robin_with_affinity and transmitted_chip != candidate:
+        affinity_depth = depth(transmitted_chip)
+        candidate_depth = depth(candidate)
+        if affinity_depth + max(logical_write_wr_count, 1) <= candidate_depth:
+            return transmitted_chip
+    return candidate
 ```
 
-对于亲和优先模式，正常路径不再执行 RR 序列的 `fetch_add`。只有两个 relaxed load、整数比较和分支；
-RR 模式保持现有一次 relaxed `fetch_add`。不对“选择后但 WR 尚未构造”的请求做预占，因此多个并发线程
-可能同时观察旧快照并溢出到同一芯片。这是为避免热点 CAS/锁争用而接受的近似控制。
+两种策略都执行一次 RR sequence 的 relaxed `fetch_add`。policy 1 在阈值非零时复用现有两个 relaxed
+inflight load，并增加常数次整数比较；不增加锁、CAS 预占或时间读取。普通写使用
+`ceil(size/maxWriteSize)`，GatherWrite 使用待提交 WR 数作为预计成本；`PER_POST` 粒度固定成本为 1。
 
 ### 4.1 共享状态与并发
 
 | 状态 | Owner | 读者/写者 | 保护与语义 |
 |---|---|---|---|
 | 策略、粒度、阈值 gflag | Worker 启动配置；Client 首个 Worker 注册结果 | 所有发送线程读取；启动/初始化线程写入 | 沿用现有启动前配置和 Client `call_once`；请求期只读 |
-| RR sequence | 进程级 `UrmaManager` | RR 模式发送线程 `fetch_add` | relaxed 原子；只要求分散，不要求全序 |
+| RR sequence | 进程级 `UrmaManager` | 两种策略的发送线程 `fetch_add` | relaxed 原子；只要求分散，不要求全序 |
 | per-chip inflight | 进程级 `UrmaManager`，生命周期由 `UrmaEvent` 增减 | 发送线程读取；Event 构造/析构写入 | cache-line 隔离的 relaxed 原子；快照只作反馈信号 |
 
 没有新增锁，也没有锁顺序。无后台线程、无新队列、无新分配、无数据复制、无持久化状态，关闭和恢复
@@ -110,7 +113,7 @@ RR 模式保持现有一次 relaxed `fetch_add`。不对“选择后但 WR 尚�
 | 旧 | 旧 | RR | 原行为 |
 | 旧 | 新 | RR | proto3 缺失字段读取为 `0`，保留旧端语义 |
 | 新 | 旧 | RR | 旧 Client 忽略未知字段并继续原选择逻辑 |
-| 新 | 新 | 默认亲和优先 | Worker 默认 `1` 下发，Client 在 Arena/URMA 初始化前固化 |
+| 新 | 新 | 默认 RR + 机会式亲和 | Worker 默认 `1` 下发，Client 在 Arena/URMA 初始化前固化 |
 
 集群内 Worker 必须使用相同配置。Client 延续首个 Worker `call_once` 规则：首值设置 affinity、粒度、阈值、
 策略；后续 Worker 任一值不同只记录限量的配置冲突告警，不在运行期切换全局策略。
@@ -133,13 +136,14 @@ Client 自然保持 RR。
 ## 7. 可观测性
 
 生产路径不增加每 WR 成功日志。已有累计源/目的芯片写入计数、跨芯片计数、per-chip inflight 快照和
-阈值覆盖日志继续使用；覆盖日志从“RR candidate”泛化为“policy candidate”，并带策略数值、候选、选择、
-两芯片深度、差值和阈值。
+硬阈值覆盖日志继续使用；机会式亲和覆盖使用独立的限频 `URMA_SRC_CHIP_AFFINITY` 日志，避免与硬纠偏
+混淆。
 
 仅在 `WITH_TESTS` 下增加候选分支注入点，使 ST 能证明策略字段已经同时传播到 Client 与每个 Worker：
 
 - `UrmaManager.SrcChipPolicy.RoundRobin`
-- `UrmaManager.SrcChipPolicy.AffinityFirst`
+- `UrmaManager.SrcChipPolicy.RoundRobinWithAffinity`
+- `UrmaManager.SrcChipAffinityOverride`
 
 `UrmaManager.OverrideSrcChipPolicyDecision` 在一次同步注入中同时覆盖候选、chip1 深度和 chip2 深度，避免
 后台 WR 分别消耗候选注入与深度快照注入而产生窗口竞态。该注入只存在于测试构建。
@@ -149,12 +153,12 @@ Client 自然保持 RR。
 
 ## 8. 性能评估
 
-| 维度 | RR | 亲和优先 |
+| 维度 | RR | RR + 机会式亲和 |
 |---|---|---|
-| 候选开销 | 一次 relaxed `fetch_add`、取模 | 一次分支和传入值复制，不推进 RR 原子 |
+| 候选开销 | 一次 relaxed `fetch_add`、取模 | 相同，加常数次整数比较 |
 | 深度反馈 | 阈值非零时两个 relaxed load | 相同 |
 | 锁/分配/复制 | 无新增 | 无新增 |
-| HCCS 倾向 | 平衡时仍可能跨 CPU | 平衡时优先不跨 CPU；拥塞才溢出 |
+| HCCS 倾向 | 即使亲和芯片更空也可能跨 CPU | 只消除不会损害预计均衡的跨 CPU 发送 |
 | 短时超调 | 可能 | 可能；不做同步预占 |
 
 硬件消融必须在完全相同的请求、粒度、阈值和拓扑下只切换 policy。固定 8 MiB、8 Client × 16 线程、
@@ -166,7 +170,7 @@ Client 自然保持 RR。
 
 | 风险 | 控制 |
 |---|---|
-| 亲和芯片在阈值内积累更多 WR | 严格 `> threshold` 后溢出；阈值沿用可配置默认 15 |
+| 同 key 全部亲和同一芯片 | 深度相等时保持 RR；亲和覆盖必须容纳整次逻辑写后仍不反超 |
 | 并发线程同时溢出产生振荡 | 接受短时超调，不做预占；通过时间序列和 override rate 观察 |
 | 集群配置不一致 | Worker 文档要求一致；Client 首值冻结并告警冲突 |
 | 新旧版本行为不同 | proto 缺字段映射 RR；兼容矩阵明确；policy=0 快速回滚 |
