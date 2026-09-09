@@ -159,3 +159,11 @@ GET 最终 1001 与 SET 最终 1010 分开；同 Trace 的 WR 超时不证明硬
 源码边界已确认：`common/rpc/plugin_generator/brpc_stub_generator.cpp:BuildCallMethodAndDiagnosticsSnippet` 在发送前 VLOG 和 `CallMethod` 之前标记 ClientSend；`common/rpc/brpc_server_unary_writer_reader.h` 在应用 adapter 构造处标记 ServerRecv；`common/rpc/brpc_perf_trace.h:RecordBrpcRpcTrace` 从 Client 往返窗口减去服务端窗口。故残差包含应用计时点外的框架工作、排队、调度与传输，不能识别其单独贡献。`server_req_queue=0` 只覆盖 adapter 内已埋点区间，不等于 bRPC/内核所有队列均无等待。
 
 当前明确缺口：对应运行的实际部署版本、worker/client 参数、日志等级及同步/异步配置、bRPC 队列/线程数据、调度 profile、网络与 CQE 证据。缺少这些时，扩大 Mock 延迟注入只能重现相同外观，不能证明真实首因，也不足以合理选择增加线程、调整队列或修改超时。上述证据缺口不否定已完成的 B1/B2 当前代码修复。
+
+## 失败日志的 transportType 不能单独证明传输路径
+
+当前源码与报告分析引用 a505893 的 `AccessTransportTracker::Reset` 都先将 transport 设为 SHM；现有 `DefaultIsShmAfterReset` UT 也明确固定了这个默认值。`UbTransporter::Set` 在 `PublishSetPayload` 成功返回后才通过 `SetTransportResponseStatus` 记录 UB/TCP；此前的失败可能保留默认 SHM。GET 的 `RoutedMode::FinishTransportRead` 也有条件记录实际 kind，未成功产生数据的请求可能保留默认值。
+
+因此，失败日志中的 `transportType:SHM` 不能证明请求确实走了本节点共享内存，也不能据此把整个 59 节点运行解释为 SHM 运行。原模型全部 GET 失败标记为 SHM，属于这个字段的观测值，不是经过拓扑和成功数据传输校验的路径结论。R05 SET 的同 Trace 中同时出现 SHM 字段与真实 URMA WRITE 等待超时，也与默认值保留相符。后续归因应使用同 Trace 的真实 WR、RPC/Worker 路径和成功数据来源，缺失时标为未观测。
+
+这是现有诊断字段的语义限制；本轮没有凭该字段扩大 B1 的历史因果声明，也未将默认值改变混入已验证的错误处理修复。
