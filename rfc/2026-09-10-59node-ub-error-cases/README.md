@@ -182,3 +182,28 @@ DS_URMA_DEV_NAME=bonding_mock0 build/tests/ut/ds_ut_urma_send_jetty_fault \
 ```
 
 ds-self-verify：检查了最终差异、定向编译与测试结果、错误路径影响、所有权/并发、持久化与恢复、模块上下文；`git diff --check` 通过，差异和 PR 文本敏感扫描 0 项。独立审查补充测试后无阻断项。未执行真实硬件、59 节点部署、TSAN 或性能基准。
+
+## 当前缺陷 B2：分片失败回调早于完整收尾且可能重复执行
+
+当前 `WaitFastTransportEventWithFailure` 在循环中用 `firstError.IsOk()` 决定是否调用 `errorHandler`，同时把回调返回值写回 `firstError`。若 fallback 成功，返回 OK 会让下一失败分片再次触发回调；首轮回调也只能看到部分 `UrmaWriteFailure`。实际 Worker BatchGet 回调执行 provider 失败记录与 payload 移动，不能将它当成无副作用的状态转换。
+
+复现契约：两个已经完成的失败 WRITE Event，首项普通 CQE 错误，后项 port-unavailable；回调应在全部事件被消费后恰好一次执行，看到完整 CQE 聚合，仍接收首项原始错误。回调返回 OK 时整个批次成功 fallback；返回错误时保留该错误。两个错误的实际硬件原因不由 Mock 推断。
+
+设计候选：先遍历等待全部 keys，保留首项原始错误并聚合 failure；循环结束后仅调用一次回调。无新增分配、锁、线程、协议和持久化变更。失败 fallback 会等到已有事件消费结束，避免在消费过程中执行有副作用的状态转换。须核查所有调用点对回调时机的依赖。先记录 RED，再决定实现；不改其他 UCP 路径，除非证明存在相同且本任务需要处理的契约问题。
+
+### B2 RED / GREEN 与调用点核查
+
+新增 `BatchFallbackRunsOnceAfterAllFailuresAreCollected` 在未修复 B2 的基线上 1 FAIL：第一次回调时后项 Event 仍在 map，CQE 聚合仅有 9；fallback 返回 OK 的分支总计调用两次，第二次收到后项错误而非首项。测试在 0 ms 内完成，两个 CQE 均预先完成。
+
+最小修复后首次完整 URMA 故障组 24 PASS / 0 FAIL，UB/传输/RPC 相邻组 85 PASS / 0 FAIL。额外补充后项真实超时保留与迟到通知观察者回归，最终结果另记。
+
+核查 URMA 提交清理、阻塞写/读、gather、恢复探针、客户端 payload 等待与 migration 调用方，其回调仅返回原错误；Worker BatchGet 回调会记录故障并移动 fallback payload。原循环本来就等待全部事件，因此总等待次数与 deadline 计算未增加；但 provider 故障记录推迟至本批事件等待结束，最坏推迟至剩余请求预算耗尽。这个时机变化换取一次完整的批级故障处理。UCP 语义未改。
+
+独立审查未发现阻断项。事件“消费结束”包括按原策略保留超时的 in-flight 事件，不代表所有 DMA 和资源已经完成；需保持迟到完成观察者契约。报告未提供足以把这项缺陷归为历史 6036 次超时首因的证据。
+
+
+### B2 最终验证与交付
+
+提交 `57bf79459a441d9103a82037e2fb380fe6697b34`，已快速前进加入草稿 PR 2367。CMake 继续复用原构建目录及三方件缓存。完整故障组 `ds_ut_urma_send_jetty_fault` 最终 25 PASS / 0 FAIL / 0 DISABLED，3.234 秒；相邻 `UbTransporterTest.*:TransportLayerTest.*:WorkerRpcClientTest.*` 为 85 PASS / 0 FAIL，2.452 秒。新增 `BatchFallbackPreservesLaterTimeoutRetention` 证明后项真实超时继续登记保留，并在迟到 CQE 到达时调用原观察者；不把事件保留误判为泄漏或提前回收。
+
+源码对照：报告分析引用 a505893 的同一函数也包含循环内 callback 的旧逻辑；这证明分析引用存在该缺陷，仍不等同于已确认部署版本或历史触发证据。最终差异检查与敏感扫描通过；独立审查未发现阻断项，最坏故障通知延迟的变化已记录。
