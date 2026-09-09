@@ -230,3 +230,13 @@ DS_URMA_DEV_NAME=bonding_mock0 build/tests/st/ds_st_object_cache \
 首次构建命令把 worker 目标误写成 `datasystem_worker`，ST 已构建但该目标不存在；确认 CMake 后改为 `datasystem_worker_bin`，最终上述完整构建命令成功。沿用 URMA Mock 和已有三方件缓存，未更改产品逻辑。独立审查、差异检查与敏感扫描通过。
 
 26 条服务端 Publish 失败的原始错误进一步分为：22 条 `Key not found / Get a not found shm`（请求引用的 staging allocation），4 条 Create meta RPC deadline。这些不是 4705 条服务端成功样本，也不能与 GET 的 505 条对象未找到混为一谈。
+
+## 门禁最终状态与未闭合事项
+
+PR 2367 当前 head 为 `b9b44b9d2e86303b92094df681814e6db9abe488`。门禁 [11088](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/trigger/job/yuanrong-datasystem/11088/console) 已终止并返回 SUCCESS；x86 构建 11256、aarch64 构建 11190、CI x86 Bazel 7112 均为 SUCCESS。ARM Bazel 被门禁配置跳过，不计通过。任务内 Tiantiyun 构建仍按用户要求采用 CMake 和三方件缓存。
+
+aarch64 的 5084 项首轮有 7 项失败，重跑 7/7 通过；197 项组首轮有 1 项失败，重跑 1/1 通过。随后 Python/脚本与示例阶段完成，构建最终 SUCCESS。保留首轮失败，不能将重跑通过写成首轮全部通过，也没有据此臆断失败原因。公开 CI 没有提供可下载的独立 artifact，console 已在任务证据目录保留。
+
+完成范围：全部 11 类失败的数量排序、逐类证据边界与源码入口；B0 Mock 构建修正、B1 SHM 重试缺陷、B2 URMA 分片失败回调缺陷的复现与验证；R1 分片部分完成契约及 R2 Publish 提交不确定性复现；独立审查、fork PR、远程 CMake 缓存验证与 CI。
+
+未完成范围：59 节点真实 URMA 超时、Create RPC 窗口外耗时、snapshot 刷新失败和对象生命周期的现场因果闭合。当前 ZIP 内没有独立运行配置/profile，已请求部署 SHA 与可访问的运行期证据位置。缺失证据的情况下，Mock 可以复现错误外观但无法证明现场首因，不以继续修改生产线程数、队列或超时来替代根因证据。本目标不能标记全部完成。
