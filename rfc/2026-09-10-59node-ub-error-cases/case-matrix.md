@@ -151,3 +151,11 @@ GET 最终 1001 与 SET 最终 1010 分开；同 Trace 的 WR 超时不证明硬
 关键前因：全部 4747 条有 Client Create/Publish 阶段计时；4306 条 Create 已消耗至少 10 ms，27 条至少 19 ms。Create 中位数 12,892 us，Publish 中位数 7,124 us。4745 条有 Client URMA 阶段计时，中位数 245 us，仅 1 条达到 10 ms。各阶段阈值分布不是互斥分类，不能相加作为失败总数。
 
 该群体大多数先在 Create 的 RPC 父阶段消耗预算，Publish 是最后超时位置。服务端 access 窗口普遍很短，不能将父阶段差额直接称作物理网络耗时；需要补充 RPC 收发/排队、线程调度和客户端端到端预算证据。当前复现优先验证提交不确定性与共享预算，再追查 Create 路径。
+
+### Create RPC 四时间戳复核
+
+4747 条 Publish 截止样本的先行 Create RPC 全部具有有效四时间戳；逐条重新计算 `(ClientRecv - ClientSend - ServerSend + ServerRecv) / 1000`，与结构化残差差异超过 2 us 的记录为 0。Create RPC e2e 中位数 12,879 us，server execution 中位数 37 us，残差中位数 12,839 us。4279 条残差达到 10 ms；4707 条残差占 RPC e2e 至少 90%。
+
+源码边界已确认：`common/rpc/plugin_generator/brpc_stub_generator.cpp:BuildCallMethodAndDiagnosticsSnippet` 在发送前 VLOG 和 `CallMethod` 之前标记 ClientSend；`common/rpc/brpc_server_unary_writer_reader.h` 在应用 adapter 构造处标记 ServerRecv；`common/rpc/brpc_perf_trace.h:RecordBrpcRpcTrace` 从 Client 往返窗口减去服务端窗口。故残差包含应用计时点外的框架工作、排队、调度与传输，不能识别其单独贡献。`server_req_queue=0` 只覆盖 adapter 内已埋点区间，不等于 bRPC/内核所有队列均无等待。
+
+当前明确缺口：对应运行的实际部署版本、worker/client 参数、日志等级及同步/异步配置、bRPC 队列/线程数据、调度 profile、网络与 CQE 证据。缺少这些时，扩大 Mock 延迟注入只能重现相同外观，不能证明真实首因，也不足以合理选择增加线程、调整队列或修改超时。上述证据缺口不否定已完成的 B1/B2 当前代码修复。
