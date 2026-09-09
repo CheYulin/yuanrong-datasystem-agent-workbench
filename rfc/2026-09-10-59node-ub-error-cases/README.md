@@ -207,3 +207,26 @@ ds-self-verify：检查了最终差异、定向编译与测试结果、错误路
 提交 `57bf79459a441d9103a82037e2fb380fe6697b34`，已快速前进加入草稿 PR 2367。CMake 继续复用原构建目录及三方件缓存。完整故障组 `ds_ut_urma_send_jetty_fault` 最终 25 PASS / 0 FAIL / 0 DISABLED，3.234 秒；相邻 `UbTransporterTest.*:TransportLayerTest.*:WorkerRpcClientTest.*` 为 85 PASS / 0 FAIL，2.452 秒。新增 `BatchFallbackPreservesLaterTimeoutRetention` 证明后项真实超时继续登记保留，并在迟到 CQE 到达时调用原观察者；不把事件保留误判为泄漏或提前回收。
 
 源码对照：报告分析引用 a505893 的同一函数也包含循环内 callback 的旧逻辑；这证明分析引用存在该缺陷，仍不等同于已确认部署版本或历史触发证据。最终差异检查与敏感扫描通过；独立审查未发现阻断项，最坏故障通知延迟的变化已记录。
+
+## R2：Publish 客户端超时但服务端提交成功
+
+对全部 17,090 条失败重新读取逐 Trace 的结构化原始 access 证据。4747 条 Publish 截止中，4705 条仅观测到服务端成功、26 条仅观测到服务端失败、16 条服务端结果未观测；4731 条有服务端记录，耗时中位数 33 us，15 条达到 20 ms。1199 条 Create 截止中，1162 条观测到服务端成功、37 条未观测；已观测耗时中位数 26 us，38 条达到 20 ms。没有把缺失记录当成零耗时或成功。
+
+这些 access 耗时不包含所有排队/传输/回调成本，20 ms 也不是每一 RPC 剩余预算；不能据此认定物理网络问题。统计说明只改 Publish 业务处理耗时不足以解释多数客户端超时。继续用真实客户端/Worker 的故障注入复现提交结果不确定性。
+
+R2 契约：客户端 Create/写入正常完成，Worker Publish 已执行后延迟返回，超过客户端 API 预算；客户端应返回截止错误，而另一个客户端随后应能读到完整已提交内容。使用现有 `publish.sleep` 注入点和已有 ObjectClient ST 集群，不把人工延迟当作现场根因。如果基线通过，记为报错语义复现而非产品缺陷 RED；若失败，先区分测试环境、路由和真实代码契约问题。
+
+### R2 端到端结果
+
+`ObjectClientTest.PublishDeadlineDoesNotImplyUncommittedData` 在 Tiantiyun 通过，1 PASS / 0 FAIL / 0 DISABLED，含三 Worker 测试集群启动和退出共 7.297 秒。writer 配置 300 ms API 预算，已有 `publish.sleep` 在 PublishObject 返回后注入一次 1000 ms 响应延迟，reader 独立 Get 比较全部数据。该测试证明 deadline 与最终完整可读可以同时成立；未证明 deadline 当刻可读、远端副本或持久化完成，且不证明每条历史超时具有相同延迟原因。
+
+```sh
+cmake --build build --target ds_st_object_cache datasystem_worker_bin -j32
+DS_URMA_DEV_NAME=bonding_mock0 build/tests/st/ds_st_object_cache \
+  --gtest_filter=ObjectClientTest.PublishDeadlineDoesNotImplyUncommittedData \
+  --gtest_output=xml:.evidence/r2-publish.xml
+```
+
+首次构建命令把 worker 目标误写成 `datasystem_worker`，ST 已构建但该目标不存在；确认 CMake 后改为 `datasystem_worker_bin`，最终上述完整构建命令成功。沿用 URMA Mock 和已有三方件缓存，未更改产品逻辑。独立审查、差异检查与敏感扫描通过。
+
+26 条服务端 Publish 失败的原始错误进一步分为：22 条 `Key not found / Get a not found shm`（请求引用的 staging allocation），4 条 Create meta RPC deadline。这些不是 4705 条服务端成功样本，也不能与 GET 的 505 条对象未找到混为一谈。

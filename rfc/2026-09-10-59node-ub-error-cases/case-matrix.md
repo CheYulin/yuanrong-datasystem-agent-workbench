@@ -143,3 +143,11 @@ GET 最终 1001 与 SET 最终 1010 分开；同 Trace 的 WR 超时不证明硬
 | QueryAndGet | `DispatchedShmDegradationDoesNotEnterRetry`；`ConfirmedOwnerFailureStillReroutesDispatchedShm`；`SafeDegradedQueriesStillReachRetryAdmission` | B1 已复现当前 SHM 缺陷，真实 UB 路径仍需独立根因证据 |
 
 排序最靠前的 URMA/Publish 两类没有因现有断言通过而降级为“无问题”。继续定位应从这些缺口补证，而不是把约 20 ms 的预算统一调大、把 snapshot 文案解释成拓扑事实，或把 NotFound 当作已证实丢数据。
+
+## Publish 与 Create 的全量 access 证据复核
+
+对全部 17,090 条失败按 run/Trace 关联原结构化证据，Publish 类未出现重复服务端 Publish 记录，且这批证据没有 dropped_evidence。4747 条 Publish 截止中：服务端成功 4705、服务端失败 26、未观测 16。失败状态为 3 共 22 条、1001 共 4 条；不把这些服务端失败合并进成功提交。
+
+关键前因：全部 4747 条有 Client Create/Publish 阶段计时；4306 条 Create 已消耗至少 10 ms，27 条至少 19 ms。Create 中位数 12,892 us，Publish 中位数 7,124 us。4745 条有 Client URMA 阶段计时，中位数 245 us，仅 1 条达到 10 ms。各阶段阈值分布不是互斥分类，不能相加作为失败总数。
+
+该群体大多数先在 Create 的 RPC 父阶段消耗预算，Publish 是最后超时位置。服务端 access 窗口普遍很短，不能将父阶段差额直接称作物理网络耗时；需要补充 RPC 收发/排队、线程调度和客户端端到端预算证据。当前复现优先验证提交不确定性与共享预算，再追查 Create 路径。
