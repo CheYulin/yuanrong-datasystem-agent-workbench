@@ -2,6 +2,7 @@
 
 状态：实现与验证中，尚未合入。修订日期：2026-09-14。
 源码基线：upstream master `6ca4d4ba2f6fde0a68b99141d791d58bc70f978f`。
+[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，当前提交 `d7eddad0c`。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
 本修订替代 2026-09-13 草案；测试通过项与待验证项见第 8 节。
 
@@ -200,6 +201,17 @@ Bazel 的两个 URMA 测试目标采用静态链接以解决动态依赖中 allo
 链接依赖，指标测试改用 TEST_TMPDIR，最终故障 34/34 和 gate 10/10 通过。CMake 故障复测仍为 34/34。
 配置范围专项测试 1/1 通过，18 份模块元数据有效。
 
-HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面横向溢出、目录锚点完整。PR 创建及门禁仍在进行。
+HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面横向溢出、目录锚点完整。PR 已创建；最新门禁轮次 11271 的 CodeCheck、License、SCA 通过，x86 构建 11443 运行中。
 尚无真实 UB 设备证据，不能声称物理 DMA 恢复、provider quiescence 契约、真实硬件性能已验证。
 完全收不到任何 flush/停止证据的隔离路径保留额度；强制 reset 的设备合同仍为后续硬件验证项。
+
+
+### PR 门禁修复记录
+
+首轮 CodeCheck 四项问题通过职责拆分与封装修正：隐藏桶状态类型、拆分等待逻辑、取消可修改账本引用、
+用明确 WR 描述结构替代长参数列表。第二轮仅剩调用参数缩进，修正后第三轮 CodeCheck 通过。
+功能调整后重新通过 CMake token 17/17、fault 34/34、gate 10/10、跨 Worker GET 2/2、非 URMA token 17/17，
+以及 Bazel 三目标；最终提交仅比该已测试提交调整空白，`git diff -w` 已确认无语义差异。
+
+首轮 x86 构建 11441 完成编译，但 Python 打包因缺少 wheel 失败；该轮日志显示 CI 的 Python 3.9 依赖安装
+失败后被忽略。未用修改业务代码掩盖环境问题；当前跟进最新轮次 11443，不能把三项静态检查通过描述为全 CI 通过。
