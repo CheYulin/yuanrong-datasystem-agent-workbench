@@ -2,7 +2,7 @@
 
 状态：实现与验证中，尚未合入。修订日期：2026-09-14。
 源码基线：upstream master `6ca4d4ba2f6fde0a68b99141d791d58bc70f978f`。
-[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，当前提交 `e79f65f13`。
+[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，当前提交 `18c1543e0`。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
 本修订替代 2026-09-13 草案；测试通过项与待验证项见第 8 节。
 
@@ -223,3 +223,15 @@ mock 参数数量及 3 个回调签名，并断言迁移传入非空本地 buffe
 补充完整 worker 单测在 root 下为 119/120，失败项 `RevokeHealthProbeReportsUnlinkFailureAndRetries` 在 chmod 后
 仍能成功删除文件。使用同一二进制在独立可写目录以普通用户 nobody 复测后，120/120 通过，另有 1 项原有禁用测试；
 XML 为 121 项、0 failures、1 disabled，进程退出码 0。该差异确认了权限测试的 root 环境限制，没有修改健康探针源码或断言。
+
+
+ARM 11378 编译通过后执行 5311 项测试，暴露 `kv_metric_urma_id_layout_test` 仍断言旧枚举结束值 146。
+已补齐新指标 `WR_TOKEN_WAIT_US=146` 的编号及名称校验，并更新 `KV_METRIC_END=147`，已有指标编号保持不变。
+目标环境使用 ccache 的 CMake `ds_ut` 构建通过，执行 `--gtest_filter=MetricsTest.*` 得到 104/104、0 failures。
+独立 Bazel metrics 目标因既有传输符号依赖缺失未链接成功；上述运行证据来自 CMake 二进制。
+当前提交 `18c1543e0` 已发起新一轮门禁，尚未把前序提交的通过结果记为当前提交通过。
+
+
+上一轮 ARM 11378 的最终失败还有 `ProducerTest.TestReCreateProducerDiscardData` 超时。
+验证机 CMake 构建 `ds_st_stream_cache` 后独立执行该用例，1/1 通过（6.092 秒）；未在此环境复现。
+该结果不能替代 ARM 环境的验证，当前门禁轮次 11273 继续跟进，CodeCheck 已通过。
