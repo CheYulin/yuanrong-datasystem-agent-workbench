@@ -11,5 +11,5 @@
 - [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)：本地修订已生成，待最终发布。
 
 当前 CMake + ccache 的组件 17/17、故障与客户端配置 34/34、Jetty gate 10/10、跨 Worker GET 2/2 已通过；
-非 URMA 静态客户端和组件验证通过。Bazel token、故障 34/34 和 gate 10/10 通过；HTML 已发布；[PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) 已修复静态检查和 ARM mock 签名问题，当前提交 `18c1543e0` 正在重跑门禁。
+非 URMA 静态客户端和组件验证通过。Bazel token、故障 34/34 和 gate 10/10 通过；HTML 已发布；[PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) 已修复静态检查和 ARM mock 签名问题，当前提交 `18c1543e0` 的六项启用门禁最终通过；ARM 有自动复测，另有 stream 偶发锁等待记录及真实硬件验证边界。
 真实 UB 硬件恢复与性能尚未验证；完整证据与边界见详细设计第 8 节。

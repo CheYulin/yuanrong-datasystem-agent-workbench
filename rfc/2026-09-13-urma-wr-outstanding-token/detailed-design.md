@@ -1,6 +1,6 @@
 # URMA outstanding WR 控制与无完成恢复：详细设计
 
-状态：实现与验证中，尚未合入。修订日期：2026-09-14。
+状态：实现与软件验证完成，启用门禁通过，尚未合入。修订日期：2026-09-14。
 源码基线：upstream master `6ca4d4ba2f6fde0a68b99141d791d58bc70f978f`。
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，当前提交 `18c1543e0`。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
@@ -201,7 +201,7 @@ Bazel 的两个 URMA 测试目标采用静态链接以解决动态依赖中 allo
 链接依赖，指标测试改用 TEST_TMPDIR，最终故障 34/34 和 gate 10/10 通过。CMake 故障复测仍为 34/34。
 配置范围专项测试 1/1 通过，18 份模块元数据有效。
 
-HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面横向溢出、目录锚点完整。PR 已创建。上一提交的门禁轮次 11271：CodeCheck、License、SCA、x86 11443、Bazel x86 7295 通过，ARM 11377 失败；修复后已对当前提交发起重测。
+HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面横向溢出、目录锚点完整。PR 已创建，当前提交的最终门禁结果见本节末。
 尚无真实 UB 设备证据，不能声称物理 DMA 恢复、provider quiescence 契约、真实硬件性能已验证。
 完全收不到任何 flush/停止证据的隔离路径保留额度；强制 reset 的设备合同仍为后续硬件验证项。
 
@@ -214,7 +214,7 @@ HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面�
 以及 Bazel 三目标；该轮格式修正只调整空白；后续另补充下面记录的测试 mock 签名修正。
 
 首轮 x86 构建 11441 完成编译，但 Python 打包因缺少 wheel 失败；该轮日志显示 CI 的 Python 3.9 依赖安装
-失败后被忽略。未用修改业务代码掩盖环境问题；后续 x86 11443 已通过；当前提交重测尚未结束，不能把上一提交的通过结果当成当前提交全 CI 通过。
+失败后被忽略。未用修改业务代码掩盖环境问题；后续 x86 构建已通过，最终结论以当前提交门禁为准。
 
 
 ARM 构建 11377 暴露既有 binmock 用例仍按旧内部函数签名匹配的问题。已同步 13 处 READ/WRITE/gather
@@ -229,9 +229,25 @@ ARM 11378 编译通过后执行 5311 项测试，暴露 `kv_metric_urma_id_layou
 已补齐新指标 `WR_TOKEN_WAIT_US=146` 的编号及名称校验，并更新 `KV_METRIC_END=147`，已有指标编号保持不变。
 目标环境使用 ccache 的 CMake `ds_ut` 构建通过，执行 `--gtest_filter=MetricsTest.*` 得到 104/104、0 failures。
 独立 Bazel metrics 目标因既有传输符号依赖缺失未链接成功；上述运行证据来自 CMake 二进制。
-当前提交 `18c1543e0` 已发起新一轮门禁，尚未把前序提交的通过结果记为当前提交通过。
+当前提交的指标布局用例在 ARM 11379 中通过。
 
 
 上一轮 ARM 11378 的最终失败还有 `ProducerTest.TestReCreateProducerDiscardData` 超时。
 验证机 CMake 构建 `ds_st_stream_cache` 后独立执行该用例，1/1 通过（6.092 秒）；未在此环境复现。
-该结果不能替代 ARM 环境的验证，当前门禁轮次 11273 继续跟进，CodeCheck 已通过。
+单次本地通过不能替代 ARM 验证；后续连续复测及最终门禁结果见下文。
+
+
+### 当前提交门禁与交付结论
+
+提交 `18c1543e05dd45fa05cef3eaa344b14ccbf71943` 的六项启用门禁最终均为 SUCCESS：
+CodeCheck、License、SCA（trigger 11273），x86 构建 11445，ARM 构建与测试 11379，Bazel x86 7297。
+额外 Bazel ARM 作业被 CI 配置跳过，不计为通过。PR 尚未合入，等待维护者评审。
+
+ARM 并非首轮全绿：自动复测后最终通过，包括前轮超时的 producer 重建用例。
+该 producer 用例在验证机一次运行通过，随后连续复测也出现 60 秒 CreateProducer 超时；抓栈显示
+AddCursorForProducer、RemoteAck、AckCursors 等待 StreamManager 的同一互斥量，尚未证明锁的持有者及根因。
+本 PR 与基线在 stream_cache 源码和该测试上没有差异，未用放宽超时或屏蔽用例改变结果；这是需单独追踪的
+stream 并发风险，不能用最终门禁成功推导它已修复，也不能据此认定由 WR token 机制引起。
+
+本次交付覆盖 WR 准入、配置等待、独立完成账本、无数据 CQE 后台退役和安全结清、mock 用例、
+指定环境 CMake/ccache 验证及双构建门禁。真实 UB provider 停止/reset 契约和硬件 A/B 仍未验证。
