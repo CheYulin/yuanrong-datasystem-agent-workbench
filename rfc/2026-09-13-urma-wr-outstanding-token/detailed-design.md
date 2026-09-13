@@ -220,5 +220,6 @@ HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面�
 ARM 构建 11377 暴露既有 binmock 用例仍按旧内部函数签名匹配的问题。已同步 13 处 READ/WRITE/gather
 mock 参数数量及 3 个回调签名，并断言迁移传入非空本地 buffer owner。最终测试文件通过 CMake 生成规则编译
 （使用 ccache）；非 URMA Bazel 配置下迁移 14/14、远程 GET 准入 3/3 通过。
-补充完整 worker 单测为 119/120，失败项 `RevokeHealthProbeReportsUnlinkFailureAndRetries` 在 chmod 后
-仍能成功删除文件，未形成它预期的权限失败；本次没有修改该健康探针用例，也不宣称整个 worker 套件全绿。
+补充完整 worker 单测在 root 下为 119/120，失败项 `RevokeHealthProbeReportsUnlinkFailureAndRetries` 在 chmod 后
+仍能成功删除文件。使用同一二进制在独立可写目录以普通用户 nobody 复测后，120/120 通过，另有 1 项原有禁用测试；
+XML 为 121 项、0 failures、1 disabled，进程退出码 0。该差异确认了权限测试的 root 环境限制，没有修改健康探针源码或断言。
