@@ -1,10 +1,10 @@
 # URMA outstanding WR 控制与无完成恢复：详细设计
 
-状态：2026-09-16 rebase 与本地回归已完成，CodeCheck 两项包含顺序/常量命名问题已修复，当前提交门禁待复测，尚未合入。旧版门禁结果不代表本次提交。
+状态：2026-09-17，rebase 与本地回归完成，当前提交门禁进行中，尚未合入。旧版门禁结果不代表本次提交。
 源码基线：upstream master `fcaace844`。
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，本次基于最新主线 rebase，最终提交与验证结果见修订记录。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
-本修订替代 2026-09-13 草案；测试通过项与待验证项见第 8 节。
+本修订替代 2026-09-13 草案；最新验证见第 9 节；第 8 节保留历史证据。
 
 ## 1. 要解决的问题
 
@@ -169,7 +169,7 @@ workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
 | 构建 | 目标环境 CMake + ccache，mock 与非 URMA 构建，Bazel 元数据一致 |
 | 性能 | 默认配置与基线比较吞吐、尾延迟、锁争用；不得把 mock 吞吐当真实 UB 结果 |
 
-## 8. 已执行证据与待办
+## 8. 2026-09-14 历史证据与待办
 
 结果来自 2026-09-14 的专用分支；尚未合入。下列数字是独立测试目标，存在交叉覆盖，不应相加当作唯一场景数。
 
@@ -243,7 +243,7 @@ ARM 11378 编译通过后执行 5311 项测试，暴露 `kv_metric_urma_id_layou
 单次本地通过不能替代 ARM 验证；后续连续复测及最终门禁结果见下文。
 
 
-### 当前提交门禁与交付结论
+### 2026-09-14 提交门禁与交付结论
 
 提交 `18c1543e05dd45fa05cef3eaa344b14ccbf71943` 的六项启用门禁最终均为 SUCCESS：
 CodeCheck、License、SCA（trigger 11273），x86 构建 11445，ARM 构建与测试 11379，Bazel x86 7297。
@@ -261,7 +261,7 @@ stream 并发风险，不能用最终门禁成功推导它已修复，也不能�
 
 ## 9. 2026-09-16 rebase 与检视修复
 
-基线 `fcaace844adee1142fa105aeb9df0134b0512bb3`，提交 `ff513c002244dc4e805f80c52da79d8166443df5`。
+基线 `fcaace844adee1142fa105aeb9df0134b0512bb3`，提交 `0abc656d70b8b4422d4aa248d8b8360736d14779`。
 
 默认值按检视意见调整为 `capacity=100`、`wait_us=5000`、`recovery_timeout_ms=5000`；等待参数范围扩大到 [0, 60000]us。
 仅明确准入拒绝且零提交的当前 WR 窗口做最多 3 次尝试，100/200us 退避，总体受 API 期限约束。
@@ -299,3 +299,32 @@ stream 并发风险，不能用最终门禁成功推导它已修复，也不能�
 验证审计：发现 rsync 保留时间导致增量对象新于源码后，已核对全分支变更文件 SHA256、刷新这些文件的验证机时间并重建全部相关目标，再执行上述测试。配置 XML 含默认值新用例，共 3 项；只以此次重建后的 XML 作为本轮最终证据。
 
 补充回归：故障测试集独立执行 5 轮，每轮 38/38；CodeCheck 包含顺序和退避命名常量修正后，CMake 增量构建及故障 38/38 再次通过。未修改重试次数、退避值或结清时机。
+
+2026-09-17 门禁跟进：ARM 首轮报告多个测试失败。`TopologyRecoveryManagerTest.MembershipDeleteDoesNotBreakAnInstallingCandidate` 本地 50 次执行失败 15 次，均在第二次重复候选上报时返回 payload 未被请求。移除会与安装后成员删除竞态的重复上报，保留 READY 和安装期读保护断言；修正后目标用例 100/100，整个 topology recovery 组 50/50。`ProducerTest.TestWriteLessThanWritePage` 本地复测 10/10，通过不等于 ARM 原失败已解释。其他 ARM 结果仍在收集；当前提交门禁待完成。
+
+### Use Case 与实测用例对应
+
+下表名称均已对照本次成功 XML 核验。验证范围为 CMake 组件或 URMA mock；不扩展为真实设备证明。
+
+| Use Case | 本次实际通过的用例 |
+|---|---|
+| UC01 | `MultiChunkRemoteGetUsesWrAdmission`、`GatherLargerThanCapacityMakesProgress` |
+| UC02 | `FifoPreventsSmallRequestBypassingHead`、`ReleaseWakesWaitingCaller` |
+| UC03 | `WaitBudgetExpiresWithoutLeaking`、`AdmissionRetryIsBoundedByAttemptsAndDeadline` |
+| UC04 | `DeadlineWinsEvenWhenCapacityIsFree`、`ApiDeadlineBoundsLongerConfiguredWait` |
+| UC05 | `MultiChunkRemoteGetUsesWrAdmission` |
+| UC06 | `GatherLargerThanCapacityMakesProgress` |
+| UC07 | `PartialPostReturnsOnlyUnacceptedSuffixCredits`、`MissingBadWrPreservesAllPotentiallyAcceptedCredits` |
+| UC08 | `CompletionReturnsCreditOnceAfterEventDeletion` |
+| UC09 | `PostAdmissionCountsWrRatherThanEvents`、`CompletionReturnsCreditOnceAfterEventDeletion` |
+| UC10 | `StalledWrRetiresWithoutSuccessfulCompletion`、`BackgroundRecoveryReturnsCreditsWithoutNewTraffic` |
+| UC11 | `SplitReservationAndSettleExactRequestIdentity`、`CompletionReturnsCreditOnceAfterEventDeletion` |
+| UC12 | `FailedDeleteRetriesWithoutLosingCredits`、`MissingFlushAndQuarantineRetainCreditsAndBuffer` |
+| UC13 | `ShutdownWakesBlockedCallerWithoutReturningHeldCredit`、`ClearWithPendingJettyDefersCompleteProviderDependencyClosure` |
+| UC14 | `DisabledTokensBypassClosedBucket`、`UrmaWrTokenConfigurationBoundaries`、`UrmaWrTokenProductionDefaults` |
+| UC15 | `AdmissionRetryResumesOnlyUnsubmittedWindow`、`RemoteGetRetriesAdmissionWithoutTcpFallback` |
+| UC16 | `AdmissionRetryIsBoundedByAttemptsAndDeadline` |
+
+UC09 通过明确删除 Event 后仍持有 credit/owner 的组件场景验证独立记账；不宣称穷举了真实集群的每一种 TTL/驱逐调度。UC12 验证无停止证据时保持额度、确认 flush 后删除重试成功才归还；并未验证真实设备强制 reset。
+
+补充同类检查：observer 异常用例存在另一处无同步的重复候选上报，本地 100 次失败 26 次。移除这次重复上报后目标 100/100，完整 topology recovery 50 项连续 20 轮全过；安装中重复上报的专用屏障用例仍保留。当前 HEAD 0abc656d70b8b4422d4aa248d8b8360736d14779 已再次触发门禁。
