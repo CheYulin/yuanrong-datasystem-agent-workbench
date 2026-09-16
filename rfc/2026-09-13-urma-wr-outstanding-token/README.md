@@ -1,15 +1,25 @@
 # URMA outstanding WR 控制与无完成恢复
 
-状态：实现与验证中。更新：2026-09-14。
-基线：upstream master `6ca4d4ba2f6fde0a68b99141d791d58bc70f978f`。
+更新：2026-09-16。基线 master `fcaace844`；实现 PR #2422，当前提交 `ff513c002244dc4e805f80c52da79d8166443df5`。
 
-目标：进程级 WR 额度控制，满容量后等待可配置时间；独立于业务 Event 生命周期记账；
-无普通成功 CQE 时主动退休旧 jetty，并在 flush 和 provider delete 成功后结清剩余额度。
-无法证明设备停止时必须隔离保留，不能仅因超时清零。
+默认值按检视意见调整为 `capacity=100`、`wait_us=5000`、`recovery_timeout_ms=5000`；等待参数范围扩大到 [0, 60000]us。
+仅明确准入拒绝且零提交的当前 WR 窗口做最多 3 次尝试，100/200us 退避，总体受 API 期限约束。
+已提交前缀、provider 错误、未知接受范围不重放。关闭 token 时旁路新增同步、指标和扫描。
+确认 flush 后删除失败按恢复间隔重试，期间保留 credit/owner 和 live-resource 计数；成功后结清。
+重试时隔离表向待删除表转移所有权，避免失败回调与再次选取竞态；没有 flush 或 modify 失败不允许强删。
 
-- [详细设计](detailed-design.md)：合同、14 类外部 Use Cases、生命周期、参数和验证矩阵。
-- [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)：本地修订已生成，待最终发布。
+- [详细设计](detailed-design.md)：16 类 Use Cases、等待与恢复合同、最新验证及历史记录。
+- [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
+- [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)。
 
-当前 CMake + ccache 的组件 17/17、故障与客户端配置 34/34、Jetty gate 10/10、跨 Worker GET 2/2 已通过；
-非 URMA 静态客户端和组件验证通过。Bazel token、故障 34/34 和 gate 10/10 通过；HTML 已发布；[PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) 已修复静态检查和 ARM mock 签名问题，当前提交 `18c1543e0` 的六项启用门禁最终通过；ARM 有自动复测，另有 stream 偶发锁等待记录及真实硬件验证边界。
-真实 UB 硬件恢复与性能尚未验证；完整证据与边界见详细设计第 8 节。
+| 验证 | 本次结果 |
+|---|---|
+| CMake WR token | 17/17，0 failure |
+| CMake URMA mock 故障及客户端配置 | 38/38，0 failure |
+| CMake Jetty gate | 10/10，0 failure |
+| CMake WR 配置默认值及边界 | 3/3，0 failure |
+| CMake 跨 Worker GET | 3/3，0 failure |
+| 非 URMA CMake token | 17/17，0 failure |
+| 文档元数据、差异及敏感信息扫描 | 18 份元数据有效；差异与全分支扫描通过 |
+
+CodeCheck 两项包含顺序/常量命名问题已修复，当前提交门禁待复测。真实 UB 恢复及性能尚未验证；没有安全停止证据时保留额度，不能仅因超时归还。

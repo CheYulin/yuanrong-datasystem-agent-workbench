@@ -1,8 +1,8 @@
 # URMA outstanding WR 控制与无完成恢复：详细设计
 
-状态：实现与软件验证完成，启用门禁通过，尚未合入。修订日期：2026-09-14。
-源码基线：upstream master `6ca4d4ba2f6fde0a68b99141d791d58bc70f978f`。
-[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，当前提交 `18c1543e0`。
+状态：2026-09-16 rebase 与本地回归已完成，CodeCheck 两项包含顺序/常量命名问题已修复，当前提交门禁待复测，尚未合入。旧版门禁结果不代表本次提交。
+源码基线：upstream master `fcaace844`。
+[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，本次基于最新主线 rebase，最终提交与验证结果见修订记录。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
 本修订替代 2026-09-13 草案；测试通过项与待验证项见第 8 节。
 
@@ -21,7 +21,7 @@
 jetty 恢复，防止额度永远被遗忘。read、write、多 chunk、gather 共用一套额度。
 
 旧文档的 64×4MB/120GB/s 只是理想串行化量纲估算，不能证明真实延迟上界。
-4KB 包粒度和链路带宽需以实际部署及设备证据验证；默认容量 64 是待压测的初值。
+4KB 包粒度和链路带宽需以实际部署及设备证据验证；默认容量 100 是按检视意见调整的初值，仍需真实硬件压测。
 最新主线 lane pool 默认已为 200，不能沿用历史样本中的 64 当作当前配置。
 
 ## 2. 需求与不变量
@@ -29,7 +29,7 @@ jetty 恢复，防止额度永远被遗忘。read、write、多 chunk、gather �
 | 编号 | 合同 |
 |---|---|
 | N1 | 启用时，0 ≤ reserved + potentially accepted ≤ capacity；每个 WR 一个额度 |
-| N2 | 超额请求最多等待 min(配置等待时间, API 剩余时间)，API 期限优先 |
+| N2 | 每次准入最多等待 min(配置等待时间, API 剩余时间)；未提交窗口最多尝试 3 次，总体受 API 期限约束 |
 | N3 | 同一额度只归还一次；迟到、重复完成不得释放新请求的额度 |
 | N4 | Event 删除、TTL、驱逐、force-release、创建替代 jetty 都不是硬件结清证据 |
 | N5 | 正常/错误 CQE 可结清对应 WR；确认 flush 且 provider delete 成功可结清旧 jetty 剩余 WR |
@@ -48,7 +48,7 @@ jetty，使用受限补池及 TCP fallback；不能靠超时清零制造空闲�
 |---|---|---|
 | UC01 | 正常小对象读写 | 无排队获得额度，原数据语义不变 |
 | UC02 | 多客户端短时拥塞，期间有请求完成 | FIFO 有界等待后继续，不超配 |
-| UC03 | 满容量且短等预算耗尽 | K_URMA_TRY_AGAIN，wr_token_wait_timeout，可按既有上层策略 fallback |
+| UC03 | 满容量且单次等待预算耗尽 | 仅明确未提交窗口做最多 3 次准入，100/200us 退避；耗尽后 K_URMA_TRY_AGAIN，fallback 仍可能被配置或限额拒绝 |
 | UC04 | API 已过期或先于短等期限结束 | K_RPC_DEADLINE_EXCEEDED，不继续新提交 |
 | UC05 | 单对象拆多个 chunk | 每个真实 WR 单独计数，超过容量仍可分批推进 |
 | UC06 | gather 链长超过容量 | 分成有界提交窗口，不等自身尚未提交的预约额度 |
@@ -57,9 +57,11 @@ jetty，使用受限补池及 TCP fallback；不能靠超时清零制造空闲�
 | UC09 | 保留 Event 被驱逐或 TTL 到期 | 硬件额度仍在，等待者不能因业务记录删除而越过硬顶 |
 | UC10 | 某 jetty 不再完成，系统无新流量 | 后台检查启动 retire/refill；有效 flush + delete 后恢复额度 |
 | UC11 | 错误完成、重复完成、旧 request ID | 对应 WR 至多结清一次；旧身份不影响替代 jetty |
-| UC12 | provider modify/delete 失败或 flush 永不到达 | 隔离、限额保留并清楚报错，不伪造恢复成功 |
+| UC12 | provider modify/delete 失败或 flush 永不到达 | 隔离并保留额度；仅确认 flush 后的删除失败允许后台重试，删除成功才归还剩余额度 |
 | UC13 | 服务关闭时仍有排队和在途 WR | 排队者退出，等待已获 post permit 的调用，保持 provider 生命周期安全 |
-| UC14 | 配置关闭或非法参数 | 关闭时兼容原路径；非法参数启动校验失败；不支持运行中缩容 |
+| UC14 | 配置关闭或非法参数 | capacity=0 旁路 token 预约、指标、CQE 账本查询和扫描，保留 post gate/provider；非法参数启动失败 |
+| UC15 | 大对象无法 TCP fallback，首次准入拥塞后缓解 | 只重试尚未提交窗口，已提交前缀不重放，数据完整返回 |
+| UC16 | 持续耗尽或 API 已过期 | 最多 3 次尝试；期限耗尽不继续 post，旧额度仍可恰好结清一次 |
 
 ## 4. 组件与调用顺序
 
@@ -93,14 +95,18 @@ gather 先构造完整描述符但不预占额度，再逐窗口申请并提交�
 错误中包含 waited_us、outstanding、capacity；关闭与 API 到期具有可辨认原因。
 正常路径通过指标/trace 记录等待时间，避免无条件热路径日志。
 
+`PostSendWrWithAdmissionRetry` 只根据本地 `admissionRejected` 标记重试零提交窗口；provider 错误、部分提交和未知接受范围不触发此重试。默认最多等待 3×5000us 加 100/200us 退避（调度延迟另计），且每次均检查 API 剩余预算。wait_us=0 关闭单次等待，但不关闭这两次有界重试。
+
 ### 4.2 恢复与生命周期
 
 复用 `UrmaJetty` 的 ACTIVE -> QUIESCING -> MODIFYING -> WAIT_FLUSH -> DELETE_READY -> DELETING -> DESTROYED。
 失败进入 QUARANTINED。复用 `RetireJetty`、post gate 和 `ScheduleDeleteJetty`，不另建与它们竞争的删除器。
 
-在既有 refill 控制线程的 50ms 周期检查最老未结清 WR。暂定 recovery_timeout_ms=1000，作为独立启动参数；
+在既有 refill 控制线程的 50ms 周期检查最老未结清 WR。默认 recovery_timeout_ms=5000，作为独立启动参数；
 因为这是在途恢复时间，不应复用几百微秒的准入等待参数。检查时间达到阈值时关闭旧 jetty，不等待新的成功 CQE。
 新 jetty 可先按原有 live/refill 上限创建，但创建本身不释放旧 WR token。
+
+确认 flush 后的 provider delete 失败会设置独立的可重试标记。后台按恢复阈值的间隔，将该类 QUARANTINED 状态重新送入原删除执行器；post gate 始终关闭，成功后移除隔离引用并结清账本。modify 失败或没有 flush 的隔离对象不具备此资格。删除持续失败时额度保持可追踪，不能将其视为已释放。
 
 ### 4.3 并发与内存安全
 
@@ -128,9 +134,9 @@ retire/flush/delete 失败；真实硬件压测结果决定最终默认值。
 
 | 参数 | 初始默认 | 语义 |
 |---|---|---|
-| urma_wr_token_capacity | 64 | 进程级 WR 额度，范围 [0, 65536]，0 关闭，启动生效 |
-| urma_wr_token_wait_us | 300 | 单次准入等待预算，范围 [0, 2000]us，0 不等，启动生效 |
-| urma_wr_token_recovery_timeout_ms | 1000 | 范围 [1, 60000]ms，WR 未结清触发退役的年龄阈值，启动生效；不等于保证完成时间 |
+| urma_wr_token_capacity | 100 | 进程级 WR 额度，范围 [0, 65536]，0 关闭，启动生效 |
+| urma_wr_token_wait_us | 5000 | 单次准入等待预算，范围 [0, 60000]us，0 不等，启动生效 |
+| urma_wr_token_recovery_timeout_ms | 5000 | 范围 [1, 60000]ms，WR 未结清触发退役的年龄阈值，启动生效；不等于保证完成时间 |
 
 Worker flags、部署 JSON 和 Helm 使用同名参数及范围。客户端首次 URMA 初始化前支持
 `DATASYSTEM_URMA_WR_TOKEN_CAPACITY`、`DATASYSTEM_URMA_WR_TOKEN_WAIT_US`、
@@ -251,3 +257,45 @@ stream 并发风险，不能用最终门禁成功推导它已修复，也不能�
 
 本次交付覆盖 WR 准入、配置等待、独立完成账本、无数据 CQE 后台退役和安全结清、mock 用例、
 指定环境 CMake/ccache 验证及双构建门禁。真实 UB provider 停止/reset 契约和硬件 A/B 仍未验证。
+
+
+## 9. 2026-09-16 rebase 与检视修复
+
+基线 `fcaace844adee1142fa105aeb9df0134b0512bb3`，提交 `ff513c002244dc4e805f80c52da79d8166443df5`。
+
+默认值按检视意见调整为 `capacity=100`、`wait_us=5000`、`recovery_timeout_ms=5000`；等待参数范围扩大到 [0, 60000]us。
+仅明确准入拒绝且零提交的当前 WR 窗口做最多 3 次尝试，100/200us 退避，总体受 API 期限约束。
+已提交前缀、provider 错误、未知接受范围不重放。关闭 token 时旁路新增同步、指标和扫描。
+确认 flush 后删除失败按恢复间隔重试，期间保留 credit/owner 和 live-resource 计数；成功后结清。
+重试时隔离表向待删除表转移所有权，避免失败回调与再次选取竞态；没有 flush 或 modify 失败不允许强删。
+
+| 验证 | 本次结果 |
+|---|---|
+| CMake WR token | 17/17，0 failure |
+| CMake URMA mock 故障及客户端配置 | 38/38，0 failure |
+| CMake Jetty gate | 10/10，0 failure |
+| CMake WR 配置默认值及边界 | 3/3，0 failure |
+| CMake 跨 Worker GET | 3/3，0 failure |
+| 非 URMA CMake token | 17/17，0 failure |
+| 文档元数据、差异及敏感信息扫描 | 18 份元数据有效；差异与全分支扫描通过 |
+
+使用指定验证环境、CMake Release、URMA mock 和 ccache。构建目标为 `ds_ut_urma_wr_token`、
+`ds_ut_urma_send_jetty_fault`、`ds_ut_urma_jetty_gate`、`flags_ut`、`ds_st_urma_wr_token`、
+`datasystem_worker_bin`、`urma_wr_token_bench`，`cmake --build build --target <targets> -j16`。
+直接执行测试二进制并保留 XML；ST 过滤 `UrmaWrTokenStTest.*`，flags 过滤 `FlagsTest.Urma*`。
+非 URMA 使用独立 CMake 目录构建并运行 token 目标。以上数字不代表整个 CTest 套件。
+
+新业务用例关闭 TCP fallback，12MiB GET 注入首次准入拒绝后完整返回；组件用例实际占满容量，
+稍后完成旧 WR 后新窗口继续，最终 outstanding=0。覆盖最多尝试次数、API 已过期、部分提交不重放、
+关闭 token 和删除失败后再次结清。首次删除故障用例等待短暂 WAIT_FLUSH 状态失败，改为等待稳定隔离结果后通过，
+不将该测试时序修正称为生产代码的 TDD 红绿证据。
+
+软件微基准每线程 100 万次：1/8 线程禁用桶 acquire 为 59.69/7.73 wall ns/op，baseline 为 31.13/4.87；
+四组均 errors=0、最终 outstanding=0。wall ns/op 为聚合吞吐倒数；这是软件桶微基准，
+不是整个 PostSendWr 的耗时或真实硬件性能 A/B。ccache 命中已确认。
+
+首轮 CodeCheck 两项问题已修复，当前提交门禁尚未得出结果，不沿用 18c1543e0 的旧版全绿结论。真实 UB 停止/reset 合同仍未验证。
+
+验证审计：发现 rsync 保留时间导致增量对象新于源码后，已核对全分支变更文件 SHA256、刷新这些文件的验证机时间并重建全部相关目标，再执行上述测试。配置 XML 含默认值新用例，共 3 项；只以此次重建后的 XML 作为本轮最终证据。
+
+补充回归：故障测试集独立执行 5 轮，每轮 38/38；CodeCheck 包含顺序和退避命名常量修正后，CMake 增量构建及故障 38/38 再次通过。未修改重试次数、退避值或结清时机。
