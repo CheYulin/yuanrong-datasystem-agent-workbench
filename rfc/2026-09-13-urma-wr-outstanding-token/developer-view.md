@@ -1,6 +1,6 @@
 # WR 额度：关键概念与开发视图
 
-状态：2026-09-17，相关 CMake 回归通过，当前提交门禁进行中。关联 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) 和 [详细 RFC](detailed-design.md)。
+状态：2026-09-17，相关 CMake 回归通过，当前提交 6 项启用门禁全部通过。关联 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) 和 [详细 RFC](detailed-design.md)。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
