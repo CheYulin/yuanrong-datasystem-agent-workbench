@@ -1,27 +1,23 @@
-# URMA outstanding WR 控制与无完成恢复
+# URMA outstanding WR 控制与安全归还
 
-更新：2026-09-17。基线 master `fcaace844`；实现 PR #2422，当前提交 `0abc656d70b8b4422d4aa248d8b8360736d14779`。
+2026-09-17 · 基线 `fcaace844` · 实现 `4a580cf3d318c4d3127d0a2d7d8a75a8dc967c29` · 当前提交门禁进行中，尚未合入。
 
-默认值按检视意见调整为 `capacity=100`、`wait_us=5000`、`recovery_timeout_ms=5000`；等待参数范围扩大到 [0, 60000]us。
-仅明确准入拒绝且零提交的当前 WR 窗口做最多 3 次尝试，100/200us 退避，总体受 API 期限约束。
-已提交前缀、provider 错误、未知接受范围不重放。关闭 token 时旁路新增同步、指标和扫描。
-确认 flush 后删除失败按恢复间隔重试，期间保留 credit/owner 和 live-resource 计数；成功后结清。
-重试时隔离表向待删除表转移所有权，避免失败回调与再次选取竞态；没有 flush 或 modify 失败不允许强删。
+[RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
-- [详细设计](detailed-design.md)：16 类 Use Cases、等待与恢复合同、最新验证及历史记录。
-- [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
-- [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)。
+- [详细 RFC](detailed-design.md)：20 类 Use Cases、容量守恒、等待和恢复合同。
+- [关键概念与开发视图](developer-view.md)：Req/WR/令牌、共享 buffer owner、提交与恢复的开发位置。
 
-| 验证 | 本次结果 |
-|---|---|
-| CMake WR token | 17/17，0 failure |
-| CMake URMA mock 故障及客户端配置 | 38/38，0 failure |
-| CMake Jetty gate | 10/10，0 failure |
-| CMake WR 配置默认值及边界 | 3/3，0 failure |
-| CMake 跨 Worker GET | 3/3，0 failure |
-| 非 URMA CMake token | 17/17，0 failure |
-| 文档元数据、差异及敏感信息扫描 | 18 份元数据有效；差异与全分支扫描通过 |
+默认容量 100 WR，单次等待 5000us，恢复阈值 5000ms。仅明确零提交的准入拒绝重试当前窗口；未知接受范围保留账本。没有安全停止证据时不得超时清零。
 
-当前提交门禁进行中。真实 UB 恢复及性能尚未验证；没有安全停止证据时保留额度，不能仅因超时归还。
+| 验证范围 | 通过 / 总数 | 证据文件 |
+|---|---:|---|
+| WR token | 17/17 | `final-summary-token.xml` |
+| 故障 / 客户端配置 | 42/42 | `final-summary-fault.xml` |
+| Jetty gate | 10/10 | `final-summary-gate.xml` |
+| 默认值 / 参数边界 | 3/3 | `final-summary-flags.xml` |
+| 跨 Worker 系统 | 4/4 | `final-summary-st.xml` |
+| tracing / metrics / topology | 201/201 | `final-summary-common-green.xml` |
+| 非 URMA token | 17/17 | `final-summary-no-urma.xml` |
 
-Use Case 对照已逐项核对成功 XML。额外修复 topology 测试中两处重复候选上报与异步安装的竞态；目标用例各 100 次通过，整个 50 项测试组连续 20 轮全过。
+
+第二项登记分配失败、READ/WRITE 背压误诊断、连续等待 summary 缺项都有红绿对照；两个 WR 的乱序/重复完成与容量 1 跨 Worker 请求已验证。测试和 HTML 不能替代真实硬件停止合同。

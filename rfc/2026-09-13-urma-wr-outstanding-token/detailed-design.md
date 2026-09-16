@@ -2,9 +2,11 @@
 
 状态：2026-09-17，rebase 与本地回归完成，当前提交门禁进行中，尚未合入。旧版门禁结果不代表本次提交。
 源码基线：upstream master `fcaace844`。
-[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，本次基于最新主线 rebase，最终提交与验证结果见修订记录。
+[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，本次基于最新主线 rebase，最终提交与验证结果见第 8 节。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
-本修订替代 2026-09-13 草案；最新验证见第 9 节；第 8 节保留历史证据。
+本修订替代 2026-09-13 草案；实现提交 `4a580cf3d318c4d3127d0a2d7d8a75a8dc967c29`。
+
+[RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
 ## 1. 要解决的问题
 
@@ -62,6 +64,10 @@ jetty，使用受限补池及 TCP fallback；不能靠超时清零制造空闲�
 | UC14 | 配置关闭或非法参数 | capacity=0 旁路 token 预约、指标、CQE 账本查询和扫描，保留 post gate/provider；非法参数启动失败 |
 | UC15 | 大对象无法 TCP fallback，首次准入拥塞后缓解 | 只重试尚未提交窗口，已提交前缀不重放，数据完整返回 |
 | UC16 | 持续耗尽或 API 已过期 | 最多 3 次尝试；期限耗尽不继续 post，旧额度仍可恰好结清一次 |
+| UC17 | 多段请求提交前发生内存分配失败 | 不触发 provider；撤销所有未提交预留，释放缓冲区，保留健康连接可用性 |
+| UC18 | 一个请求恰好拆成两 WR，完成乱序或重复 | 每项各结清一次，共享内存保持到最后一项；容量 1 也能按窗口完成 |
+| UC19 | 持续额度耗尽与真正 provider 故障分别发生 | 拥塞返回原等待错误和限频诊断；真实 provider 故障仍保留诊断；Event/lane 清理不遗漏 |
+| UC20 | 开启 client/worker 慢请求 summary，单请求多 WR 与重试 | 汇总等待 us 并传递到调用方，不因每 WR 打 tick 溢出，不重复扣除重叠总耗时；关闭 tracing 时旁路 |
 
 ## 4. 组件与调用顺序
 
@@ -130,9 +136,23 @@ gather 先构造完整描述符但不预占额度，再逐窗口申请并提交�
 启动 capacity=0 可回退到既有 lane 路径；不允许热缩容。上线先小范围，观测 token 水位、等待分布、fallback、
 retire/flush/delete 失败；真实硬件压测结果决定最终默认值。
 
-## 5. 配置
+## 5. 组件接口与配置
 
-| 参数 | 初始默认 | 语义 |
+业务 SDK 没有新增公开方法。下列是额度组件面向传输调用方的接口，签名与当前头文件一致；本节只列本特性新增/变更的配置。
+
+```cpp
+// WrTokenBucket：成功时 token 持有 count 份预约；失败不取得额度，waitedUs 返回实际排队耗时。
+Status Acquire(uint32_t count, uint64_t waitUs, std::chrono::steady_clock::time_point deadline,
+               WrToken &token, uint64_t &waitedUs);
+// WrTokenLedger：转入一个 WR 的 token 与 owner，Complete 仅在首次匹配时返回 true。
+Status Track(uint64_t requestId, WrToken token, std::chrono::steady_clock::time_point now,
+             std::shared_ptr<void> localBufferOwner = {});
+bool Complete(uint64_t requestId);
+```
+
+
+
+| 参数 | 默认 | 语义 |
 |---|---|---|
 | urma_wr_token_capacity | 100 | 进程级 WR 额度，范围 [0, 65536]，0 关闭，启动生效 |
 | urma_wr_token_wait_us | 5000 | 单次准入等待预算，范围 [0, 60000]us，0 不等，启动生效 |
@@ -142,7 +162,7 @@ Worker flags、部署 JSON 和 Helm 使用同名参数及范围。客户端首�
 `DATASYSTEM_URMA_WR_TOKEN_CAPACITY`、`DATASYSTEM_URMA_WR_TOKEN_WAIT_US`、
 `DATASYSTEM_URMA_WR_TOKEN_RECOVERY_TIMEOUT_MS`；未设置保留现值，非法值初始化失败，Worker 忽略这些客户端环境变量。
 
-流水线 H2D 内部还有独立 provider 提交，不具备逐 WR 记账接口。本次实现将明确拒绝与启用 token 的组合，
+流水线 H2D 内部还有独立 provider 提交，不具备逐 WR 记账接口。本次实现明确拒绝与启用 token 的组合，
 并拒绝带 pipeline 标记的混配请求，防止绕过硬顶；不能宣称此类错误自动 TCP fallback。
 启动配置、pipeline 初始化入口和带 pipeline 标记的请求均已实施拒绝，故障测试覆盖该边界。
 旧 pipeline 运行模式可选择 capacity=0；关闭模式同时关闭本次账本的 buffer owner 保活，恢复原有传输行为。
@@ -169,144 +189,28 @@ workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
 | 构建 | 目标环境 CMake + ccache，mock 与非 URMA 构建，Bazel 元数据一致 |
 | 性能 | 默认配置与基线比较吞吐、尾延迟、锁争用；不得把 mock 吞吐当真实 UB 结果 |
 
-## 8. 2026-09-14 历史证据与待办
+## 8. 当前实现与验证
 
-结果来自 2026-09-14 的专用分支；尚未合入。下列数字是独立测试目标，存在交叉覆盖，不应相加当作唯一场景数。
+| 验证范围 | 通过 / 总数 | 证据文件 |
+|---|---:|---|
+| WR token | 17/17 | `final-summary-token.xml` |
+| 故障 / 客户端配置 | 42/42 | `final-summary-fault.xml` |
+| Jetty gate | 10/10 | `final-summary-gate.xml` |
+| 默认值 / 参数边界 | 3/3 | `final-summary-flags.xml` |
+| 跨 Worker 系统 | 4/4 | `final-summary-st.xml` |
+| tracing / metrics / topology | 201/201 | `final-summary-common-green.xml` |
+| 非 URMA token | 17/17 | `final-summary-no-urma.xml` |
 
-| 验证 | 实际结果 | 覆盖及限制 |
-|---|---|---|
-| CMake token 组件 | 17/17，0 failure | FIFO、关闭、并发守恒、bthread、期限、超大预算、buffer owner |
-| CMake URMA mock 故障与客户端配置 | 34/34，0 failure | 30 项故障回归和 4 项环境配置；部分提交、未知 bad_wr、迟到/重复 CQE、后台恢复、pipeline 拒绝 |
-| CMake Jetty gate | 10/10，0 failure | post/退休互斥、隔离保留额度和 owner、迟到完成结清 |
-| CMake 跨 Worker GET | 2/2，0 failure | capacity=1 的 2 MiB 多 chunk 读；512 个 8 KiB 对象 gather；核对数据及准入入口 |
-| CMake 非 URMA | 静态客户端构建成功；token 17/17 | 核查不依赖 provider SDK 的组件和包装接口 |
-| Bazel 7.4.1 token | 目标 PASS，17 项组件用例 | 补齐直接头文件和链接依赖；mock 故障 34/34、gate 10/10 均通过 |
+实现提交 `4a580cf3d318c4d3127d0a2d7d8a75a8dc967c29`，相关 CMake 回归通过，当前提交门禁进行中。完整红绿对照、两 WR 请求级证据、微基准与设备边界见 [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)。
 
-SDD/TDD 过程保留了运行期红测证据：期限及 owner 新增测试曾有 4 项失败，客户端配置有 2 项失败，
-pipeline/配置集成有 2 项失败；实现修正后以上最终 CMake 结果通过。故障测试中两个旧断言与基线源码不符，
-已按时间负值钳制及现有 request ID 日志键校正，不能将其归因为本次新引入的生产缺陷。
+账本前缀回滚使用仅含引用/指针的栈上守卫；第 N 项登记失败不会遗留前 N-1 个未提交项。READ/WRITE 清理后返回前置原错误，真正 provider 错误才进入 provider 诊断。
 
-构建使用 x86_64 URMA mock 环境、CMake Release 和 ccache 4.5.1，第三方依赖使用显式缓存目录，
-已观察到编译缓存命中。CMake 初次缺少 utils.pb.h 时先构建 utils_protos；未在本次改动中扩展修复基线依赖。
-CTest 聚合入口因其他未构建测试的发现文件缺失而失败，表内结果来自直接执行 CMake 测试二进制和 XML，
-不代表整个 CTest 套件通过。Bazel 9 的 native C++ 规则不兼容，以及 Bazel 6 的平台依赖错误均单独记录；
-Bazel 7.4.1 已进入有效构建和测试。
-
-软件微基准提供 baseline、acquire/reset 和 acquire/track/complete 三组，同一进程桶、多线程、逐线程 ledger。
-构建结束后每线程 100 万次操作的单次样本如下，所有组 errors=0、最终 outstanding=0：
-
-| 线程 | baseline wall ns/op | acquire/reset wall ns/op | 完整账本 wall ns/op | 完整账本 CPU ns/op |
-|---|---:|---:|---:|---:|
-| 1 | 31.08 | 138.21 | 235.37 | 234.49 |
-| 8 | 4.04 | 711.01 | 1029.67 | 6533.57 |
-
-多线程样本显示共享桶锁争用成本，不能宣称无开销。wall ns/op 是聚合吞吐倒数，CPU ns/op 为进程 CPU
-消耗除以操作数；不代表单请求 P99、真实 URMA 链路吞吐，也不是 master 与 PR 的端到端 A/B。
-ccache 统计观测到 887 次命中；这是该缓存累计值，不等同于本次所有编译均命中。
-Bazel 的两个 URMA 测试目标采用静态链接以解决动态依赖中 allocator 符号缺失；gate 补齐相邻测试使用的
-链接依赖，指标测试改用 TEST_TMPDIR，最终故障 34/34 和 gate 10/10 通过。CMake 故障复测仍为 34/34。
-配置范围专项测试 1/1 通过，18 份模块元数据有效。
-
-HTML 已发布并在 1440px 和 390px 检查：无页面 JS 异常、无页面横向溢出、目录锚点完整。PR 已创建，当前提交的最终门禁结果见本节末。
-尚无真实 UB 设备证据，不能声称物理 DMA 恢复、provider quiescence 契约、真实硬件性能已验证。
-完全收不到任何 flush/停止证据的隔离路径保留额度；强制 reset 的设备合同仍为后续硬件验证项。
+`urma.wr_token_wait` 追加 phase ID 31，复用现有 phase 协议。每个 Trace 按一个槽累计本地与下游等待，旧端忽略未知 ID；不加入派生阶段扣减集合。`wr_token_wait_failed_total`（ID 147）统计失败尝试，日志限频。更多概念和开发位置见 [开发视图](developer-view.md)。
 
 
-### PR 门禁修复记录
+### Use Case 到最终测试的对应
 
-首轮 CodeCheck 四项问题通过职责拆分与封装修正：隐藏桶状态类型、拆分等待逻辑、取消可修改账本引用、
-用明确 WR 描述结构替代长参数列表。第二轮仅剩调用参数缩进，修正后第三轮 CodeCheck 通过。
-功能调整后重新通过 CMake token 17/17、fault 34/34、gate 10/10、跨 Worker GET 2/2、非 URMA token 17/17，
-以及 Bazel 三目标；该轮格式修正只调整空白；后续另补充下面记录的测试 mock 签名修正。
-
-首轮 x86 构建 11441 完成编译，但 Python 打包因缺少 wheel 失败；该轮日志显示 CI 的 Python 3.9 依赖安装
-失败后被忽略。未用修改业务代码掩盖环境问题；后续 x86 构建已通过，最终结论以当前提交门禁为准。
-
-
-ARM 构建 11377 暴露既有 binmock 用例仍按旧内部函数签名匹配的问题。已同步 13 处 READ/WRITE/gather
-mock 参数数量及 3 个回调签名，并断言迁移传入非空本地 buffer owner。最终测试文件通过 CMake 生成规则编译
-（使用 ccache）；非 URMA Bazel 配置下迁移 14/14、远程 GET 准入 3/3 通过。
-补充完整 worker 单测在 root 下为 119/120，失败项 `RevokeHealthProbeReportsUnlinkFailureAndRetries` 在 chmod 后
-仍能成功删除文件。使用同一二进制在独立可写目录以普通用户 nobody 复测后，120/120 通过，另有 1 项原有禁用测试；
-XML 为 121 项、0 failures、1 disabled，进程退出码 0。该差异确认了权限测试的 root 环境限制，没有修改健康探针源码或断言。
-
-
-ARM 11378 编译通过后执行 5311 项测试，暴露 `kv_metric_urma_id_layout_test` 仍断言旧枚举结束值 146。
-已补齐新指标 `WR_TOKEN_WAIT_US=146` 的编号及名称校验，并更新 `KV_METRIC_END=147`，已有指标编号保持不变。
-目标环境使用 ccache 的 CMake `ds_ut` 构建通过，执行 `--gtest_filter=MetricsTest.*` 得到 104/104、0 failures。
-独立 Bazel metrics 目标因既有传输符号依赖缺失未链接成功；上述运行证据来自 CMake 二进制。
-当前提交的指标布局用例在 ARM 11379 中通过。
-
-
-上一轮 ARM 11378 的最终失败还有 `ProducerTest.TestReCreateProducerDiscardData` 超时。
-验证机 CMake 构建 `ds_st_stream_cache` 后独立执行该用例，1/1 通过（6.092 秒）；未在此环境复现。
-单次本地通过不能替代 ARM 验证；后续连续复测及最终门禁结果见下文。
-
-
-### 2026-09-14 提交门禁与交付结论
-
-提交 `18c1543e05dd45fa05cef3eaa344b14ccbf71943` 的六项启用门禁最终均为 SUCCESS：
-CodeCheck、License、SCA（trigger 11273），x86 构建 11445，ARM 构建与测试 11379，Bazel x86 7297。
-额外 Bazel ARM 作业被 CI 配置跳过，不计为通过。PR 尚未合入，等待维护者评审。
-
-ARM 并非首轮全绿：自动复测后最终通过，包括前轮超时的 producer 重建用例。
-该 producer 用例在验证机一次运行通过，随后连续复测也出现 60 秒 CreateProducer 超时；抓栈显示
-AddCursorForProducer、RemoteAck、AckCursors 等待 StreamManager 的同一互斥量，尚未证明锁的持有者及根因。
-本 PR 与基线在 stream_cache 源码和该测试上没有差异，未用放宽超时或屏蔽用例改变结果；这是需单独追踪的
-stream 并发风险，不能用最终门禁成功推导它已修复，也不能据此认定由 WR token 机制引起。
-
-本次交付覆盖 WR 准入、配置等待、独立完成账本、无数据 CQE 后台退役和安全结清、mock 用例、
-指定环境 CMake/ccache 验证及双构建门禁。真实 UB provider 停止/reset 契约和硬件 A/B 仍未验证。
-
-
-## 9. 2026-09-16 rebase 与检视修复
-
-基线 `fcaace844adee1142fa105aeb9df0134b0512bb3`，提交 `0abc656d70b8b4422d4aa248d8b8360736d14779`。
-
-默认值按检视意见调整为 `capacity=100`、`wait_us=5000`、`recovery_timeout_ms=5000`；等待参数范围扩大到 [0, 60000]us。
-仅明确准入拒绝且零提交的当前 WR 窗口做最多 3 次尝试，100/200us 退避，总体受 API 期限约束。
-已提交前缀、provider 错误、未知接受范围不重放。关闭 token 时旁路新增同步、指标和扫描。
-确认 flush 后删除失败按恢复间隔重试，期间保留 credit/owner 和 live-resource 计数；成功后结清。
-重试时隔离表向待删除表转移所有权，避免失败回调与再次选取竞态；没有 flush 或 modify 失败不允许强删。
-
-| 验证 | 本次结果 |
-|---|---|
-| CMake WR token | 17/17，0 failure |
-| CMake URMA mock 故障及客户端配置 | 38/38，0 failure |
-| CMake Jetty gate | 10/10，0 failure |
-| CMake WR 配置默认值及边界 | 3/3，0 failure |
-| CMake 跨 Worker GET | 3/3，0 failure |
-| 非 URMA CMake token | 17/17，0 failure |
-| 文档元数据、差异及敏感信息扫描 | 18 份元数据有效；差异与全分支扫描通过 |
-
-使用指定验证环境、CMake Release、URMA mock 和 ccache。构建目标为 `ds_ut_urma_wr_token`、
-`ds_ut_urma_send_jetty_fault`、`ds_ut_urma_jetty_gate`、`flags_ut`、`ds_st_urma_wr_token`、
-`datasystem_worker_bin`、`urma_wr_token_bench`，`cmake --build build --target <targets> -j16`。
-直接执行测试二进制并保留 XML；ST 过滤 `UrmaWrTokenStTest.*`，flags 过滤 `FlagsTest.Urma*`。
-非 URMA 使用独立 CMake 目录构建并运行 token 目标。以上数字不代表整个 CTest 套件。
-
-新业务用例关闭 TCP fallback，12MiB GET 注入首次准入拒绝后完整返回；组件用例实际占满容量，
-稍后完成旧 WR 后新窗口继续，最终 outstanding=0。覆盖最多尝试次数、API 已过期、部分提交不重放、
-关闭 token 和删除失败后再次结清。首次删除故障用例等待短暂 WAIT_FLUSH 状态失败，改为等待稳定隔离结果后通过，
-不将该测试时序修正称为生产代码的 TDD 红绿证据。
-
-软件微基准每线程 100 万次：1/8 线程禁用桶 acquire 为 59.69/7.73 wall ns/op，baseline 为 31.13/4.87；
-四组均 errors=0、最终 outstanding=0。wall ns/op 为聚合吞吐倒数；这是软件桶微基准，
-不是整个 PostSendWr 的耗时或真实硬件性能 A/B。ccache 命中已确认。
-
-首轮 CodeCheck 两项问题已修复，当前提交门禁尚未得出结果，不沿用 18c1543e0 的旧版全绿结论。真实 UB 停止/reset 合同仍未验证。
-
-验证审计：发现 rsync 保留时间导致增量对象新于源码后，已核对全分支变更文件 SHA256、刷新这些文件的验证机时间并重建全部相关目标，再执行上述测试。配置 XML 含默认值新用例，共 3 项；只以此次重建后的 XML 作为本轮最终证据。
-
-补充回归：故障测试集独立执行 5 轮，每轮 38/38；CodeCheck 包含顺序和退避命名常量修正后，CMake 增量构建及故障 38/38 再次通过。未修改重试次数、退避值或结清时机。
-
-2026-09-17 门禁跟进：ARM 首轮报告多个测试失败。`TopologyRecoveryManagerTest.MembershipDeleteDoesNotBreakAnInstallingCandidate` 本地 50 次执行失败 15 次，均在第二次重复候选上报时返回 payload 未被请求。移除会与安装后成员删除竞态的重复上报，保留 READY 和安装期读保护断言；修正后目标用例 100/100，整个 topology recovery 组 50/50。`ProducerTest.TestWriteLessThanWritePage` 本地复测 10/10，通过不等于 ARM 原失败已解释。其他 ARM 结果仍在收集；当前提交门禁待完成。
-
-### Use Case 与实测用例对应
-
-下表名称均已对照本次成功 XML 核验。验证范围为 CMake 组件或 URMA mock；不扩展为真实设备证明。
-
-| Use Case | 本次实际通过的用例 |
+| Use Case | 已通过的代表测试 |
 |---|---|
 | UC01 | `MultiChunkRemoteGetUsesWrAdmission`、`GatherLargerThanCapacityMakesProgress` |
 | UC02 | `FifoPreventsSmallRequestBypassingHead`、`ReleaseWakesWaitingCaller` |
@@ -324,7 +228,13 @@ stream 并发风险，不能用最终门禁成功推导它已修复，也不能�
 | UC14 | `DisabledTokensBypassClosedBucket`、`UrmaWrTokenConfigurationBoundaries`、`UrmaWrTokenProductionDefaults` |
 | UC15 | `AdmissionRetryResumesOnlyUnsubmittedWindow`、`RemoteGetRetriesAdmissionWithoutTcpFallback` |
 | UC16 | `AdmissionRetryIsBoundedByAttemptsAndDeadline` |
+| UC17 | `LedgerAllocationFailureReturnsUnsubmittedPrefix` |
+| UC18 | `TwoWrSharedBufferLivesUntilBothCompletions`、`TwoWrWaitAppearsInClientAndWorkerSummary` |
+| UC19 | `ReadAndWriteAdmissionFailuresPreserveStatusAndCleanup` |
+| UC20 | `RepeatedAdmissionFailuresRemainInRequestSummary`、`WrWaitAggregatesAcrossWrAndDownstreamWithoutDoubleSubtracting`、`TwoWrWaitAppearsInClientAndWorkerSummary` |
 
-UC09 通过明确删除 Event 后仍持有 credit/owner 的组件场景验证独立记账；不宣称穷举了真实集群的每一种 TTL/驱逐调度。UC12 验证无停止证据时保持额度、确认 flush 后删除重试成功才归还；并未验证真实设备强制 reset。
+## 9. 修订与限制
 
-补充同类检查：observer 异常用例存在另一处无同步的重复候选上报，本地 100 次失败 26 次。移除这次重复上报后目标 100/100，完整 topology recovery 50 项连续 20 轮全过；安装中重复上报的专用屏障用例仍保留。当前 HEAD 0abc656d70b8b4422d4aa248d8b8360736d14779 已再次触发门禁。
+此前已完成最新主线 rebase、默认值扩大、仅未提交窗口的有界重试、关闭快路径和确认 flush 后删除失败重试。此次补齐异常回滚、等待可观测性及两 WR 取证；两个检视讨论已回复并确认解决。
+
+验证中修正了测试枚举清单、后台探测计数混入及进程日志路径，不据此扩大生产修复结论。源码指纹核对、CMake 编译缓存和非 URMA 独立构建均有证据。真实 UB 的安全停止/reset 与生产性能仍未验证。
