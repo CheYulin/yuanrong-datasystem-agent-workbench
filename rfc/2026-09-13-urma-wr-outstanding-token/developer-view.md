@@ -64,3 +64,6 @@ provider 返回明确 bad WR 时，只归还从该 WR 开始的未接受后缀�
 | 配置入口 | flags、CLI JSON、Helm、说明文档 | 默认值和上下界同步；us 与 ms 不混淆 |
 
 TDD 验收必须包含：第二区间登记分配失败的 RED/GREEN；两个 WR 乱序/重复完成与共享 owner；容量 1 下恰好两 WR 的跨 worker 数据一致性；持续额度失败时 provider 零调用且日志限频；client/worker summary 等待耗时；无成功 poll、flush 缺失、删除失败重试与 shutdown。使用 CMake+ccache，在核对源码指纹后运行；每项报告区分组件 mock、系统测试和真实设备证据。
+
+
+性能与计时口径详见[详细设计 §4.4](detailed-design.md)：立即准入wait=0不代表没有锁/登记成本；WR等待不含重试退避；既有post/transport区间包含新增准入。微基准只覆盖软件桶/账本，尚不能给出真实链路性能结论。

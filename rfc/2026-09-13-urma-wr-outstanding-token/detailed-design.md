@@ -127,14 +127,61 @@ gather 先构造完整描述符但不预占额度，再逐窗口申请并提交�
   对端超时/复用仍需沿传输协议验证，不能由 token 守恒推导。
 - 仅 provider 删除成功后批量结清；ERROR 设置成功本身仍不等于 flush 完成。
 
-### 4.4 性能、风险与回滚
+### 4.4 性能开销、耗时口径与发布边界
 
-不增加数据复制或 IO；每 WR 增加一次准入操作及账本更新。立即成功不分配 FIFO waiter 节点；
-拥塞时使用有界期限，后台扫描范围受 live jetty 和 token 容量限制。需测锁争用、分配开销与吞吐影响。
+以下按当前实现 `644dca738` 说明。容量控制会增加 CPU、锁竞争和内存驻留开销；当前证据不足以宣称“无性能影响”。这里区分源码可确定的成本、已测软件微基准和尚未测量的真实链路影响。
 
-这是共享传输层的高风险变更，需要 URMA 生命周期及并发领域维护者评审。无持久化格式变更。
-启动 capacity=0 可回退到既有 lane 路径；不允许热缩容。上线先小范围，观测 token 水位、等待分布、fallback、
-retire/flush/delete 失败；真实硬件压测结果决定最终默认值。
+#### 提交、完成与后台成本
+
+| 路径 | 增加的工作 | 成本与边界 |
+|---|---|---|
+| 无排队准入 | 时间读取、进程共享 bucket 的 bthread mutex、计数及 shared_ptr 引用操作；每次尝试记录直方图 | 单 WR 一次预约；Gather 每个窗口一次预约。没有等待队列节点分配，但不是无锁路径 |
+| 逐 WR 登记 | 每 Jetty ledger mutex、requestId 查找/插入、unordered_map 节点分配、posted 时间戳和 owner 引用 | 按实际 WR 数发生；坏链校验及登记为窗口长度的线性遍历。栈上回滚守卫本身不分配 |
+| 额度拥塞 | FIFO list 节点分配、条件变量挂起/唤醒、重新获取锁、到期检查 | bthread 等待而非忙轮询；调度和锁竞争可能使实际返回晚于配置预算。大窗口位于队首时后续小窗口也需等待 |
+| 匹配 CQE | Jetty registry mutex/查找/weak_ptr 提升，ledger mutex/查找/摘除；锁外释放 owner，归还 token 时再次获取 bucket mutex 并通知队首 | 这是轮询完成处理的新增成本，会影响通知前处理时间；不是只有提交端多一次计数。最后一个 owner 的析构/内存回收也可能在此发生 |
+| 后台恢复 | 复用现有 RefillLoop，通常每50ms醒来，通知可更早唤醒；收集有效 Jetty 引用并逐账本检查过期 | 不新建线程，但增加扫描、临时vector分配和锁竞争；一次扫描上界按 O(J+W) 理解，J为注册Jetty数、W为检查到的账本条目数，不是每轮固定O(1) |
+| 删除重试 | 已确认flush且删除失败的隔离项，按 recovery_timeout_ms 间隔重新调度原删除器 | 默认5000ms为检查/重试阈值，实际恢复还取决于调度、post drain、flush与delete，不能解释为5秒内必定归还 |
+
+不增加有效载荷复制，但会延长 buffer owner 的持有时间。账本条目/额度受capacity约束；buffer字节数并不因此有同样的上限，Gather共享集合还可能持有整个批次的源内存。需要观察驻留内存与释放延迟。
+
+capacity=0 会跳过新增的 token Acquire、等待直方图/summary、逐WR登记、CQE账本查找和恢复扫描。它不等于与基线机器指令完全一致：统一post封装/链校验、owner参数转递、Gather源owner集合构造，以及Jetty账本对象初始化仍可能存在。关闭tracing只跳过summary归集，不关闭已启用额度路径的指标和账本。
+
+#### 耗时与日志的变化点
+
+| 观测项 | 当前精确口径 | 不包含或不能推断的内容 |
+|---|---|---|
+| `wr_token_wait_us`，histogram ID146，us | 每次启用额度的准入尝试记录一次，包括失败与0；只有实际走过条件变量等待才记正耗时，采样从Acquire加锁前start到等待分支退出 | 立即准入记0，即使获取mutex/计数有成本；不等于整个Acquire耗时。排队样本可包含初始锁竞争和唤醒重新获锁时间 |
+| `urma.wr_token_wait`，phase31，us | 复用上述waitedUs，同一Trace内多个WR、窗口和失败尝试求和，再通过既有phase协议合并下游，进入client/worker summary | 不含100/200us重试退避、账本登记、provider调用、CQE处理和后台恢复。并行分支的累计量不保证等于请求关键路径时长 |
+| `wr_token_wait_failed_total`，counter ID147 | 每次Acquire返回错误递增，包括预算耗尽、deadline或关闭等错误 | 不是最终失败请求数；一次请求多次尝试可多次计数。不要与普通完成失败混用 |
+| `[URMA_WR_TOKEN_WAIT_FAILED]` | 同一调用点每秒限频输出waited_us、outstanding、requested和原status | 日志条数不能代替失败计数；限频减少输出，但失败状态构造和计数仍有成本 |
+| 原 `[UrmaWrite] elapsed` / `postUs` | Timer及postUs在准入之前设置，成功日志包含这次提交的准入、重试、登记和provider调用等软件工作 | 不能继续解释成纯provider post或DMA耗时；失败路径可能没有成功的finish-write日志。`postUs`不是实际进入provider的时刻 |
+| 原 `urma_write_latency` / transport总耗时 | 既有ScopedTimer包围的写循环作用域、既有transport区间不移动；现在自然包含新增准入工作 | 字段名未改但工作内容变了；版本前后升高可能来自背压和软件处理，不能直接归因为设备变慢 |
+| 完成与恢复 | CQE回调在通知业务前结清账本；恢复日志标识retire/flush/delete阶段 | 当前没有独立的ledger CPU、bucket锁等待、provider-only post或总恢复耗时分解，不能从wr_token_wait反推出这些值 |
+
+summary仅在已有Trace包含tick时记录，仍受原有采样/慢日志策略约束。实现扫描已有固定容量数组（最多12个downstream phase），找到WR项后累加，不为每个WR新增tick或动态容器；首次加入时若槽位已满仍可能drop，应结合phase_dropped判断，字段缺失不能直接当作0。`URMA_WR_TOKEN_WAIT`加入process慢日志判定，可能使原来未打印的请求触发summary输出；格式化/I/O量也可能变化。
+
+WR等待是transport总耗时的重叠细项，未加入derived减法列表。不要把它再次加到总耗时，也不要在不同作用域/并行累计口径下简单相减以估计DMA时间。一个Req拆两WR时，每项/每次尝试的waitedUs累加到同一槽；额度释放仍按各WR分别进行。
+
+默认最多3次准入，每次等待预算5000us，两次退避100/200us，按检查点受API剩余预算限制。理论配置预算合计15300us仅用于说明策略；实际墙钟还包含锁、调度及其他工作，不是硬实时上限。summary只合计实际记录的waitedUs，不包含这300us退避。
+
+#### 已有微基准与不足
+
+下表复用已保存测量，不是本次文档更新重新跑出的结果。验证环境为x86_64、CMake Release+ccache、WITH_TESTS=ON；每线程100万次操作，共享capacity64桶，每线程独立ledger。基准直接调用桶/账本，没有真实provider和非空buffer owner。
+
+| 场景 | 1线程 wall ns/op | 8线程 wall ns/op | 8线程 cpu ns/op |
+|---|---:|---:|---:|
+| baseline：计时/校验循环 | 30.46 | 3.94 | 29.93 |
+| disabled_acquire | 57.58 | 7.43 | 49.85 |
+| acquire_reset | 208.07 | 947.57 | 5977.85 |
+| acquire_track_complete | 388.63 | 1280.94 | 8106.34 |
+
+全部场景errors=0、最终outstanding=0。wall ns/op为总墙钟除以总操作数，即聚合吞吐倒数；8线程1280.94ns/op不能表述为“每个请求只增加1.28us”，也不是P99。cpu ns/op为进程CPU增量除以总操作数，包含并发线程的CPU消耗。baseline包含计时和循环开销，不是旧版真实传输基线。
+
+8线程结果提示共享bucket竞争成本值得关注，但它没有把锁、分配、引用计数分别归因；也未覆盖同一Jetty的多线程ledger竞争、真实CQE registry/轮询、等待饱和、非空owner析构、指标/summary/日志和后台扫描。capacity64下最多8个并发单额度操作，不是在测容量耗尽的排队性能。disabled基准直接调用Acquire，实际PostSendWr关闭时会跳过Acquire，两者不能等同。含测试注入检查的结果不能替代生产构建与真实UB设备A/B。
+
+封版前如需性能结论，应在同一机器/同一负载对比基线、当前capacity0与capacity100，分别控制tracing/metrics配置；至少覆盖小对象高QPS、1.5MiB两WR、Gather、容量饱和和恢复，记录吞吐、P50/P95/P99、CPU、分配/驻留内存、等待分布、失败/fallback及恢复时间。上述真实链路性能对比尚未完成，当前门禁通过不能充当“无性能退化”结论。
+
+源码依据：`urma_wr_token.cpp`的Acquire/WaitForCapacity/Track/Complete，`urma_resource.cpp`的RecordWrTokenWait/PostSendWr/RefillLoop/GetJettyById，`urma_manager.cpp`的UrmaWriteImpl/CheckCompletionRecordStatus，`trace.cpp`的AddDownstreamPhase和`latency_phase.cpp`的process gate。容量0只能在初始化配置时回退，不支持热缩容；Pipeline H2D兼容性和真实设备安全停止边界仍按本RFC其他章节执行。
 
 ## 5. 组件接口与配置
 
