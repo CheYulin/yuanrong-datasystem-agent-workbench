@@ -4,7 +4,7 @@
 源码基线：upstream master `fcaace844`。
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)，本次基于最新主线 rebase，最终提交与验证结果见第 8 节。
 [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
-本修订替代 2026-09-13 草案；实现提交 `4a580cf3d318c4d3127d0a2d7d8a75a8dc967c29`。
+本修订替代 2026-09-13 草案；实现提交 `644dca738d97ffe8fe7436409b0890b5c95a83d3`。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
@@ -201,7 +201,7 @@ workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
 | tracing / metrics / topology | 201/201 | `final-summary-common-green.xml` |
 | 非 URMA token | 17/17 | `final-summary-no-urma.xml` |
 
-实现提交 `4a580cf3d318c4d3127d0a2d7d8a75a8dc967c29`，相关 CMake 回归通过，当前提交 6 项启用门禁全部通过。完整红绿对照、两 WR 请求级证据、微基准与设备边界见 [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)。
+实现提交 `644dca738d97ffe8fe7436409b0890b5c95a83d3`，相关 CMake 回归通过，当前提交 6 项启用门禁全部通过。完整红绿对照、两 WR 请求级证据、微基准与设备边界见 [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)。
 
 账本前缀回滚使用仅含引用/指针的栈上守卫；第 N 项登记失败不会遗留前 N-1 个未提交项。READ/WRITE 清理后返回前置原错误，真正 provider 错误才进入 provider 诊断。
 

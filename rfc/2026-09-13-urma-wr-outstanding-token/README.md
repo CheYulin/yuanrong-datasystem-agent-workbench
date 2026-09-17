@@ -1,6 +1,6 @@
 # URMA outstanding WR 控制与安全归还
 
-2026-09-17 · 基线 `fcaace844` · 实现 `4a580cf3d318c4d3127d0a2d7d8a75a8dc967c29` · 当前提交 6 项启用门禁全部通过，尚未合入。
+2026-09-17 · 基线 `fcaace844` · 实现 `644dca738d97ffe8fe7436409b0890b5c95a83d3` · 当前提交 6 项启用门禁全部通过，尚未合入。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
