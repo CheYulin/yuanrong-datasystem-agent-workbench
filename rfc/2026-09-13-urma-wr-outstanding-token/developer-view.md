@@ -1,12 +1,14 @@
 # WR 额度：关键概念与开发视图
 
-状态：2026-09-18。当前实现 `5bdc13c65`，已合入主线 `3d31acd54` 并推送 PR #2422。合并后软件/mock及采样回归117/117通过；随后修复4项CodeCheck问题，受影响62/62重跑通过。本轮远程门禁尚待最终结果。
+状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
 ## 先分清请求、WR 和令牌
 
 一个业务请求 Req 可以拆成多个 WR。WR 是向 URMA provider 提交的实际工作单元，令牌按照 WR 数量计费。例如一个 Req 切成两段写入，就是两个 WR、两个唯一 requestId、两份额度；不能按一个 Req、一个 Event 或一个 Jetty 只扣一次。
+
+额度的作用域是本进程经该URMA manager发起的read/write/gather提交。同一芯片上其他进程的提交、对端发起的入站操作，不会自动进入这个桶；芯片级统计必须先对齐进程、方向和时间窗口，不能拿总量与单进程capacity直接比较。
 
 Jetty 是提交和恢复的资源，不是令牌。JFC 是完成队列，poll 读出完成通知；poll 暂时没有结果并不意味着 WR 已停止。Event 用来等待或通知业务调用者，业务超时或 Event 删除也不意味着 DMA 已停止。
 

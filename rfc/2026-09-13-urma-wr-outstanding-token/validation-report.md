@@ -1,6 +1,6 @@
 # URMA WR 额度控制：验证报告
 
-状态：2026-09-18。当前实现 `5bdc13c65`，已合入主线 `3d31acd54` 并推送 PR #2422。合并后软件/mock及采样回归117/117通过；随后修复4项CodeCheck问题，受影响62/62重跑通过。本轮远程门禁尚待最终结果。
+状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](detailed-design.md) · [开发视图](developer-view.md)
 
@@ -21,7 +21,7 @@
 
 系统套件85.212秒是全部测试墙钟耗时，不是请求延迟。历史644dca738的277项公共/mock测试、17项独立非URMA验证与6项门禁为旧版本记录，不与本轮相加，也不作为新门禁通过证据。
 
-最新 `5bdc13c65` 为两文件内部整理：诊断字段收拢为局部结构、显式lambda捕获、宏参数缩进、并行执行上下文提取到同文件helper；不扩公共接口。受影响49+7+6共62项重跑通过，2个变更文件严格SHA一致；这轮ST为88.755秒，仍不是性能测量。上一轮CodeCheck的4项失败有逐项修复，新远程门禁不能沿用旧结果。
+`5bdc13c65` 为两文件内部整理：诊断字段收拢为局部结构、显式lambda捕获、宏参数缩进、并行执行上下文提取到同文件helper；不扩公共接口。受影响49+7+6共62项重跑通过，2个变更文件严格SHA一致；这轮ST为88.755秒，仍不是性能测量。上一轮CodeCheck的4项失败有逐项修复，新远程门禁不能沿用旧结果。
 
 ## TDD红绿对照
 
@@ -44,6 +44,8 @@ QueryAndGet定向UT模拟两次11us等待贡献，验证access累计22；覆盖0
 ## WR、请求、inflight与chip
 
 容量是进程级软件预约加尚未安全结清的WR额度上限。一个逻辑read/write/gather的全部WR同时预约，随后转入逐WR账本；不是跨节点整个GET/SET/BatchGet的分布式原子预约。
+
+本桶约束本进程经URMA manager发起的提交；同芯片其他进程和对端入站操作不共享该桶，比较设备统计前需要对齐进程、方向和时间窗口。
 
 Event在准入前创建、可保留或先于硬件结束删除；因此Event峰值329与容量100不能直接证明超发。chip字段也是Event关联生命周期统计，不是bucket/ledger，更不是厂商芯片内部WQE计数。观察实际bucket的capacity/outstanding_snapshot/peak/waiting_snapshot，并关联request_id、申请WR数、预算、Acquire耗时与状态。快照不等于过去准入瞬间的原子快照。
 
@@ -86,4 +88,19 @@ Worker定向7例来自现有worker_oc_service_impl_test.cpp，使用外部CMake�
 
 ## 门禁与交付状态
 
-新增提交保留旧历史。主线合并后的117项回归已通过，PR已推送并重新触发门禁；四条检视讨论已回复并回读确认关闭；远程门禁待最终结果，不把旧门禁或禁用任务记作通过。
+新增提交保留旧历史。主线合并后的117项回归已通过，PR已推送并重新触发门禁；四条检视讨论已回复并回读确认关闭；当前6项启用门禁全部通过，不把旧门禁或禁用任务计入本轮。
+
+## 当前提交门禁
+
+当前 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
+
+| 门禁 | 结果 | 同轮证据 |
+|---|---|---|
+| CodeCheck | SUCCESS | [trigger #11435](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/trigger/job/yuanrong-datasystem/11435/console) |
+| license | SUCCESS | 同上 |
+| SCA | SUCCESS | 同上 |
+| x86_64 | SUCCESS | [#11611](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/x86-64/job/yuanrong-datasystem/11611/console) |
+| aarch64 | SUCCESS | [#11545](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/aarch64/job/yuanrong-datasystem/11545/console) |
+| Bazel x86 | SUCCESS | [#7459](https://ci.openeuler.openatom.cn/job/multiarch/job/manual-jobs/job/openeuler/job/openyuanrong/job/Test_Datasystem_Bazel_x86/7459/console) |
+
+ARM两组C++测试首轮分别为5396项中2项异常、200项中3项异常，官方自动重跑分别2/2、3/3通过，随后Python检查报告140项、状态OK（7项跳过），example通过。保留首轮失败记录，不称为全程零失败。这5项为既有Exist、PubSub、Eviction与Stream/Producer用例；未证实其失败与WR特性的因果关系。Exist用例在指定验证环境重复1000次未复现，未为此扩展特性生产代码。以上远程门禁与本地WR专项117项/62项是不同证据，不相加冒充特性覆盖数。

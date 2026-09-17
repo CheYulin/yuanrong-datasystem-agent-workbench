@@ -1,6 +1,6 @@
 # URMA outstanding WR 控制与安全归还
 
-状态：2026-09-18。当前实现 `5bdc13c65`，已合入主线 `3d31acd54` 并推送 PR #2422。合并后软件/mock及采样回归117/117通过；随后修复4项CodeCheck问题，受影响62/62重跑通过。本轮远程门禁尚待最终结果。
+状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)
 

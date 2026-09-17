@@ -1,6 +1,6 @@
 # URMA outstanding WR 控制与无完成恢复：详细设计
 
-状态：2026-09-18。当前实现 `5bdc13c65`，已合入主线 `3d31acd54` 并推送 PR #2422。合并后软件/mock及采样回归117/117通过；随后修复4项CodeCheck问题，受影响62/62重跑通过。本轮远程门禁尚待最终结果。
+状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
 
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。保留旧提交历史，以新增提交交付修复。报告未提供部署 SHA，源码缺陷与现场 trace 根因分别陈述。
 
@@ -49,7 +49,7 @@ jetty，使用受限补池及 TCP fallback；不能靠超时清零制造空闲�
 - 完成及确认静默后的额度归还必须先于 buffer owner 析构；退出 ledger 锁后归还，批量静默回收先归还全部 token 再清理 owner。未确认设备停止时禁止回收。普通完成和静默回收测试须在 owner deleter 内验证可立即重新申请全部已归还额度。
 - 已定位准入后至 provider 调用前的超期窗口：提交前必须重新检查 API deadline；超期时回滚尚未调用 provider 的整条链，提交数为零。故障注入测试先复现超期仍提交，再验证拒绝和额度归零。这只能阻止已知超期的新提交，不构成抢占或硬实时返回保证。
 - chip 计数随 UrmaEvent 构造递增、析构递减，仅覆盖携带有效源 chip counter 的事件；Event 表随插入/删除变化，外部引用可延迟析构。因此 chip 合计不要求等于 Event 表大小，更不等于 token outstanding。不能拿两者验证 QD 硬上限。
-- 一个请求全部 WR 同时满足：本轮实现以一次逻辑 URMA 读、写或 gather 为预约边界，在第一个 provider 调用前一次拿齐该次传输全部 WR 的额度；超容量直接拒绝，不再逐 chunk／窗口准入。跨节点 GET/SET 或 BatchGet 多对象调用之间的原子预约不在这个进程级边界内，仍需单独确认，不能宣称已覆盖整个分布式 API。当前已完成软件回归并推送，新的远程门禁仍待结果。
+- 一个请求全部 WR 同时满足：本轮实现以一次逻辑 URMA 读、写或 gather 为预约边界，在第一个 provider 调用前一次拿齐该次传输全部 WR 的额度；超容量直接拒绝，不再逐 chunk／窗口准入。跨节点 GET/SET 或 BatchGet 多对象调用之间的原子预约不在这个进程级边界内，仍需单独确认，不能宣称已覆盖整个分布式 API。当前已完成软件回归并推送，最新6项远程门禁已全部通过。
 - QD 验收针对 bucket reserved + potentially accepted；Event 表及 chip 业务计数单独说明。需要可关联请求的 requested、capacity、outstanding、准入总耗时、结果和归还原因，避免逐 WR 高成本日志。
 - 准入日志新增真实 token 快照：`capacity`、`outstanding_snapshot`、`peak`、`waiting_snapshot`。`peak` 是同一 bucket 初始化以来的最大预约额度，在既有桶锁内更新，不能用采样瞬时值代替峰值。快照在日志实际输出时取得，不与此前准入事件原子绑定。
 - `wait_us` 保持现有等待分支口径（实际条件等待才为正，从Acquire加锁前计时，含锁竞争）；`acquire_us` 覆盖整个 Acquire 调用（含桶锁等待），不包含后续账本登记/provider/CQE。`request_id`、`requested`、`wait_budget_us`、`api_remaining_at_entry_us` 与结果共同解释准入边界。失败日志继续每秒限频；成功按既有慢阶段阈值或 VLOG 输出。关闭 token 时旁路；格式化及快照锁只在日志输出时执行。新增一次结束时钟读取，正常准入在已有锁内增加峰值比较，无额外堆分配。
@@ -278,7 +278,7 @@ workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
 | 跨Worker系统 | 6/6 | 多WR预约、超容量拒绝、两端等待摘要、64×64并发BatchGet |
 | 主线采样兼容 | 27/27 | request/access独立采样、0/1边界、access guard与记录格式 |
 
-CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出。34个变更C++文件严格SHA相等。系统套件85.212s是测试总墙钟时间，不是性能指标。本表属于合入最新主线后的验证；远程门禁尚待最终结果。
+CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出。34个变更C++文件严格SHA相等。系统套件85.212s是测试总墙钟时间，不是性能指标。本表属于合入最新主线后的验证；最新6项远程门禁已全部通过。
 
 历史 `644dca738` 曾通过277项mock/公共组件与17项独立非URMA测试及6项启用门禁；这些只作为历史记录，不计入本轮117项，也不证明新提交门禁已过。独立微基准及其构建入口已从特性PR移除，历史测量保留为参考。
 
@@ -325,6 +325,34 @@ CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出�
 
 相对最新主线 `3d31acd54` 的最终代码统计：生产C++ 24文件，新增1204、删除241，净增963；旧版为23文件、新增956、删除217，净增739。不能因删除微基准就声称生产代码缩小。本轮必要修复增加了逻辑传输预约、deadline继承、异常恢复和关闭排空；新触及的生产文件为QueryAndGet实现。独立174行微基准及12行构建入口已移出特性PR，另删除无生产调用者的20行提交封装。进一步删去ledger、post gate或安全删除证明会削弱QD/内存所有权不变量，不作为封版减行方案。测试10文件新增1809/删除30；构建6文件新增56/删除7；文档配置6文件新增104/删除1。总计46文件新增3173/删除279；主线自带变更不计入本PR。
 
+生产改动集中在8个文件，另外16个文件合计净增73行。以下均相对主线 `3d31acd54`，加减行包含移动和替换，不能把新增行全部当作新运行逻辑：
+
+| 生产范围 | 文件数 | 新增/删除 | 净增 | 必要性及可收缩边界 |
+|---|---:|---:|---:|---|
+| `urma_wr_token.{h,cpp}` | 2 | 377/0 | 377 | 容量、FIFO、预约RAII及逐WR账本；删除会失去守恒和所有权基础 |
+| `urma_resource.{h,cpp}` | 2 | 419/12 | 407 | 提交许可、部分接受、后台退役、隔离重试和安全删除；已去掉20行无生产调用封装 |
+| `urma_manager.{h,cpp}` | 2 | 212/168 | 44 | 读写/gather接入整量预约并传递owner；多数为替换旧提交循环 |
+| 并行BatchGet实现 | 1 | 60/16 | 44 | 继承绝对deadline并避开TBB在可迁移bthread执行的问题；只提取同文件helper |
+| QueryAndGet实现 | 1 | 23/5 | 18 | 补齐入口采样、Worker等待摘要与NA/丢弃诊断；未扩protobuf |
+| 其余配置、计时及调用适配 | 16 | 113/40 | 73 | 配置贯通、phase定义、deadline访问和owner参数传播 |
+
+核心bucket/ledger、resource与manager合计净增828行，占生产净增963行的约86%。可以将独立测量工具移出PR，也已执行；若再移除账本或异常关闭机制，会改变本特性的安全合同。真实硬件性能A/B尚缺，不能据此宣称当前实现已经达到最小成本。
+
 ### 主线采样兼容边界
 
 最新主线将request与access独立采样：request日志被保留，不代表该请求一定有access等待摘要；request采样率较低但access采样率为1时，access仍可全量采集。分析缺失字段必须同时检查access采样配置、latency开关和丢弃计数，不能将缺失解释为0us。
+
+## 当前提交门禁
+
+当前 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
+
+| 门禁 | 结果 | 同轮证据 |
+|---|---|---|
+| CodeCheck | SUCCESS | [trigger #11435](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/trigger/job/yuanrong-datasystem/11435/console) |
+| license | SUCCESS | 同上 |
+| SCA | SUCCESS | 同上 |
+| x86_64 | SUCCESS | [#11611](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/x86-64/job/yuanrong-datasystem/11611/console) |
+| aarch64 | SUCCESS | [#11545](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/aarch64/job/yuanrong-datasystem/11545/console) |
+| Bazel x86 | SUCCESS | [#7459](https://ci.openeuler.openatom.cn/job/multiarch/job/manual-jobs/job/openeuler/job/openyuanrong/job/Test_Datasystem_Bazel_x86/7459/console) |
+
+ARM两组C++测试首轮分别为5396项中2项异常、200项中3项异常，官方自动重跑分别2/2、3/3通过，随后Python检查报告140项、状态OK（7项跳过），example通过。保留首轮失败记录，不称为全程零失败。这5项为既有Exist、PubSub、Eviction与Stream/Producer用例；未证实其失败与WR特性的因果关系。Exist用例在指定验证环境重复1000次未复现，未为此扩展特性生产代码。以上远程门禁与本地WR专项117项/62项是不同证据，不相加冒充特性覆盖数。
