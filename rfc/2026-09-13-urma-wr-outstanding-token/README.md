@@ -1,23 +1,13 @@
 # URMA outstanding WR 控制与安全归还
 
-2026-09-17 · 基线 `fcaace844` · 实现 `644dca738d97ffe8fe7436409b0890b5c95a83d3` · 当前提交 6 项启用门禁全部通过，尚未合入。
+状态：2026-09-18。当前实现 `5bdc13c65`，已合入主线 `3d31acd54` 并推送 PR #2422。合并后软件/mock及采样回归117/117通过；随后修复4项CodeCheck问题，受影响62/62重跑通过。本轮远程门禁尚待最终结果。
 
-[RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
+[RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422)
 
-- [详细 RFC](detailed-design.md)：20 类 Use Cases、容量守恒、等待和恢复合同。
-- [关键概念与开发视图](developer-view.md)：Req/WR/令牌、共享 buffer owner、提交与恢复的开发位置。
+- [详细RFC](detailed-design.md)：请求/WR/额度边界、Use Cases、恢复和计时口径。
+- [开发视图](developer-view.md)：源码位置、配置、Event/chip与真实额度的关系。
+- [验证报告](validation-report.md)：红绿证据、组合回归、性能限制与门禁状态。
 
-默认容量 100 WR，单次等待 5000us，恢复阈值 5000ms。仅明确零提交的准入拒绝重试当前窗口；未知接受范围保留账本。没有安全停止证据时不得超时清零。
+默认容量100 WR，一次逻辑URMA传输的全部WR同时预约；超过容量直接拒绝，不按窗口流式提交。最多3次未提交准入尝试及100/200us退避共用5000us预算，另受绝对API deadline约束。该预算不是整个请求20ms墙钟硬上限。恢复阈值5000ms；无普通CQE主动退役并重试失败modify/delete，确认flush且provider删除成功才归还剩余token。缺乏安全停止证明时不得超时清零。
 
-| 验证范围 | 通过 / 总数 | 证据文件 |
-|---|---:|---|
-| WR token | 17/17 | `final-summary-token.xml` |
-| 故障 / 客户端配置 | 42/42 | `final-summary-fault.xml` |
-| Jetty gate | 10/10 | `final-summary-gate.xml` |
-| 默认值 / 参数边界 | 3/3 | `final-summary-flags.xml` |
-| 跨 Worker 系统 | 4/4 | `final-summary-st.xml` |
-| tracing / metrics / topology | 201/201 | `final-summary-common-green.xml` |
-| 非 URMA token | 17/17 | `final-summary-no-urma.xml` |
-
-
-第二项登记分配失败、READ/WRITE 背压误诊断、连续等待 summary 缺项都有红绿对照；两个 WR 的乱序/重复完成与容量 1 跨 Worker 请求已验证。测试和 HTML 不能替代真实硬件停止合同。
+QueryAndGet等待归入Worker既有采样access记录，并在原慢日志区分数值与NA；不扩Client协议。独立微基准已经移出特性PR，不计入生产性能证明。生产代码仍比旧版多，保留QD/所有权必要改动，移除重复封装和非必要工具；具体统计见详细设计。

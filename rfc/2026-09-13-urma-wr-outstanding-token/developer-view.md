@@ -1,6 +1,6 @@
 # WR 额度：关键概念与开发视图
 
-状态：2026-09-17，相关 CMake 回归通过，当前提交 6 项启用门禁全部通过。关联 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) 和 [详细 RFC](detailed-design.md)。
+状态：2026-09-18。当前实现 `5bdc13c65`，已合入主线 `3d31acd54` 并推送 PR #2422。合并后软件/mock及采样回归117/117通过；随后修复4项CodeCheck问题，受影响62/62重跑通过。本轮远程门禁尚待最终结果。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
@@ -21,7 +21,7 @@ Jetty 是提交和恢复的资源，不是令牌。JFC 是完成队列，poll �
 
 ## 一条写入如何流转
 
-`UrmaWrite/UrmaRead/Gather` 切分工作 → 为当前提交窗口申请额度 → 获得 post permit → 逐 WR 登记账本 → 调用 provider → 保留已接受的 WR，撤销明确未接受的后缀 → 完成通知或安全删除结清账本。
+`UrmaWrite/UrmaRead/Gather` 切分工作 → 一次预约本次逻辑传输的全部额度 → 获得 post permit → 逐 WR 登记账本 → 调用 provider → 保留已接受的 WR，撤销明确未接受的后缀 → 完成通知或安全删除结清账本。
 
 令牌遵守守恒关系：`outstanding = 尚未提交但已预留的额度 + 账本中尚未结清的额度`。它始终不超过配置容量。成功登记会把一个令牌从 reservation 移到账本，不会增加总数。重复完成只查到第一次，不能重复归还。
 
@@ -33,21 +33,24 @@ provider 返回明确 bad WR 时，只归还从该 WR 开始的未接受后缀�
 
 容量至少为 2 且一次提交两项时，两项各扣一个 token、共享同一份 buffer owner。第二项先完成只归还第二项的 token，owner 必须保留到第一项也安全结清。重复完成不能改变 outstanding。
 
-容量为 1 时，切分后的请求应按窗口推进：第一项提交并结清后，第二项再获得额度。不能一次申请超过容量的两项并永远等待。Gather 同样按实际 WR 数裁剪窗口，而不是按逻辑对象数估计。
+容量为1时，含两个WR的传输立即拒绝；容量为2而已占1时，两个WR都不能提前提交。Gather同样按实际整链WR数预约。该边界是单次逻辑URMA读、写或gather；不宣称跨节点API或BatchGet全部对象同时预约。
 
-如果第二次申请额度超时，已经提交的第一项仍保留令牌与 owner。重试仅针对明确未提交的当前窗口，不能从整个 Req 的起点重放。
+预约成功后逐WR转交账本；中途失败时，未提交预约由RAII归还，已接受或不确定的前缀仍保留令牌与owner。准入重试只发生在任何WR提交前，不能重放已提交前缀。
 
 ## 超时并不是安全停止证明
 
-默认容量 100；每次额度等待最多 5000us；最多 3 次明确准入拒绝重试，之间退避 100/200us，并受 API 剩余时间约束。5000us 是单次等待上限，不能当成整次调用上限。
+默认容量100；一次逻辑传输的预约最多3次尝试，连同100/200us退避共用5000us预算，并受API剩余时间限制。提交前再次检查deadline。这限制预约等待和过期后的新提交，不保证包含调度、provider和完成等待的整个调用在5000us或20ms内返回。
 
-恢复阈值默认 5000ms。后台发现账本长时间无进展，会关闭旧 Jetty 的提交入口，发起错误态/flush，并补充可用 Jetty。确认 flush 且成功删除后才能归还剩余额度；确认 flush 后删除失败会保留所有权，并按恢复间隔重试删除。
+恢复阈值默认 5000ms。后台发现账本长时间无进展，会关闭旧 Jetty 的提交入口，发起错误态/flush，并补充可用 Jetty。确认 flush 且成功删除后才能归还剩余额度；确认 flush 后删除失败会保留所有权，并按恢复间隔重试删除。modify失败也按原恢复线程重试，隔离期间flush会锁存。关闭时保持poll/恢复循环，先有界排空再停止；超时返回错误并保留不安全资源，Clear在锁外join删除执行器。
 
 没有 flush、修改失败或 provider 无法证明停止时，旧资源必须隔离、继续计入额度和 live-resource 上限。这样可能降低可用容量，但不能靠清零计数把仍可能 DMA 的资源伪装成已归还。真实设备的停止/reset 合同仍需设备验证；mock 测试不能替代这一证据。
 
 ## 可观测性合同
 
-已实现并验证 `urma.wr_token_wait`：单位 us，累计同一请求本地及返回的下游额度等待，包括失败尝试。它通过既有 latency phase 协议进入 worker 和 client summary。它是 transport 总耗时中的重叠细项，不能与总耗时相加，也不再从派生阶段重复扣除。
+已在普通GET等路径实现并验证 `urma.wr_token_wait`：单位 us，累计同一请求本地及返回的下游额度等待，包括失败尝试。它通过既有 latency phase 协议进入 worker 和 client summary；QueryAndGet现已通过同Trace的Worker采样access日志补充累计等待，原完成慢日志显示等待/NA与丢弃计数，不扩响应协议或Client解码；Client分段缺失仍不能当作零。它是 transport 总耗时中的重叠细项，不能与总耗时相加，也不再从派生阶段重复扣除。
+
+
+最新主线将request与access独立采样：request日志被保留，不代表该请求一定有access等待摘要；request采样率较低但access采样率为1时，access仍可全量采集。分析缺失字段必须同时检查access采样配置、latency开关和丢弃计数，不能将缺失解释为0us。
 
 同一请求的多个 WR/重试应累加到同一个固定容量槽，不应为每次等待增加一对 tick。未启动 latency tracing 的请求不收集该项。沿用 summary 的采样、慢日志阈值和有界丢弃规则。
 
@@ -59,11 +62,16 @@ provider 返回明确 bad WR 时，只归还从该 WR 开始的未接受后缀�
 |---|---|---|
 | 容量、等待、FIFO | `urma_wr_token.cpp` | 边界、deadline、关闭唤醒、异常回滚、计数守恒 |
 | 提交事务与恢复 | `urma_resource.cpp` | 逐 WR 记账、部分接受、无 CQE 后台恢复、删除失败重试 |
-| Req 切分与清理 | `urma_manager.cpp` | READ/WRITE/Gather、当前窗口重试、Event/lane 清理 |
+| Req 切分与清理 | `urma_manager.cpp` | READ/WRITE/Gather、整次预约和有界重试、Event/lane 清理 |
 | 请求 summary | `trace.cpp`、`latency_phase.cpp` | 多 WR 累加、下游传递、关闭旁路、避免双重扣时 |
 | 配置入口 | flags、CLI JSON、Helm、说明文档 | 默认值和上下界同步；us 与 ms 不混淆 |
 
-TDD 验收必须包含：第二区间登记分配失败的 RED/GREEN；两个 WR 乱序/重复完成与共享 owner；容量 1 下恰好两 WR 的跨 worker 数据一致性；持续额度失败时 provider 零调用且日志限频；client/worker summary 等待耗时；无成功 poll、flush 缺失、删除失败重试与 shutdown。使用 CMake+ccache，在核对源码指纹后运行；每项报告区分组件 mock、系统测试和真实设备证据。
+TDD 验收必须包含：第二区间登记分配失败的 RED/GREEN；两个 WR 乱序/重复完成与共享 owner；容量足够时两WR的跨worker数据一致性、容量不足时零提交；持续额度失败时 provider 零调用且日志限频；client/worker summary 等待耗时；无成功 poll、flush 缺失、删除失败重试与 shutdown。使用 CMake+ccache，在核对源码指纹后运行；每项报告区分组件 mock、系统测试和真实设备证据。
 
 
-性能与计时口径详见[详细设计 §4.4](detailed-design.md)：立即准入wait=0不代表没有锁/登记成本；WR等待不含重试退避；既有post/transport区间包含新增准入。微基准只覆盖软件桶/账本，尚不能给出真实链路性能结论。
+性能与计时口径详见[详细设计 §4.4](detailed-design.md)：立即准入wait=0不代表没有锁/登记成本；WR等待不含重试退避。整量预约移到普通write的chunk循环之前后，逐chunk的`[UrmaWrite] elapsed`、`postUs`及`urma_write_latency`不再包含这次准入等待，而整个write/gather/上层transport窗口仍包含。逐chunk指标下降不能解释成DMA加快。并行入口还增加TBB入队、完成通知、每range上下文复制和可选Trace汇总；并行等待之和可能大于墙钟时间。微基准仅覆盖历史软件桶/账本，尚不能给出本轮真实链路性能结论。
+
+0918新增准入日志包含request_id、requested、capacity、outstanding_snapshot、peak、waiting_snapshot、wait_us、acquire_us、wait_budget_us与api_remaining_at_entry_us。峰值在既有桶锁下维护，快照仅在实际输出日志时加锁读取；不是与准入事件原子绑定的历史水位。Event map和chip Event生命周期计数必须与该额度分开解释。
+
+
+QueryAndGet采样快请求只扩展既有access记录，不新增完成INFO条数；采样收尾有phase合并、字符串构造及日志字节开销。未采样无summary，关闭access日志时快请求没有该信号。已验证NA/0/22及丢弃2的实际日志输出；这不等于真实链路性能A/B通过。无普通CQE可以主动退役，但永无flush且没有设备停止证明时必须保留额度，不能把超时当作DMA停止。
