@@ -61,6 +61,8 @@ Event在准入前创建、可保留或先于硬件结束删除；因此Event峰�
 
 PR 8789f20c1在URMA完成慢日志中新增`urma_event_map_size`和同刻`wr_token{outstanding,capacity,waiting,peak}`，保留旧`urma_inflight_wr_cnt`字段兼容现有报告解析。后续3x/10x验收必须以同一进程、方向、时间窗口的token snapshot确认100上限，并单独关联provider post、CQE、poll、orphan和Jetty重建；不能用采样区间计数或event-map最大值证明硬件QD超发。
 
+完成性边界：源码和mock/st用例已经证明普通读写入口汇聚到`PostReservedWr`，部分提交、CQE、flush、orphan和Jetty重建不会提前归还不确定WR的额度。若provider永久不产生CQE或`FLUSH_ERR_DONE`，实现会保守保留token并隔离Jetty，进入fail-closed背压；这保证令牌不泄露，但不能仅凭软件用例宣称硬件场景一定自动恢复。真实验收必须注入或观测持续poll/CQE/flush故障，验证恢复后token回到基线，永久无安全证据时则验证其不提前下降。
+
 ## 安全归还合同
 
 普通CQE恰好结清一次；异常路径必须确认Jetty静默且provider删除成功后才能释放剩余token与buffer。部分post只有明确未接受后缀可以撤销，未知bad_wr保守保留。无普通CQE或无新流量可以触发退役/重建；永无flush、永久provider失败且没有设备停止/reset证明时仍须保留所有权，不能用超时清零冒充回收。
