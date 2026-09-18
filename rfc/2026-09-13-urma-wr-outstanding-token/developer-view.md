@@ -75,5 +75,7 @@ TDD 验收必须包含：第二区间登记分配失败的 RED/GREEN；两个 WR
 
 0918新增准入日志包含request_id、requested、capacity、outstanding_snapshot、peak、waiting_snapshot、wait_us、acquire_us、wait_budget_us与api_remaining_at_entry_us。峰值在既有桶锁下维护，快照仅在实际输出日志时加锁读取；不是与准入事件原子绑定的历史水位。Event map和chip Event生命周期计数必须与该额度分开解释。
 
+0918 10x 具体样本 `getBuffer-89-2599-00075195;2e28bc639b76` 为普通 QueryAndGet/UrmaWrite，并无 Gather Write 作为前提：`urma_inflight_wr_count=301`、`postSrcChipInflight={1:145,2:145}`，但 `post` 到 JFC `poll_begin` 约有20.257ms间隔；同一请求随后出现 `pendingWrs=1, orphanWrs=1`。这说明需把 JFC poll/完成观察延迟、event map/chip 生命周期和真实 token/CQE 结算分开关联。PR 8789f20c1 在 URMA 完成慢日志中补充 `urma_event_map_size` 与同刻 `wr_token{outstanding,capacity,waiting,peak}`，保留旧字段供历史报告解析；下一轮运行验收必须按进程、方向和时间窗口比较这些字段，不能用 event map 最大值替代硬件 outstanding WR。
+
 
 QueryAndGet采样快请求只扩展既有access记录，不新增完成INFO条数；采样收尾有phase合并、字符串构造及日志字节开销。未采样无summary，关闭access日志时快请求没有该信号。已验证NA/0/22及丢弃2的实际日志输出；这不等于真实链路性能A/B通过。无普通CQE可以主动退役，但永无flush且没有设备停止证明时必须保留额度，不能把超时当作DMA停止。
