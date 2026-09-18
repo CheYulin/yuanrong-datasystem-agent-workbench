@@ -55,6 +55,8 @@ Event在准入前创建、可保留或先于硬件结束删除；因此Event峰�
 
 0918报告按各时延区间定额采样，区间条数不能外推全量发生率。10x采样包含797条`wr_token_wait_timeout`，原始日志中的等待为约5003--5140us，并出现`outstanding=96..100 capacity=100`；这是令牌触顶和5ms准入预算生效的直接证据。报告中`urma_inflight_wr_count`为event map快照，10x采样p99为305、最大321，不能与单个进程Resource的token容量直接比较。
 
+3x对照同样关键：3x没有令牌等待超时，Client最大15.644ms，但event map最大值已经达到130。10x才出现令牌触顶和URMA超时，event map最大321。因此130/321是Event生命周期或完成通知积压的观测，不是100个令牌或provider硬件QD的观测。令牌按WR数量计费，不按字节计费；只有每个WR固定为4MiB时，100个令牌才可换算为400MiB的逻辑payload窗口。
+
 具体普通`UrmaWrite`样本`getBuffer-89-2599-00075195;2e28bc639b76`显示：WR 1025809的`post->completion=20.279ms`，JFC `poll_begin-post`约20.257ms，`pre_completed_before_wait=1`且wait仅0.00073ms；后续WR 1026179在4.910ms超时，记录`pendingWrs=1, orphanWrs=1`并force release。该链路支持“JFC poll/完成观察延迟+未收到CQE的orphan WR”这一候选根因，不支持把Gather Write作为必要解释。CQE结算会先归还token，event通知和event map删除可滞后，因此高event/chip快照与真实provider outstanding不能混用。
 
 PR 8789f20c1在URMA完成慢日志中新增`urma_event_map_size`和同刻`wr_token{outstanding,capacity,waiting,peak}`，保留旧`urma_inflight_wr_cnt`字段兼容现有报告解析。后续3x/10x验收必须以同一进程、方向、时间窗口的token snapshot确认100上限，并单独关联provider post、CQE、poll、orphan和Jetty重建；不能用采样区间计数或event-map最大值证明硬件QD超发。
