@@ -1,19 +1,19 @@
 # URMA WR 额度控制：验证报告
 
-状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
+状态：2026-09-19。当前特性分支验证 HEAD 为 `8789f20c1cef66c48ab9feea9521845977e064d6`，远端 fork 分支已同步；此前 `974303605` 的 PR #2422 门禁结果不能自动外推到新增可观测性提交。当前 HEAD 已在 tiantiyun-80c128g 使用 CMake Release + URMA mock + ccache 完成指定构建；定向 UT 为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped（真实 provider 用例），ST 定向筛选 6/6。完整门禁和真实 provider 证据仍需按当前 HEAD 单独确认。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](detailed-design.md) · [开发视图](developer-view.md)
 
 ## 结论与证据范围
 
-接入新主线后的组合回归117/117通过，0失败、0跳过，测试进程正常退出。34个变更C++文件与验证机严格SHA256一致。使用指定环境的CMake Release、ccache和URMA mock；不是实际硬件DMA停止、生产P99或pmax的证明。针对主线日志、采样及依赖变化已重跑，并追加真实access采样器27项兼容测试。
+接入新主线后的组合回归117/117通过，0失败；fault 专项1项因真实 provider 未配置而跳过，测试进程正常退出。34个变更C++文件与验证机严格SHA256一致。使用指定环境的CMake Release、ccache和URMA mock；不是实际硬件DMA停止、生产P99或pmax的证明。针对主线日志、采样及依赖变化已重跑，并追加真实access采样器27项兼容测试。
 
 ## 组合回归
 
 | 范围 | 通过/总数 | 关键覆盖 |
 |---|---:|---|
 | Token | 17/17 | 容量守恒、FIFO、关闭唤醒、owner析构前归还 |
-| 故障及配置 | 49/49 | 整量预约、过期后不post、部分接受、重试、无普通CQE、关闭排空 |
+| 故障及配置 | 48 passed + 1 skipped | 整量预约、过期后不post、部分接受、重试、无普通CQE、关闭排空 |
 | Jetty状态机 | 11/11 | post/retire互斥、隔离flush、delete准入 |
 | Worker定向 | 7/7 | 父绝对deadline、TBB安全调度、QueryAndGet七种观测情形 |
 | 跨Worker系统 | 6/6 | 多WR、超容量拒绝、两端summary、64×64并发BatchGet |
@@ -104,7 +104,7 @@ Worker定向7例来自现有worker_oc_service_impl_test.cpp，使用外部CMake�
 
 ## 当前提交门禁
 
-当前 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
+历史 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`；当前 `8789f20c1cef66c48ab9feea9521845977e064d6` 新增了11行观测字段，不能复用该历史结果，必须重新触发当前HEAD门禁。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
 
 | 门禁 | 结果 | 同轮证据 |
 |---|---|---|
