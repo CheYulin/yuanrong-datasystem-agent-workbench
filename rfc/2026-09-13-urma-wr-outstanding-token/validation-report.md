@@ -1,6 +1,6 @@
 # URMA WR 额度控制：验证报告
 
-状态：2026-09-19。当前特性分支验证 HEAD 为 `8789f20c1cef66c48ab9feea9521845977e064d6`，远端 fork 分支已同步；此前 `974303605` 的 PR #2422 门禁结果不能自动外推到新增可观测性提交。当前 HEAD 已在 tiantiyun-80c128g 使用 CMake Release + URMA mock + ccache 完成指定构建；定向 UT 为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped（真实 provider 用例），ST 定向筛选 6/6。完整门禁和真实 provider 证据仍需按当前 HEAD 单独确认。
+状态：2026-09-19。当前特性分支验证 HEAD 为 `8789f20c1cef66c48ab9feea9521845977e064d6`，远端 fork 分支已同步；PR #2422 当前 HEAD 已完成门禁触发器 11450：CodeCheck、license、SCA、x86_64、aarch64、openyuanrong 全部 SUCCESS。tiantiyun-80c128g 使用 CMake Release + URMA mock + ccache 的定向回归为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped（真实 provider 用例）、ST 定向筛选 6/6。真实 provider 行为仍不由 mock 回归覆盖。
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](detailed-design.md) · [开发视图](developer-view.md)
 

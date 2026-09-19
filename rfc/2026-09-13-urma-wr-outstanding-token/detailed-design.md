@@ -1,6 +1,6 @@
 # URMA outstanding WR 控制与无完成恢复：详细设计
 
-状态：2026-09-19。当前特性分支验证 HEAD 为 `8789f20c1cef66c48ab9feea9521845977e064d6`，远端 fork 分支已同步；此前 `974303605` 的 PR #2422 门禁结果不能自动外推到新增可观测性提交。当前 HEAD 已在 tiantiyun-80c128g 使用 CMake Release + URMA mock + ccache 完成指定构建；定向 UT 为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped（真实 provider 用例），ST 定向筛选 6/6。完整门禁和真实 provider 证据仍需按当前 HEAD 单独确认。
+状态：2026-09-19。当前特性分支验证 HEAD 为 `8789f20c1cef66c48ab9feea9521845977e064d6`，远端 fork 分支已同步；PR #2422 当前 HEAD 已完成门禁触发器 11450：CodeCheck、license、SCA、x86_64、aarch64、openyuanrong 全部 SUCCESS。tiantiyun-80c128g 使用 CMake Release + URMA mock + ccache 的定向回归为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped（真实 provider 用例）、ST 定向筛选 6/6。真实 provider 行为仍不由 mock 回归覆盖。
 
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。保留旧提交历史，以新增提交交付修复。报告未提供部署 SHA，源码缺陷与现场 trace 根因分别陈述。
 
@@ -344,7 +344,7 @@ CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出�
 
 ## 当前提交门禁
 
-历史 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`；当前 `8789f20c1cef66c48ab9feea9521845977e064d6` 新增11行观测字段，必须重新触发当前 HEAD 门禁。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
+历史 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`；当前 `8789f20c1cef66c48ab9feea9521845977e064d6` 新增11行观测字段，当前 HEAD 已由触发器 11450 重新验证：六项启用门禁全部 SUCCESS。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
 
 | 门禁 | 结果 | 同轮证据 |
 |---|---|---|
