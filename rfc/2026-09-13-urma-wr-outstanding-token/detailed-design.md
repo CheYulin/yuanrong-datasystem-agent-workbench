@@ -278,7 +278,7 @@ workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
 | 跨Worker系统 | 6/6 | 多WR预约、超容量拒绝、两端等待摘要、64×64并发BatchGet |
 | 主线采样兼容 | 27/27 | request/access独立采样、0/1边界、access guard与记录格式 |
 
-CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出。34个变更C++文件严格SHA相等。系统套件85.212s是测试总墙钟时间，不是性能指标。本表属于合入最新主线后的验证；最新6项远程门禁已全部通过。
+CMake Release + ccache，URMA mock；当前定向结果为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped、ST 6/6。系统套件耗时是测试墙钟时间，不是请求性能指标。PR当前 HEAD 的六项远程门禁由触发器11450全部通过；真实 provider 用例仍未在该环境执行。
 
 历史 `644dca738` 曾通过277项mock/公共组件与17项独立非URMA测试及6项启用门禁；这些只作为历史记录，不计入本轮117项，也不证明新提交门禁已过。独立微基准及其构建入口已从特性PR移除，历史测量保留为参考。
 
