@@ -4,6 +4,19 @@
 
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。保留旧提交历史，以新增提交交付修复。报告未提供部署 SHA，源码缺陷与现场 trace 根因分别陈述。
 
+## 2026-09-21 源码复核补充
+
+当前 PR head 为 `67f9307e8`。本轮只增加 URMA 初始化时的有效配置日志：`capacity`、`wait_us` 和
+`recovery_timeout_ms`，不读取 post/CQE 热路径上的额外快照，也不新增 benchmark。tiantiyun-80c128g
+使用 CMake Release、URMA Mock 和 ccache 完成 80 项定向回归，全部通过。
+
+事件与额度的对应关系需要按入口区分：普通 Read/Write 在整量预约成功后才创建业务 Event；Gather
+先创建 Event，再对整条 WR 链预约。两条路径中，Event 都是业务通知对象，`WrTokenLedger` 才是已提交或
+可能已接受 WR 的安全所有权。CQE 可以先调用 `CompleteWr` 归还额度，随后才完成 Event 通知和 map 删除；
+超时保留、orphan WR 以及 flush/delete 恢复又会把两种生命周期进一步拉开。因此 event-map 大于 token
+并不表示 token 失效或 provider 超发，必须用同一进程、同一 Jetty 和同一时间窗口的 token snapshot、CQE、
+orphan、flush/delete 记录联合判定。
+
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
 ## 1. 要解决的问题

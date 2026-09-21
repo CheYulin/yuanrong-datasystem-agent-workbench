@@ -4,6 +4,11 @@
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
 
+2026-09-21 复核：PR head `67f9307e8` 在 URMA 初始化日志中记录有效的三项额度配置；CMake+ccache+URMA Mock
+定向回归 80/80 通过。普通 Read/Write 是先预约后创建 Event，Gather 是先创建 Event 后整链预约；两者的
+Event 仍属于业务通知生命周期，不能替代 per-WR ledger。普通 CQE 结算、超时保留、orphan 和 Jetty
+flush/delete 会让 event-map 与 token snapshot 暂时出现明显 gap。
+
 ## 先分清请求、WR 和令牌
 
 一个业务请求 Req 可以拆成多个 WR。WR 是向 URMA provider 提交的实际工作单元，令牌按照 WR 数量计费。例如一个 Req 切成两段写入，就是两个 WR、两个唯一 requestId、两份额度；不能按一个 Req、一个 Event 或一个 Jetty 只扣一次。

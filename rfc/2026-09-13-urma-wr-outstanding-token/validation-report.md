@@ -4,6 +4,19 @@
 
 [RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](detailed-design.md) · [开发视图](developer-view.md)
 
+## 2026-09-21 源码复核与定向回归
+
+本节更新优先于下方历史状态。当前核对基线为 `f95b1dd5849d62f42f81b01263574d3a214fb9fd`，加一处未提交的初始化配置日志；本轮尚未验证远程门禁，不能沿用 974303605 的门禁结果。
+
+- 指定 tiantiyun-80c128g 环境，CMake Release、WITH_TESTS=ON、BUILD_WITH_URMA_MOCK=ON，C/C++ compiler launcher 均为 ccache。首次直接构建 token 目标缺少 utils.pb.h；先构建既有 utils_protos 目标后，四个目标构建成功。未修改产品构建文件规避此问题。
+- 当前定向回归：token 17、故障及配置 51、Jetty gate 11、生命周期 1，合计 80 项通过。此数字只代表软件/mock 回归。
+- 实际日志观察到 `[URMA_WR_TOKEN_CONFIG] mode=limited, capacity=100, wait_us=5000, recovery_timeout_ms=5000`。日志仅在初始化快照配置时输出，不能当作此前 0920 运行的配置证据，也不宣称初始化最终成功。
+- 普通 READ/WRITE 当前在创建 Event 前整量预约；gather 是先创建 Event 再整链预约。不能用“所有 Event 都在准入前创建”解释普通写的 gap。普通写仍可因 CQE 结清早于通知/WaitToFinish 删除而积累 Event；带 late-completion context 的超时 Event 另有保留生命周期。
+- 5000us 是准入预算，5000ms 是退役触发年龄。无 flush/成功 delete 的状态仍保留 token；这证明不提前释放的安全策略，不证明任意硬件故障均能最终回收。
+- 相对本地 main/master 的完整差异为 47 文件、+3261/-282（不含本轮四行日志），不能把最后一个观测补丁的 +80/-6 当作整个 PR 规模。尚需继续逐项审查、精简和核对最新远端基线。
+
+原始回归日志保存于本地 `trace-analysis/0921-wr-audit/`，未加入产品 PR；无新增 benchmark。本轮配置日志尚未交付为 PR，TDD 红绿证据及最新门禁也尚未完成。
+
 ## 结论与证据范围
 
 接入新主线后的组合回归117/117通过，0失败、0跳过，测试进程正常退出。34个变更C++文件与验证机严格SHA256一致。使用指定环境的CMake Release、ccache和URMA mock；不是实际硬件DMA停止、生产P99或pmax的证明。针对主线日志、采样及依赖变化已重跑，并追加真实access采样器27项兼容测试。
