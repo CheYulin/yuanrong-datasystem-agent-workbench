@@ -48,23 +48,43 @@ python3 scripts/ds_trace_bottleneck.py \
 
 按 Trace ID 和 evidence 正文去重。优先使用 Client access latency，缺失时才使用明确标注的 Worker 口径。按总时延降序选择 TopN，以时间和 Trace ID 稳定打破并列。
 
-### 4.2 六个互斥阶段
+### 4.2 读取互斥阶段
 
-- RPC 网络/框架 residual
-- QueryMeta/metadata
-- URMA/UB completion
-- 远端供数非 URMA
-- 直连 Data Worker 本地/内部未细分
+- URMA 建链耗时
+- URMA 通信耗时，包括显式完成耗时或明确的超时等待窗口
+- QueryAndGet 其他业务处理耗时，扣除 URMA、RPC 通信残差与 RPC 框架
+- Get 其他业务处理耗时，扣除 URMA、RPC 通信残差与 RPC 框架
+- 明确的调度和线程等待
+- RPC 通信残差
+- RPC 框架
 - 未解释残差
 
 父窗口与子阶段不能重复相加；阶段之和不得超过用户可见总时延。主问题取最大阶段。证据不足时只能落入“内部未细分”或“未解释残差”，不能推断为网络、CPU、锁或线程调度。
 
-### 4.3 场景规则
+`transportType:UB` 只确认选择了 UB 数据通路，不等价于观测到 URMA 精确耗时。只有 `URMA_ELAPSED_TOTAL`、`URMA_WAIT_TIMEOUT` 或可唯一关联的等价证据才能填入 URMA 时间；否则保留“UB 路径已确认、URMA 耗时未观测”。
+
+### 4.3 写入互斥阶段
+
+- Create RPC 其他处理
+- 写入 MemoryCopy
+- 写入 URMA 通信
+- Publish RPC 其他处理
+- Worker Publish/元数据
+- 明确的调度和线程等待
+- RPC 通信残差
+- RPC 框架
+- 未解释残差
+
+Create 和 Publish 分别拆解。优先使用包含重试的 `client.rpc.create_total` 与 `client.rpc.publish_total`。MemoryCopy 包含 URMA 子窗口时使用 `MemoryCopy - URMA` 与 URMA 两段，禁止重复累计。RPC 失败或 timing 不闭合时不强行推断网络、框架或 handler。
+
+### 4.4 场景规则
 
 - RPC：区分 server queue/exec、framework 和 network residual。
 - URMA：比较 total、completion wait、wake、poll/notify/thread scheduling、Inflight WR、RemoteGet WR、source chip 和源→目标边。
 - GET：使用 triage 提供的 Client/Worker access、ProcessGet、BatchGet、QueryMeta、Local processing、RemotePull 证据。
 - 非 RPC/非 UB：只有显式证据时才细分本地处理、BatchGet 超时/重试、供数端处理和 deadline 观测空窗。
+- `local_cache=false`：按当前源码解释为 Client 查询 Meta Owner 后直接访问 Data Worker，不虚构固定 Entry Worker 或 Worker 间互拉。
+- Trace ID：兼容分号、冒号及 `getBuffer`、`setStringView` 等前缀变化，不以单一 UUID 形态为前提。
 
 分析层输出事实、派生结论、证据强度、缺失字段与下一步；浏览器 JavaScript 只负责交互，不重新发明结论。
 
@@ -79,6 +99,8 @@ python3 scripts/ds_trace_bottleneck.py \
 7. 按日志可证角色展示 Worker，不假设 `local cache=false` 存在固定 Entry Worker。
 8. Trace 筛选、排序、8 行分页、阶段明细、重点日志和完整日志展开。
 9. 输入/ref/缺失面与源码校正边界。
+10. 写入 TopN 使用独立 Stacked Bars、汇总和分页表格，不与读取 TopN 共享名额。
+11. 多 Runs 首页只比较匹配控制变量，各 Run 保留独立 triage、bottleneck 与 NUMA 页面。
 
 下载支持 TopN 全量、当前筛选/分类和单条 Trace。异常高亮只作用于关键词与具体耗时 token，避免整段铺红。
 
@@ -105,7 +127,7 @@ python3 scripts/ds_trace_bottleneck.py \
 
 这是离线工具，不进入 DataSystem 运行时热路径，不涉及并发共享状态、持久化格式或恢复协议。HTML 转义所有标题、Worker、Trace 和日志文本；不记录私有节点地址到 RFC/PR。依赖限制为 Python 标准库和仓库内 ECharts。
 
-首版消费当前 run-directory schema；不兼容时明确失败，不静默猜测。新日志格式应先进入 `ds_trace_triage.py` 的 ParserRules/归一化字段和测试，再由后置脚本消费。
+分析器消费当前 run-directory schema；不兼容时明确失败，不静默猜测。新日志格式应先进入 `ds_trace_triage.py` 的 ParserRules/归一化字段和测试，再由后置脚本消费。基础 triage 只增加通用归一化字段，专项分析和页面变化不得破坏原 triage 报告合同。
 
 ## 9. 发布与回滚
 
