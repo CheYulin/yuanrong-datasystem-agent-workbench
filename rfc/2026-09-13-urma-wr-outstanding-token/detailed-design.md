@@ -1,6 +1,6 @@
 # URMA outstanding WR 控制与无完成恢复：详细设计
 
-状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
+状态：2026-09-19。当前特性分支验证 HEAD 为 `8789f20c1cef66c48ab9feea9521845977e064d6`，远端 fork 分支已同步；PR #2422 当前 HEAD 已完成门禁触发器 11450：CodeCheck、license、SCA、x86_64、aarch64、openyuanrong 全部 SUCCESS。tiantiyun-80c128g 使用 CMake Release + URMA mock + ccache 的定向回归为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped（真实 provider 用例）、ST 定向筛选 6/6。真实 provider 行为仍不由 mock 回归覆盖。
 
 [实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。保留旧提交历史，以新增提交交付修复。报告未提供部署 SHA，源码缺陷与现场 trace 根因分别陈述。
 
@@ -285,13 +285,13 @@ workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
 | 验证范围 | 通过 / 总数 | 覆盖 |
 |---|---:|---|
 | WR token | 17/17 | FIFO、容量守恒、取消、owner析构顺序 |
-| 故障与配置 | 49/49 | 整量预约、部分post、无普通CQE恢复、modify/delete失败重试、关闭排空和超时保留 |
+| 故障与配置 | 48 passed + 1 skipped | 整量预约、部分post、无普通CQE恢复、modify/delete失败重试、关闭排空和超时保留；跳过项需真实 provider |
 | Jetty gate | 11/11 | post/retire/delete顺序、隔离期间flush锁存 |
 | Worker定向 | 7/7 | 精确父deadline、TBB调度、QueryAndGet七种采样/等待状态 |
 | 跨Worker系统 | 6/6 | 多WR预约、超容量拒绝、两端等待摘要、64×64并发BatchGet |
 | 主线采样兼容 | 27/27 | request/access独立采样、0/1边界、access guard与记录格式 |
 
-CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出。34个变更C++文件严格SHA相等。系统套件85.212s是测试总墙钟时间，不是性能指标。本表属于合入最新主线后的验证；最新6项远程门禁已全部通过。
+CMake Release + ccache，URMA mock；当前定向结果为 token 17/17、Jetty gate 11/11、fault 48 passed + 1 skipped、ST 6/6。系统套件耗时是测试墙钟时间，不是请求性能指标。PR当前 HEAD 的六项远程门禁由触发器11450全部通过；真实 provider 用例仍未在该环境执行。
 
 历史 `644dca738` 曾通过277项mock/公共组件与17项独立非URMA测试及6项启用门禁；这些只作为历史记录，不计入本轮117项，也不证明新提交门禁已过。独立微基准及其构建入口已从特性PR移除，历史测量保留为参考。
 
@@ -357,7 +357,7 @@ CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出�
 
 ## 当前提交门禁
 
-当前 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
+历史 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`；当前 `8789f20c1cef66c48ab9feea9521845977e064d6` 新增11行观测字段，当前 HEAD 已由触发器 11450 重新验证：六项启用门禁全部 SUCCESS。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
 
 | 门禁 | 结果 | 同轮证据 |
 |---|---|---|
