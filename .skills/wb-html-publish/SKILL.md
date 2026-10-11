@@ -37,7 +37,7 @@ Publish **conclusions only** — not Draft RFC or raw L8 perf dumps.
 
 ## 默认导航与字体
 
-创建、修改或统一 yche.me 文档页时，读取 [紧凑文档导航约定](references/compact-navigation.md)，以用户指定的 [HIXL × NIXL 页面](https://yche.me/research/hixl-nixl-20261012.html) 为视觉基准：12px 导航、236px 桌面固定左栏、清晰编号与当前章节高亮、统一微软雅黑。使用本 skill 的公共导航适配资产，保留单一固定头栏与单一目录；手机目录折叠，图注居中。不要将基准页的静态模式复制成所有页面的默认模式。
+创建、修改或统一 yche.me 文档页时，读取 [紧凑文档导航约定](references/compact-navigation.md)，以用户指定的 [HIXL × NIXL 页面](https://yche.me/research/hixl-nixl-20261012.html) 为视觉基准：12px 导航、236px 桌面固定左栏、清晰编号与当前章节高亮、统一微软雅黑。使用本 skill 的公共导航适配资产，保留单一固定头栏与单一目录；顶部“章节目录”按钮控制同一目录的展开/收起，桌面章节跳转后保持目录展开；手机目录折叠，图注居中。不要将基准页的静态模式复制成所有页面的默认模式。
 
 正文主章节默认 **6 个**，通常控制在 **6–8 个**（对应目录中的 h2；页面标题 h1 不计入）。细分内容放在 h3/h4 二级、三级标题；按内容合并章节，不靠隐藏目录项减少数量。短文无需凑足 6 章。
 

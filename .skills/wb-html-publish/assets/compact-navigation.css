@@ -12,12 +12,15 @@
 .yche-compact-main :is(p,li,td,th){font-size:14px;line-height:1.8}
 .yche-compact-main h2{font-size:23px;line-height:1.5}.yche-compact-main h3{font-size:17px;line-height:1.6}
 .yche-compact-main figcaption,.yche-compact-main .yche-figure-caption{font-size:12px!important;text-align:center!important;line-height:1.8}
-.yche-compact-native-active #yche-reader-panel,.yche-compact-native-active .yche-toc-button{display:none!important}
+.yche-compact-native-active #yche-reader-panel{display:none!important}
+.yche-compact-native-collapsed [data-yche-compact-directory="native"]{display:none!important}
+.yche-compact-native-collapsed .content-area.report-main{margin-left:24px!important}
 @media(min-width:801px){
  .yche-compact-pinned .yche-reader-panel{position:fixed;top:var(--yche-header-height,50px)!important;bottom:0;left:0;width:var(--yche-compact-width);max-height:calc(100dvh - var(--yche-header-height,50px));border:0;border-right:1px solid #e0e4e8;border-radius:0;box-shadow:none;padding:24px 16px;overflow-y:auto;z-index:1200}
- .yche-compact-pinned .yche-reader-panel[hidden]{display:block!important}
- .yche-compact-pinned .yche-reader-panel>button,.yche-compact-pinned .yche-toc-button{display:none!important}
+ .yche-compact-pinned .yche-reader-panel>button{display:none!important}
  .yche-compact-pinned .yche-compact-main{width:auto!important;max-width:1500px;margin:24px 24px 24px calc(var(--yche-compact-width) + var(--yche-compact-gap))!important}
+ .yche-compact-pinned.yche-compact-collapsed .yche-compact-main{margin-left:24px!important}
+ .yche-compact-pinned.yche-compact-collapsed .comments-section{margin-left:24px!important}
  .yche-compact-pinned .comments-section{width:auto!important;margin-left:calc(var(--yche-compact-width) + var(--yche-compact-gap))!important;margin-right:24px!important}
 }
 @media(max-width:800px){.yche-compact-main h2{font-size:20px}.yche-compact-page .yche-reader-panel a{min-height:38px}.yche-compact-page .yche-reader-panel{width:min(320px,calc(100vw - 24px))}}
