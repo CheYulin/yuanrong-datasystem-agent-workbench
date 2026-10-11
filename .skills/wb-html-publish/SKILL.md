@@ -35,6 +35,12 @@ curl -sI "https://yche.me/<path>.html" | head -1
 Read remote `CLAUDE.md` + `assets/template.html` before writing.  
 Publish **conclusions only** — not Draft RFC or raw L8 perf dumps.
 
+## 默认导航与字体
+
+创建、修改或统一 yche.me 文档页时，读取 [紧凑文档导航约定](references/compact-navigation.md)，以用户指定的 [HIXL × NIXL 页面](https://yche.me/research/hixl-nixl-20261012.html) 为视觉基准：12px 导航、236px 桌面固定左栏、清晰编号与当前章节高亮、统一微软雅黑。使用本 skill 的公共导航适配资产，保留单一固定头栏与单一目录；手机目录折叠，图注居中。不要将基准页的静态模式复制成所有页面的默认模式。
+
+迁移旧页面时保留文章内容、原有发布时间、评论/权限和图表交互。完成参考文档里的真实浏览器验收后才能报告样式统一；服务器不可访问时明确区分本地准备与线上迁移。
+
 ## Ground truth (datasystem code claims)
 
 ```bash
