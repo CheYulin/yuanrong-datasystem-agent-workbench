@@ -8,12 +8,12 @@
 | UT-S2 | RR，阈值 15 | 深度差 `15` | 保留 RR 候选 |
 | UT-S3 | RR，阈值 15 | 深度差 `16`，双方向 | 选择低 inflight 芯片 |
 | UT-S4 | RR，阈值 0 | 深度 `100:0` | 仍保留 RR 候选 |
-| UT-S5 | 亲和优先，阈值 15 | transmitted=2，深度 `0:0`，重复选择 | 始终为 2，RR sequence 不推进 |
-| UT-S6 | 亲和优先，阈值 15 | transmitted=2，深度 `0:15` | 差值等于边界，仍为 2 |
-| UT-S7 | 亲和优先，阈值 15 | transmitted=2，深度 `0:16` | 溢出到 1 |
-| UT-S8 | 亲和优先，阈值 15 | transmitted=2，深度 `16:0` | 亲和芯片本来较空，仍为 2 |
-| UT-S9 | 亲和优先，阈值 15 | transmitted=1，深度 `16:0` | 对称地溢出到 2 |
-| UT-S10 | 亲和优先，阈值 0 | 任意深度失衡 | 始终为 transmitted chip |
+| UT-S5 | RR+亲和，阈值 15 | RR=1，亲和=2，深度 `4:4`，预计 2 WR | 保持 RR=1，深度相等不扎堆 |
+| UT-S6 | RR+亲和，阈值 15 | RR=1，亲和=2，深度 `6:3`，预计 2 WR | 覆盖为 2；接收后 `6:5` 仍不反超 |
+| UT-S7 | RR+亲和，阈值 15 | RR=1，亲和=2，深度 `4:3`，预计 2 WR | 保持 RR=1；接收后会反超 |
+| UT-S8 | RR+亲和，阈值 15 | RR=1，亲和=1，深度差未超限 | 保持 RR=1 |
+| UT-S9 | RR+亲和，阈值 15 | RR/亲和均为忙芯片，深度差 16 | 选择较空芯片，硬纠偏优先 |
+| UT-S10 | RR+亲和，阈值 0 | 任意深度失衡 | 关闭全部反馈，保持纯 RR |
 | UT-S11 | 任意策略，RR type 0 | affinity enabled | 返回 transmitted chip，候选状态不推进 |
 | UT-S12 | 每逻辑写粒度 | 首个 Post 选择后改变深度 | 后续 Post 复用首次选择 |
 | UT-S13 | 每 Post 粒度 | 两次 Post 之间改变深度 | 第二次重新按策略和深度选择 |
@@ -24,7 +24,7 @@
 | ID | 场景 | 期望 |
 |---|---|---|
 | UT-C1 | proto 未设置字段 33 | `ub_numa_src_chip_policy()==0`，兼容旧 Worker |
-| UT-C2 | proto 设置 1 | Client 可读取亲和优先策略 |
+| UT-C2 | proto 设置 1 | Client 可读取 RR+机会式亲和策略 |
 | UT-C3 | 同节点 SHM endpoint 但 Worker 具备 UB runtime | 策略仍随注册响应传播，早于 Arena 初始化应用 |
 | UT-C4 | Worker flag 值 2 | validator 拒绝启动配置 |
 | UT-C5 | Client 收到未知远端值 | 告警并归一化为 1 |
@@ -41,13 +41,14 @@
 - 每 Client 并发写 4 个 8 MiB key；
 - 每个 key 提交十个独立读取任务；等全部 128 个 Client 线程进入线程池后统一放行，保证同 key 十读并发且跨 Worker；
 - 开启 Worker-to-Worker Batch Get，额外读取 128 个 8 KiB 对象覆盖 GatherWrite；
-- chip1 Mock 完成延迟 100 us、chip2 为 0；使用一次性复合决策注入原子地指定亲和候选和 `16:0` 深度快照；
-- 校验所有读回 payload、两个芯片选择、深度覆盖、Gather counter 归零。
+- chip1 Mock 完成延迟 100 us、chip2 为 0；使用复合决策注入分别制造 `16:0` 硬纠偏和亲和芯片可无损
+  接收的场景；
+- 校验所有读回 payload、两个芯片选择、硬深度覆盖、机会式亲和覆盖和 Gather counter 归零。
 
 | ID | 策略 | 额外断言 |
 |---|---|---|
-| ST-E1 | `ROUND_ROBIN=0` | Client 和每个 Worker 都执行 RR 候选分支；亲和候选分支为 0；两芯片均被选择；失衡时覆盖 |
-| ST-E2 | `AFFINITY_FIRST=1` | Client 和每个 Worker 都执行亲和候选分支；RR 候选分支为 0；阈值内保持强制的 chip1 亲和；`16:0` 时溢出 chip2 |
+| ST-E1 | `ROUND_ROBIN=0` | Client 和每个 Worker 都执行纯 RR 分支；机会式亲和分支和覆盖计数为 0；两芯片均被选择；失衡时硬纠偏 |
+| ST-E2 | `ROUND_ROBIN_WITH_AFFINITY=1` | Client 和每个 Worker 都执行 RR+亲和分支，观察一次无损亲和覆盖；两芯片均被选择；`16:0` 时硬纠偏到 chip2 |
 
 该 ST 证明 Client/Worker 配置传播、普通写与 GatherWrite 选芯、WR inflight 生命周期、多 Client 初始化和
 业务读写正确性。Mock 的 memfd 重映射不能保留真实物理 NUMA 页，因此 NUMA 分配计划、Arena 等分、
@@ -79,11 +80,11 @@ Mock 通过不是硬件消融通过；若本轮没有真实 URMA/HCCS 环境，P
 
 | 范围 | 结果 |
 |---|---|
-| 策略、协议和 NUMA focused UT | 15/15 PASS |
+| 策略、协议和 NUMA focused UT | 18/18 PASS |
 | flag validator UT | 1/1 PASS |
 | 相邻 NUMA URMA Mock ST | 2/2 PASS |
-| affinity-first 与 Round Robin 独立 E2E | 2/2 PASS |
-| focused 总计 | 20/20 PASS |
+| RR+机会式亲和与纯 RR 独立 E2E | 2/2 PASS |
+| focused 总计 | 23/23 PASS |
 | 双策略各重复三轮 | 6/6 PASS |
 
 真实 URMA/HCCS 硬件消融未执行，P99、PMax、HCCS 和端口带宽仍是上线前证据缺口。
