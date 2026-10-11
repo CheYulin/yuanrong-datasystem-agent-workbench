@@ -1,3 +1,5 @@
+> 归档说明（2026-10-11）：本文为历史交接记录，提取包已移至 `archive/extract/for-datasystem/`，下述生成与安装流程不再作为当前工作入口。
+
 # Codex 接力交接：Skill 收口 + Datasystem 提取包
 
 **Status:** In-Progress  
@@ -69,7 +71,7 @@ bash scripts/harness/sync_workspace_to_tiantiyun.sh
 ### 3.4 Datasystem 提取包（**未 commit**，`?? extract/`）
 
 ```
-extract/for-datasystem/
+archive/extract/for-datasystem/
 ├── README.md
 ├── build_extract.py          # 从 workbench 重新生成
 ├── install-to-datasystem.sh
@@ -85,8 +87,8 @@ extract/for-datasystem/
 
 ```bash
 cd yuanrong-datasystem-agent-workbench
-python3 extract/for-datasystem/build_extract.py
-bash extract/for-datasystem/install-to-datasystem.sh ../yuanrong-datasystem
+python3 archive/extract/for-datasystem/build_extract.py
+bash archive/extract/for-datasystem/install-to-datasystem.sh ../yuanrong-datasystem
 ```
 
 **本地已验证（datasystem 仓 dry-run）：**
@@ -213,7 +215,7 @@ bash scripts/run_skill_tests.sh
 bash scripts/harness/verify_skill.sh --skill wb-dev --sync
 
 # 重新生成 extract
-python3 extract/for-datasystem/build_extract.py
+python3 archive/extract/for-datasystem/build_extract.py
 
 # 仪表盘
 python3 scripts/harness/render_skill_dashboard.py \
@@ -242,7 +244,7 @@ bash ../yuanrong-datasystem-agent-workbench/scripts/development/sync/publish_htm
 ## 10. 交接检查清单
 
 - [ ] 读本文 + 旧 handoff [`workbench-skills-scripts-handoff-20260620.md`](workbench-skills-scripts-handoff-20260620.md)
-- [ ] 确认 `extract/for-datasystem/.skills/` 存在；必要时 `build_extract.py`
+- [ ] 确认 `archive/extract/for-datasystem/.skills/` 存在；必要时 `build_extract.py`
 - [ ] tiantiyun 磁盘 >5GB 可用再跑 smoke
 - [ ] datasystem 安装后 dry-run → 实跑 verify
 - [ ] workbench stub + scripts 归档（Phase C）
@@ -252,6 +254,6 @@ bash ../yuanrong-datasystem-agent-workbench/scripts/development/sync/publish_htm
 
 ## 11. 联系上下文
 
-完整对话与工具记录见 Cursor agent transcript（关键词：`feat/skills-harness-simplify`、`extract/for-datasystem`、`wb-dev PASS`、`skip-zmq-gate`）。
+完整对话与工具记录见 Cursor agent transcript（关键词：`feat/skills-harness-simplify`、`archive/extract/for-datasystem`、`wb-dev PASS`、`skip-zmq-gate`）。
 
 **用户最新原话：**「只操作 skill，不操作 scripts；scripts 无用脚本要清理；skill 和脚本提取到 datasystem 仓，特别是构建开发验证相关逻辑。」

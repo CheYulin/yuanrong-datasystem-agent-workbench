@@ -2,16 +2,9 @@
 
 Single routing table for **yuanrong-datasystem-agent-workbench**. Product skills for datasystem live in sibling **yuanrong-datasystem** (do not edit until workbench validation passes).
 
-## Datasystem extract (build / dev / verify)
+## Archived Datasystem extract
 
-Build/dev/daily skills + scripts are packaged for **`yuanrong-datasystem/.skills/`**:
-
-```bash
-python3 extract/for-datasystem/build_extract.py
-bash extract/for-datasystem/install-to-datasystem.sh ../yuanrong-datasystem
-```
-
-See [`extract/for-datasystem/README.md`](extract/for-datasystem/README.md) — target skills: `ds-build`, `ds-dev`, `ds-daily`, `ds-harness`.
+历史提取包已移至 [`archive/extract/for-datasystem/`](archive/extract/for-datasystem/README.md)，保留供查阅，不再作为当前工作入口。
 
 ## Workbench skills (canonical: `.skills/`)
 

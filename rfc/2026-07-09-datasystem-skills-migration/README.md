@@ -71,4 +71,4 @@
 - [`../../.skills/wb-dev/SKILL.md`](../../.skills/wb-dev/SKILL.md)
 - [`../../.skills/wb-daily/SKILL.md`](../../.skills/wb-daily/SKILL.md)
 - [`../../.skills/wb-perf/SKILL.md`](../../.skills/wb-perf/SKILL.md)
-- [`../../extract/for-datasystem/README.md`](../../extract/for-datasystem/README.md)
+- [`../../archive/extract/for-datasystem/README.md`](../../archive/extract/for-datasystem/README.md)

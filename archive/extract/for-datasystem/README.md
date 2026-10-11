@@ -1,4 +1,6 @@
-# Datasystem skill extract (build / dev / verify)
+# Archived Datasystem skill extract (build / dev / verify)
+
+Archived on 2026-10-11. Retained for historical reference; no longer an active workbench entrypoint.
 
 Portable bundle extracted from `yuanrong-datasystem-agent-workbench` for installation into **`yuanrong-datasystem/.skills/`**.
 
@@ -20,22 +22,22 @@ Follows the same layout as existing product skills (`ds-test`, `ds-pr-review`): 
 From workbench root:
 
 ```bash
-python3 extract/for-datasystem/build_extract.py
+python3 archive/extract/for-datasystem/build_extract.py
 ```
 
-Writes `extract/for-datasystem/.skills/` and refreshes `MANIFEST.yaml`.
+Writes `archive/extract/for-datasystem/.skills/` and refreshes `MANIFEST.yaml`.
 
 ## Install into datasystem
 
 ```bash
 # from workbench root
-bash extract/for-datasystem/install-to-datasystem.sh /path/to/yuanrong-datasystem
+bash archive/extract/for-datasystem/install-to-datasystem.sh /path/to/yuanrong-datasystem
 ```
 
 Or manual rsync:
 
 ```bash
-rsync -av extract/for-datasystem/.skills/ ../yuanrong-datasystem/.skills/
+rsync -av archive/extract/for-datasystem/.skills/ ../yuanrong-datasystem/.skills/
 ```
 
 ## Agent usage (after install)

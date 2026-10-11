@@ -2,9 +2,9 @@
 """Build portable ds-build / ds-dev / ds-daily / ds-harness bundle for yuanrong-datasystem.
 
 Usage (from workbench root):
-  python3 extract/for-datasystem/build_extract.py
+  python3 archive/extract/for-datasystem/build_extract.py
 
-Output: extract/for-datasystem/.skills/  (rsync or install-to-datasystem.sh into datasystem repo)
+Output: archive/extract/for-datasystem/.skills/  (rsync or install-to-datasystem.sh into datasystem repo)
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import shutil
 import textwrap
 from pathlib import Path
 
-WORKBENCH = Path(__file__).resolve().parents[2]
+WORKBENCH = Path(__file__).resolve().parents[3]
 EXTRACT = Path(__file__).resolve().parent
 OUT_SKILLS = EXTRACT / ".skills"
 
