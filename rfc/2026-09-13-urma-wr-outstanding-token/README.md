@@ -11,3 +11,10 @@
 默认容量100 WR，一次逻辑URMA传输的全部WR同时预约；超过容量直接拒绝，不按窗口流式提交。最多3次未提交准入尝试及100/200us退避共用5000us预算，另受绝对API deadline约束。该预算不是整个请求20ms墙钟硬上限。恢复阈值5000ms；无普通CQE主动退役并重试失败modify/delete，确认flush且provider删除成功才归还剩余token。缺乏安全停止证明时不得超时清零。
 
 QueryAndGet等待归入Worker既有采样access记录，并在原慢日志区分数值与NA；不扩Client协议。独立微基准已经移出特性PR，不计入生产性能证明。生产代码仍比旧版多，保留QD/所有权必要改动，移除重复封装和非必要工具；具体统计见详细设计。
+
+
+## 当前三视图与验证
+
+[关键设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [开发视图](https://yche.me/design/urma-wr-token-control-developer-view-20260920.html) · [部署视图](https://yche.me/ops/urma-wr-token-deployment-view-20261009.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
+
+[部署 RFC](deployment-view.md)。以2026-10-09当前版本节为准，下方/旧版本数值不并入本轮结果。
