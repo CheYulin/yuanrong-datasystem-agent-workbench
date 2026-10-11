@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FEMA_CSV = REPO_ROOT / "yuanrong-datasystem-agent-workbench/workspace/archive/01-fema/fema-final.csv"
-FEMA_MD = REPO_ROOT / "yuanrong-datasystem-agent-workbench/workspace/archive/01-fema/fema-analysis-filled.md"
+FEMA_CSV = REPO_ROOT / "yuanrong-datasystem-agent-workbench/archive/workspace/01-fema/fema-final.csv"
+FEMA_MD = REPO_ROOT / "yuanrong-datasystem-agent-workbench/archive/workspace/01-fema/fema-analysis-filled.md"
 GIT_REPO = REPO_ROOT / "yuanrong-datasystem"
 OUTPUT = REPO_ROOT / "htmls/reliability/ds-gitcode-bugfix-fema-coverage.html"
 API = "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem"

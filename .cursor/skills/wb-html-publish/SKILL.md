@@ -6,4 +6,4 @@ description: >-
 
 # wb-html-publish (redirect)
 
-Read the canonical skill: [`.skills/wb-html-publish/SKILL.md`](../../.skills/wb-html-publish/SKILL.md)
+Read the canonical skill: [`.skills/wb-html-publish/SKILL.md`](../../../.skills/wb-html-publish/SKILL.md)

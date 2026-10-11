@@ -1,157 +1,37 @@
-# Agent 说明
+# Repository Instructions
 
-本仓库 **`yuanrong-datasystem-agent-workbench`**（历史目录名 `yuanrong-datasystem-agent-workbench/`）与 **`yuanrong-datasystem`（Open Yuanrong DataSystem）** 配对使用：前者是 **Agent / vibe-coding 工作台**，承载 **脚本 + 文档 + 计划 + RFC + 验证产物 + Cursor Skills**；后者以 **源码与 `build.sh`** 为主。
+本仓库是 Open Yuanrong DataSystem 的轻量配套仓库。当前内容边界以 `README.md` 为准：主要承载 `docs/`、`rfc/`、`scripts/`，技能与 Agent 入口只提供必要的协作配置。
 
-## 工作角色（与本仓协作时）
+## 内容与任务边界
 
-- **架构师**：评估模块边界、依赖与演进是否合理。  
-- **设计师 / 技术专家**：弄清接口语义、错误与可观测性细节，能引用代码证据。  
-- **Code Review**：从正确性、并发、风格一致性给出可执行的评审意见。  
-- **用户视角**：关注 SDK/文档/错误信息的易用性与可行动性。  
-- **测试与验证**：功能验收路径、性能基线与门禁脚本（见 `docs/verification`、`scripts/verify`、`scripts/perf`）。
+- 新的问题分析、bugfix 方案、设计、评审和验证记录统一放在 `rfc/YYYY-MM-DD-<topic>/`，并更新 `rfc/README.md`。
+- 可复用说明放在 `docs/`；必要的辅助脚本放在 `scripts/`。优先复用产品仓能力，不扩展独立工作台或重复构建体系。新增脚本须有明确任务需求。
+- `archive/` 是历史资料，不作为当前默认工作流。不要在其中追加新专题；需要借鉴历史资料时检查其适用版本。
+- 既有 `plans/`、`workspace/` 等目录属于历史兼容材料，后续新专题统一进入 `rfc/`。
+- 原始运行日志、缓存、构建产物及大文件放在仓库外。文档只记录必要证据与产物位置。
+- 产品源码、产品测试和构建规则在 `yuanrong-datasystem` 修改，本仓只保留配套材料。
 
-## 脚本与 Skill
+## Codex / Claude Code / Cursor
 
-- **入口索引：** [`INDEX.md`](INDEX.md) · **统一 harness：** `scripts/harness/ds_harness.py` + `profiles.yaml`
-- **构建画像：** **wb-build**（**tiantiyun**）
-- **开发闭环：** **wb-dev** — lint、smoke、UT、ST、matrix 门禁（**tiantiyun**）
-- **每日全量：** **wb-daily** — coverage、perf 回归（**tiantiyun**）
-- **性能研究：** **wb-perf** — bpftrace、strace、bench（**tiantiyun**）
-- **yche.me HTML：** **wb-html-publish**（**xqyun**）
-- **报告 / 工作簿：** **wb-docs**（`docs/observable/workbook/`）
-- **GitCode PR：** **ds-pr-flow**（**本地 WSL**）
-- **新增脚本：** 放 `scripts/`，在 `profiles.yaml` 登记 owner skill
+- Codex 从 `AGENTS.md` 读取约束，Claude Code 从 `CLAUDE.md` 转入同一份约束。
+- 技能正文唯一来源是 `.skills/<name>/SKILL.md`。
+- `.agents/skills/<name>`（Codex）和 `.claude/skills/<name>`（Claude Code）是指向共享技能目录的相对符号链接；Cursor 保留跳转入口。
+- 按任务读取对应技能，不强制执行完整 harness 或远程验证。技能中的命令均从仓库根目录执行。
+- 不要在工具入口复制技能正文。维护技能后检查名称、description、发现路径和命令引用。
 
-## Excel / PPT
+## DataSystem 工程与 Git 约束
 
-- **Excel**：表格类交付优先脚本生成；见 [`docs/observable/workbook/README.md`](docs/observable/workbook/README.md)（**wb-docs** skill）；新脚本优先放 **`scripts/`**。
-- **PPT**：以 `docs/observable/*ppt*`、`ppt.md` 等 Markdown 素材为主；自动化导出可再加 `scripts/` 工具。
+- 重要结论以当前源码或日志为准，区分事实、推断和未观察到的运行证据。
+- 涉及 DataSystem 行为、源码或测试时，先读取产品仓 `AGENTS.md`、`.repo_context/README.md`、`index.md`、`maintenance.md`，再选择相关模块和工程工作流。
+- 性能、并发安全、内存安全、恢复正确性和可用性是产品工程要求；验证范围按改动风险选择。
+- 禁止向 `openeuler/yuanrong-datasystem` 的任何分支推送。每次 push 前验证 remote，只推送用户授权的 fork。
+- 配对源码路径是同级 `../yuanrong-datasystem` 或显式 `DATASYSTEM_ROOT`；DataSystem 隔离 worktree 使用 `datasystem` 命名。
+- 归档或迁移保留内容，修复受影响的链接和脚本路径；避免无关格式修改。
+- 提交前检查 diff、相关验证结果和工作区状态，报告实际验证范围。
 
-## 请先阅读
+## 入口
 
-### 外部权威链接（给 Agent 查阅）
-
-- 官方文档（latest）：<https://pages.openeuler.openatom.cn/openyuanrong-datasystem/docs/zh-cn/latest/index.html>
-- 代码仓（上游镜像）：<https://gitcode.com/openeuler/yuanrong-datasystem>
-
-### 配对仓库上下文（执行任务前）
-
-当任务涉及 `yuanrong-datasystem` 行为、源码或验证时，先查看：
-
-- `../yuanrong-datasystem/.cursor/rules/repo-context.mdc`
-- `../yuanrong-datasystem/.repo_context/`（优先按 `README.md` → `index.md` → `maintenance.md` 的顺序）
-- `../yuanrong-datasystem/.skills/`（复用现有 Skill，避免重复造轮子）
-
-1. [`docs/agent/README.md`](docs/agent/README.md)  
-2. [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md)（`scripts/{build,index,perf,verify}/` 何时用哪个）  
-3. [`docs/verification/手动验证确认指南.md`](docs/verification/手动验证确认指南.md)（逐步验收）  
-4. [`docs/verification/cmake-non-bazel.md`](docs/verification/cmake-non-bazel.md)  
-5. [`docs/verification/构建产物目录与可复现工作流.md`](docs/verification/构建产物目录与可复现工作流.md)（第三方缓存与 `output`/`build` 结构）  
-6. [`plans/agent开发载体_vibe与yuanrong分工.plan.md`](plans/agent开发载体_vibe与yuanrong分工.plan.md)  
-7. 根目录 [`README.md`](README.md)（角色定位、脚本/Skill/Excel/PPT 约定）
-
-执行本仓库脚本时，若未与 `yuanrong-datasystem` 同级放置，请设置 `DATASYSTEM_ROOT`。
-
-### 远程执行与 rsync 同步（重要）
-
-**节点分工**：
-
-| 任务 | 节点 | 入口 |
-|------|------|------|
-| Skill 验证（TDD + harness profiles） | **tiantiyun-80c128g** | `bash scripts/harness/run_skill_verification_remote.sh` |
-| HTML 发布验证 | **xqyun-32c32g** | `bash scripts/harness/run_skill_html_verify_remote.sh` |
-| GitCode PR / commit 草稿 | **本地 WSL** | `bash scripts/run_skill_local_verification.sh` |
-| 日间代码 sync | xqyun-32c32g | `bash scripts/development/sync/sync_to_xqyun.sh` |
-
-**验证同步到 tiantiyun**：
-
-```bash
-bash scripts/harness/sync_workspace_to_tiantiyun.sh
-```
-
-**约束**：代码在本地改，通过 rsync 同步；验证节点上不依赖 git pull。
-
-详见：[`scripts/harness/README.md`](scripts/harness/README.md)、[`INDEX.md`](INDEX.md)。
-
----
-
-## GitCode PR 操作指南
-
-本仓库关联的源码仓库 **yuanrong-datasystem** 托管在 GitCode (gitcode.com/openeuler/yuanrong-datasystem)。以下指南用于自动化 PR 审查、评论读取、评论回复等操作。
-
-### 认证
-
-所有 GitCode API 调用使用 **Bearer Token** 认证：
-
-```bash
-curl -H "Authorization: Bearer $GITCODE_TOKEN" "https://api.gitcode.com/api/v5/..."
-```
-
-环境变量：`GITCODE_TOKEN` — 在 GitCode 设置 → 访问令牌 中创建，需具备 PR 读写权限。
-
-### 关键 API 端点
-
-Base URL: `https://api.gitcode.com/api/v5`
-
-| 操作 | 方法 | 端点 |
-|------|------|------|
-| 获取 PR 详情 | GET | `/repos/:owner/:repo/pulls/:number` |
-| 获取 PR diff | GET | `/repos/:owner/:repo/pulls/:number/files` |
-| 获取评论列表 | GET | `/repos/:owner/:repo/pulls/:number/comments` |
-| 发表 PR 评论 | POST | `/repos/:owner/:repo/pulls/:number/comments` |
-| 回复评论 | POST | `/repos/:owner/:repo/pulls/:number/comments` (带 `in_reply_to_id`) |
-
-### 常用操作示例
-
-```bash
-# 获取 PR 详情（标题、状态、作者、base/head 分支）
-curl -s -H "Authorization: Bearer $GITCODE_TOKEN" \
-  "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem/pulls/706"
-
-# 获取 PR 变更文件列表
-curl -s -H "Authorization: Bearer $GITCODE_TOKEN" \
-  "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem/pulls/706/files"
-
-# 获取所有评论
-curl -s -H "Authorization: Bearer $GITCODE_TOKEN" \
-  "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem/pulls/706/comments"
-
-# 发表普通评论（Markdown 支持）
-curl -s -X POST -H "Authorization: Bearer $GITCODE_TOKEN" \
-  -H "Content-Type: application/json; charset=utf-8" \
-  -d '{"body":"LGTM overall. One suggestion: consider adding unit tests for the new metrics."}' \
-  "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem/pulls/706/comments"
-
-# 回复已有评论（串入讨论线程）
-curl -s -X POST -H "Authorization: Bearer $GITCODE_TOKEN" \
-  -H "Content-Type: application/json; charset=utf-8" \
-  -d '{"body":"Fixed in latest commit, PTAL.","in_reply_to_id":12345678}' \
-  "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem/pulls/706/comments"
-
-# 行内代码评论（指定文件和行号）
-curl -s -X POST -H "Authorization: Bearer $GITCODE_TOKEN" \
-  -H "Content-Type: application/json; charset=utf-8" \
-  -d '{
-    "body": "Consider using const here for better compiler optimization.",
-    "path": "src/datasystem/common/rpc/zmq/zmq_stub_impl.h",
-    "new_position": 42
-  }' \
-  "https://api.gitcode.com/api/v5/repos/openeuler/yuanrong-datasystem/pulls/706/comments"
-```
-
-### PR 审查工作流
-
-1. **读取 PR 详情**：`GET /pulls/:number` → 获取标题、正文、状态、作者、base/head refs
-2. **读取变更文件**：`GET /pulls/:number/files` → 获取变更文件列表和 diff
-3. **读取现有评论**：`GET /pulls/:number/comments` → 获取所有审查评论
-4. **分析 Review 意见**：按评论 ID 和 `in_reply_to_id` 梳理讨论线程
-5. **自动回复评论**：对每个待回复的评论用 `in_reply_to_id` 参数 POST 回复
-6. **发表新评论**：没有 `in_reply_to_id` 时作为独立评论发表
-
-### 注意事项
-
-- 评论内容支持 Markdown 格式
-- 批量发表评论时注意频率限制，每次 POST 之间建议添加短暂间隔
-- `in_reply_to_id` 用于将回复串入指定评论线程
-- 行内评论通过 `path` + `new_position` 指定目标位置
-- 评论 ID 从获取评论列表的返回中获取
+- `README.md`：仓库定位与内容边界。
+- `INDEX.md`：当前内容及既有脚本/技能入口。
+- `.skills/README.md`：共享技能与工具发现方式。
+- `docs/agent/README.md`：协作说明。

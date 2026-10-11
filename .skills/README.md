@@ -6,8 +6,14 @@ Do not duplicate workflow text under `.cursor/skills/` — use redirect stubs on
 | Tool | How to load |
 |------|-------------|
 | **Cursor** | `.cursor/skills/*/SKILL.md` (stub → here) + `.cursor/rules/skills-entry.mdc` |
-| **Codex** | `agents/openai.yaml` per skill |
-| **Claude Code** | `CLAUDE.md` / `AGENTS.md` → this directory |
+| **Codex** | `.agents/skills/<name>` → `../../.skills/<name>`；`agents/openai.yaml` 为展示元数据 |
+| **Claude Code** | `.claude/skills/<name>` → `../../.skills/<name>`；约束见 `CLAUDE.md` / `AGENTS.md` |
+
+技能目录使用相对符号链接，正文只维护一份。Codex 用 `$wb-docs`，Claude Code 用 `/wb-docs`。Linux/WSL checkout 可直接使用；Windows 原生 checkout 需支持符号链接，否则按 `.skills/<name>/SKILL.md` 手工读取。命令从仓库根目录执行。
+
+本仓主要承载 `docs/`、`rfc/`、必要的 `scripts/`；新专题和 bugfix 记录进入 `rfc/`，历史材料见 `archive/`。以下技能为既有工具入口，按需求使用。
+
+规范：[Codex](https://learn.chatgpt.com/docs/build-skills)、[Claude Code](https://code.claude.com/docs/en/skills)。
 
 ## Skills (6)
 

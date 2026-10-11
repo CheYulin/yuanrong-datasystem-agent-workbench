@@ -6,4 +6,4 @@ description: >-
 
 # wb-daily (redirect)
 
-Read the canonical skill: [`.skills/wb-daily/SKILL.md`](../../.skills/wb-daily/SKILL.md)
+Read the canonical skill: [`.skills/wb-daily/SKILL.md`](../../../.skills/wb-daily/SKILL.md)

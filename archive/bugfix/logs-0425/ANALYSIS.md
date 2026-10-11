@@ -5,8 +5,8 @@
 
 **相关**：
 
-- ZMQ `New gateway` / liveness / 为何频繁重建见同目录 [`ZMQ_GATEWAY_REBUILD.md`](./ZMQ_GATEWAY_REBUILD.md)。
-- **Get 路径上 `client_rpc_get_*` 与 `worker_*` 延迟为何对不上**（计时边界、MsgQ 异步、ZMQ E2E）见 [`METRICS_CLIENT_WORKER_ALIGNMENT.md`](./METRICS_CLIENT_WORKER_ALIGNMENT.md)。
+- ZMQ `New gateway` / liveness / 为何频繁重建见同目录 [`ZMQ_GATEWAY_REBUILD.md`](ZMQ_GATEWAY_REBUILD.md)。
+- **Get 路径上 `client_rpc_get_*` 与 `worker_*` 延迟为何对不上**（计时边界、MsgQ 异步、ZMQ E2E）见 [`METRICS_CLIENT_WORKER_ALIGNMENT.md`](METRICS_CLIENT_WORKER_ALIGNMENT.md)。
 
 ---
 

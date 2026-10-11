@@ -6,4 +6,4 @@ description: >-
 
 # wb-perf (redirect)
 
-Read the canonical skill: [`.skills/wb-perf/SKILL.md`](../../.skills/wb-perf/SKILL.md)
+Read the canonical skill: [`.skills/wb-perf/SKILL.md`](../../../.skills/wb-perf/SKILL.md)

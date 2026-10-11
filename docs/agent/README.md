@@ -1,60 +1,19 @@
-# 指导 Agent 使用本仓库
+# Agent 协作入口
 
-本目录说明：**何时改 `yuanrong-datasystem`，何时用 `yuanrong-datasystem-agent-workbench` 的脚本与文档**，避免在错误仓库里找工具或重复造轮子。
+本仓是 DataSystem 的轻量配套仓库，定位与约束以 [`README.md`](../../README.md) 和 [`AGENTS.md`](../../AGENTS.md) 为准。
 
-## 0. Agent 角色（Open Yuanrong DataSystem）
+## 内容分工
 
-在本载体仓库与配对 datasystem 上工作时，宜同时具备：**架构合理性**（边界与依赖）、**设计与语义细节**（接口与观测）、**Code Review**、**用户易用性**、**测试与性能验证**。根目录 [`README.md`](../../README.md) 有对照表；重复流程建议做成 **Cursor Skill**（见 [`.cursor/skills/feature-tree-to-docs/SKILL.md`](../../.cursor/skills/feature-tree-to-docs/SKILL.md)）。
+- 新问题分析、bugfix 方案、设计、评审和验证记录：[`rfc/`](../../rfc/README.md)。
+- 通用技术说明和操作指南：[`docs/`](../)。
+- 明确需要的辅助工具：[`scripts/`](../../scripts/README.md)，优先复用已有能力。
+- 历史 bugfix、workspace 和提取包：[`archive/`](../../archive/README.md)。
+- 产品源码、产品测试和构建规则：独立的 `yuanrong-datasystem` 仓库。
 
-**Excel**：可复现表格优先用脚本生成，见 [`docs/observable/workbook/README.md`](../observable/workbook/README.md)（命令 `./ops docs.kv_observability_xlsx`）；新脚本放 [`scripts/`](../../scripts/README.md)。
+## 工具入口
 
-## 1. 仓库分工（必读）
+Codex 读取 `AGENTS.md`，Claude Code 读取 `CLAUDE.md`。共享技能正文位于 `.skills/`，两者通过各自发现目录中的符号链接加载，见 [技能说明](../../.skills/README.md)。不要为不同工具复制工作流。
 
-- **`yuanrong-datasystem`**：C/C++ 等**产品源码**、`build.sh`、与 CMake 强耦合的 `scripts/build_thirdparty.sh` 等。  
-- **`yuanrong-datasystem-agent-workbench`**：**开发载体**——验证 KV executor、锁、brpc ST、覆盖率门禁、URMA IDE 索引、bpftrace/strace 辅助；以及 `docs/`、`plans/`。
+命令从仓库根目录执行。配对源码目录使用同级 `../yuanrong-datasystem` 或 `DATASYSTEM_ROOT`。涉及产品行为时先读产品仓的 `AGENTS.md` 与 `.repo_context/`，结论以当前源码和日志为证据。
 
-打开 [`datasystem-dev.code-workspace`](../../datasystem-dev.code-workspace) 同时加载两个根目录。
-
-## 官方关键链接（给 Agent 查阅）
-
-- 官方文档（latest）：<https://pages.openeuler.openatom.cn/openyuanrong-datasystem/docs/zh-cn/latest/index.html>
-- 代码仓（上游镜像）：<https://gitcode.com/openeuler/yuanrong-datasystem>
-
-## 配对仓库上下文（开始任务前先看）
-
-若当前任务会查阅或修改 `yuanrong-datasystem`，请先读取：
-
-1. `../yuanrong-datasystem/.cursor/rules/repo-context.mdc`
-2. `../yuanrong-datasystem/.repo_context/README.md`、`index.md`、`maintenance.md`
-3. `../yuanrong-datasystem/.skills/`（优先复用已有 Skill，如 `ds-refresh-docs`、`ds-create-pr`）
-
-## 2. 执行任务前的检查清单
-
-1. **定位 datasystem 根**：若脚本找不到仓库，设置 `export DATASYSTEM_ROOT=/绝对路径/yuanrong-datasystem`。  
-2. **ST 测试**：用 **`ctest --test-dir <build>`** 或本仓库 **`./ops test.kv_executor`**，不要直接执行 `ds_st_kv_cache` 二进制（缺 `LD_LIBRARY_PATH` 会失败）。  
-3. **已编过 ST、避免长耗时重编**：`./ops test.kv_executor --skip-build <build>`。  
-4. **需要人类读的长文档**：优先写进 `docs/` 或 `plans/`，不要在对话里只留碎片命令。
-
-## 3. 文档地图
-
-| 文档 | 用途 |
-|------|------|
-| [**`decision-tree.md`**](decision-tree.md) | **按意图路由**：快速找到最相关的文档 |
-| [**`maintenance.md`**](maintenance.md) | **维护规范**：修改后需同步更新哪些索引 |
-| [**`scripts-map.md`**](scripts-map.md) | **`scripts/` 分类地图**：build / index / perf / verify 何时用哪个入口 |
-| [`docs/verification/手动验证确认指南.md`](../verification/手动验证确认指南.md) | **逐步验收**：每步命令、成功判据、自检清单 |
-| [`docs/verification/构建产物目录与可复现工作流.md`](../verification/构建产物目录与可复现工作流.md) | 第三方缓存、`output`/`build` 目录结构、Client/Worker/whl |
-| [`docs/verification/cmake-non-bazel.md`](../verification/cmake-non-bazel.md) | build、perf、coverage、executor、锁、examples 命令速查 |
-| [`scripts/README.md`](../../scripts/README.md) | 脚本子目录说明、`lib/` 解析、`scripts-map` 链接 |
-| [`plans/agent开发载体_vibe与yuanrong分工.plan.md`](../../plans/agent开发载体_vibe与yuanrong分工.plan.md) | 分工与脚本总表 |
-| [`docs/reliability/README.md`](../reliability/README.md) | 可靠性主线：架构、故障模式、故障树、可靠性设计、运维 playbook |
-| [`docs/reliability/03-status-codes.md`](../reliability/03-status-codes.md) | Client `StatusCode` 全表 + L0-L5 分层映射 |
-| [`docs/observable/README.md`](../observable/README.md) | 可观测与定位定界主线：调用链、故障模式库、triage 手册、metrics |
-| [`tech-research/README.md`](../../tech-research/README.md) | 第三方库技术调研（如 brpc、bpftrace 方法论） |
-| [`docs/feature-tree/openyuanrong-data-system-feature-tree.md`](../feature-tree/openyuanrong-data-system-feature-tree.md) | **产品特性树**（openYuanrong / yuanrong-datasystem 能力矩阵；表头说明 + 同目录 `.xlsx`） |
-| [`workspace/README.md`](../../workspace/README.md) | bpftrace/perf/strace **默认产物根**（`workspace/observability/`） |
-
-## 4. 修改边界
-
-- **改业务逻辑 / CMake 目标 / 测试用例**：在 **yuanrong-datasystem**。  
-- **改验证流程、加新门禁脚本、更新操作说明**：在 **yuanrong-datasystem-agent-workbench**（并更新 `docs/verification` 与本目录）。
+按任务选择已有脚本和风险验证范围，入口见 [`INDEX.md`](../../INDEX.md)、[`scripts-map.md`](scripts-map.md)。维护约定见 [`maintenance.md`](maintenance.md)。

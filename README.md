@@ -1,57 +1,40 @@
 # yuanrong-datasystem-agent-workbench
 
-> Agent / vibe-coding workbench paired with **Open Yuanrong DataSystem** (`yuanrong-datasystem`):
-> scripts, verification flows, RFCs, plans, observability docs, and Cursor Agent Skills.
-> Source code lives in the sibling `yuanrong-datasystem` repo; this repo is where agents
-> **plan, run, verify, and document**.
+Open Yuanrong DataSystem 的轻量配套仓库，主要承载 **文档、RFC 和必要的辅助脚本**。产品源码、产品测试和产品构建规则在独立的 `yuanrong-datasystem` 仓库维护。
 
-> 本仓的历史目录名仍为 `yuanrong-datasystem-agent-workbench/`，文档与脚本中的相对路径不受影响；GitHub 上的仓名建议改为 `yuanrong-datasystem-agent-workbench`（或短名 `ds-agent-workbench`）。
+## 内容边界
 
-与 **`yuanrong-datasystem`（Open Yuanrong DataSystem）** 配套的开发载体仓库：业务**源码**在同级仓库 **`yuanrong-datasystem`**；本仓承载脚本、文档、计划、RFC、验证产物与 Agent 工作流。
+| 目录 | 用途 |
+|------|------|
+| [`docs/`](docs/) | 可复用的技术说明、操作指南、报告与证据说明 |
+| [`rfc/`](rfc/README.md) | 新问题分析、bugfix 方案、设计、评审与验证记录 |
+| [`scripts/`](scripts/README.md) | 已有辅助工具；新增工具仅在明确需要时加入，优先复用产品仓能力 |
+| [`archive/`](archive/README.md) | 历史材料，保留供查阅，不作为当前任务入口 |
 
-## 本仓对 Agent 的角色定位
+后续新专题统一建在 `rfc/YYYY-MM-DD-<topic>/`，至少提供一个 `README.md` 说明问题、证据、方案和验证状态，并登记到 [`rfc/README.md`](rfc/README.md)。不再新增顶层 `bugfix/` 或新的专题工作台。稳定且通用的说明再沉淀到 `docs/`；运行日志、构建缓存和大体积产物保存在仓库外。
 
-在本仓库与配对 datasystem 上工作时，Agent 应同时具备下列视角（可按任务侧重）：
+历史 `bugfix/` 已归档到 `archive/bugfix/`，`workspace/archive/` 已归档到 `archive/workspace/`，DataSystem skills 提取包位于 `archive/extract/for-datasystem/`。既有 `plans/`、`workspace/` 等材料仍供历史查阅，后续新内容按上述三类组织。
 
-| 视角 | 职责要点 |
-|------|-----------|
-| **架构师** | 模块边界、依赖方向、扩展点与风险；改动是否破坏分层与可运维性。 |
-| **设计师与技术专家** | 接口语义、错误码与契约、日志/可观测性含义；能指到具体文件与行为。 |
-| **Code Review** | 变更合理性、并发与资源生命周期、与现有模式一致；指出遗漏与替代方案。 |
-| **用户 / 易用性** | SDK 与 CLI 的心智模型、错误信息是否可行动、文档与示例是否对齐真实行为。 |
-| **测试与验证** | 功能用例、ST/门禁、性能基线与对比；知道「如何证明改对了、没拖慢」。 |
+## Codex 与 Claude Code
 
-详细操作清单与文档地图见 [`AGENTS.md`](AGENTS.md)、[`docs/agent/README.md`](docs/agent/README.md)。
+仓库约束统一在 [`AGENTS.md`](AGENTS.md)；Claude Code 通过 [`CLAUDE.md`](CLAUDE.md) 读取相同约束。技能正文只维护在 [`.skills/`](.skills/README.md)：
 
-## 脚本与 Skill 约定
+| 工具 | 项目技能入口 | 调用示例 |
+|------|--------------|----------|
+| Codex | `.agents/skills/<name>` → `.skills/<name>` | `$wb-docs` |
+| Claude Code | `.claude/skills/<name>` → `.skills/<name>` | `/wb-docs` |
+| Cursor（兼容） | `.cursor/skills/<name>/SKILL.md` 转向共享正文 | 按任务选择 skill |
 
-- **可执行脚本**：**统一放在仓库根目录 [`scripts/`](scripts/README.md)** 下，按用途分子目录（如 `build/`、`perf/`、`verify/`、`index/`）；新增脚本优先放此处，并在 [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md) 或对应 `README` 中登记。  
-  - 历史或专题脚本可能仍位于 `docs/**/scripts/`、`workspace/**/scripts/` 等，**新增长脚本建议迁到 `scripts/`** 或包一层 `scripts/` 下的薄封装。  
-- **重复出现的操作流程**（同一套命令、检查项、评审维度多次使用）：建议在 Cursor 中**沉淀为 Agent Skill**（可参考 Cursor 的 *create skill* 指引），便于跨会话一致执行；本仓已有示例： [`.cursor/skills/feature-tree-to-docs/SKILL.md`](.cursor/skills/feature-tree-to-docs/SKILL.md)。
+六个既有技能保留：`wb-build`、`wb-dev`、`wb-daily`、`wb-perf`、`wb-docs`、`wb-html-publish`。按任务使用，不要求每个 RFC 运行完整构建或远程验证。具体命令见 [`.skills/README.md`](.skills/README.md) 和 [`INDEX.md`](INDEX.md)。
 
-## Excel 与 PPT
+技能入口使用 Git 跟踪的相对符号链接。建议在 Linux/WSL checkout 中使用；Windows 原生 checkout 需启用符号链接，否则可按共享正文路径手工读取。`agents/openai.yaml` 只提供 Codex 的展示元数据，不代替技能发现目录。
 
-- **Excel**：定位定界手册、观测矩阵、特性树等以表格交付时，优先用 **脚本生成 `.xlsx`**（可维护、可复现）。现有示例：[`docs/observable/workbook/README.md`](docs/observable/workbook/README.md)（含生成命令 `./ops docs.kv_observability_xlsx`）、[`workspace/reliability/scripts/build_openyuanrong_fault_library_xlsx.py`](workspace/reliability/scripts/build_openyuanrong_fault_library_xlsx.py)。**新增表格生成器建议落在 `scripts/` 子目录**（例如 `scripts/documentation/`），并在文档中写明输入输出与依赖（如 `openpyxl`）。  
-- **PPT**：本仓以 **Markdown 素材 + 结构提纲** 为主。需要自动化时可在 `scripts/` 增加导出步骤（如 pandoc / python-pptx），并在 `docs/agent` 中登记。
+## 协作规则
 
-## 快速开始
+- 开始任务先确认仓库和版本，重要结论以 DataSystem 当前源码或日志为证据。
+- 涉及产品行为时遵循产品仓的 `AGENTS.md` 和 `.repo_context/`；实现修改留在产品仓。
+- 区分已验证事实、推断和待验证项，选择与风险匹配的验证范围。
+- 推送前检查 remote，禁止推送到 `openeuler/yuanrong-datasystem`；只使用用户指定的 fork。
+- 辅助脚本需要产品仓路径时，使用同级 `../yuanrong-datasystem` 或 `DATASYSTEM_ROOT`。
 
-| 角色 | 第一步 |
-|------|--------|
-| 人 / Agent | 阅读 [`AGENTS.md`](AGENTS.md) 与 [`docs/agent/README.md`](docs/agent/README.md) |
-| **亲自逐步验收** | [`docs/verification/手动验证确认指南.md`](docs/verification/手动验证确认指南.md) |
-| **产物目录 / 第三方缓存 / 可复现工作流** | [`docs/verification/构建产物目录与可复现工作流.md`](docs/verification/构建产物目录与可复现工作流.md) |
-| 验证与构建命令速查 | [`docs/verification/cmake-non-bazel.md`](docs/verification/cmake-non-bazel.md) |
-| 分工总览 | [`plans/agent开发载体_vibe与yuanrong分工.plan.md`](plans/agent开发载体_vibe与yuanrong分工.plan.md) |
-
-## 目录
-
-- **`scripts/`** — 可执行工具（KV executor、锁、brpc、URMA 索引、bpftrace 等），见 [`scripts/README.md`](scripts/README.md)  
-- **`docs/`** — 架构、流程、可靠性、验证步骤、**Agent 开发指引**、可观测性 / Excel / PPT 素材  
-- **`plans/`** — 计划与复盘文稿  
-- **`.cursor/skills/`** — 与本仓协作相关的 Cursor Agent Skills（可选）  
-- **`datasystem-dev.code-workspace`** — Cursor/VS Code 多根工作区（本仓 + `../yuanrong-datasystem`）
-
-## 环境
-
-将本仓库与 `yuanrong-datasystem` 放在**同一父目录**下克隆（例如 `git-repos/`），或设置 `DATASYSTEM_ROOT` 指向 datasystem 根目录。
+技能发现规范：[Codex](https://learn.chatgpt.com/docs/build-skills)、[Claude Code](https://code.claude.com/docs/en/skills)。

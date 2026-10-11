@@ -6,4 +6,4 @@ description: >-
 
 # wb-dev (redirect)
 
-Read the canonical skill: [`.skills/wb-dev/SKILL.md`](../../.skills/wb-dev/SKILL.md)
+Read the canonical skill: [`.skills/wb-dev/SKILL.md`](../../../.skills/wb-dev/SKILL.md)

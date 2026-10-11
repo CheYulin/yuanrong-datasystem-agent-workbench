@@ -36,6 +36,17 @@ class WorkbenchSkillRegistryTest(unittest.TestCase):
             stub = WORKBENCH / ".cursor/skills" / name / "SKILL.md"
             self.assertTrue(stub.is_file(), f"{name} missing cursor stub")
 
+    def test_native_discovery_uses_shared_skill_contents(self) -> None:
+        for tool_dir in (".agents/skills", ".claude/skills"):
+            root = WORKBENCH / tool_dir
+            discovered = {p.name for p in root.iterdir() if (p / "SKILL.md").is_file()}
+            self.assertEqual(discovered, CANONICAL_WB)
+            for name in CANONICAL_WB:
+                entry = root / name
+                self.assertTrue(entry.is_symlink(), f"{entry} duplicates skill content")
+                self.assertEqual(entry.resolve(), (SKILLS / name).resolve())
+                self.assertEqual((entry / "SKILL.md").read_bytes(), (SKILLS / name / "SKILL.md").read_bytes())
+
     def test_each_skill_has_tests(self) -> None:
         for name in CANONICAL_WB:
             tests = SKILLS / name / "tests"

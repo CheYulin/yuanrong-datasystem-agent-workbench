@@ -26,7 +26,7 @@
 
 ### 现场触发
 
-2026-04-19，worker `kv2-jingpai-1` 出现 OOM：`shm.memUsage` 100 s 内从 **3.58 GB → 37.5 GB**（rate=0.999），同期 `OBJECT_COUNT` 从 **438 → 37**。这条"OBJECT_COUNT 反向于 OBJECT_SIZE"曲线是**元数据已删但物理 shm 仍被 `memoryRefTable_` 钉住**的经典签名（详见 [`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md §3.2 d`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)）。
+2026-04-19，worker `kv2-jingpai-1` 出现 OOM：`shm.memUsage` 100 s 内从 **3.58 GB → 37.5 GB**（rate=0.999），同期 `OBJECT_COUNT` 从 **438 → 37**。这条"OBJECT_COUNT 反向于 OBJECT_SIZE"曲线是**元数据已删但物理 shm 仍被 `memoryRefTable_` 钉住**的经典签名（详见 [`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md §3.2 d`](../../archive/bugfix/2026-04-19-worker-shm-oom-问题定位.md)）。
 
 ### 既有 metric（PR #584/#586/#588 之后）的盲区
 
@@ -187,7 +187,7 @@
 ## 关联
 
 - RFC：[`yuanrong-datasystem-agent-workbench/rfc/2026-04-shm-leak-observability/`](../../rfc/2026-04-shm-leak-observability/README.md)
-- 现场分析：[`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../bugfix/2026-04-19-worker-shm-oom-问题定位.md)
+- 现场分析：[`yuanrong-datasystem-agent-workbench/bugfix/2026-04-19-worker-shm-oom-问题定位.md`](../../archive/bugfix/2026-04-19-worker-shm-oom-问题定位.md)
 - 复用框架：PR #584（lightweight metrics framework） + PR #586（KvMetricId 体系）
 - 关联 PR：本组 PR **不依赖**任何尚未合入的提交
 

@@ -1,79 +1,37 @@
-# Agent Workbench Index
+# Workbench Index
 
-Single routing table for **yuanrong-datasystem-agent-workbench**. Product skills for datasystem live in sibling **yuanrong-datasystem** (do not edit until workbench validation passes).
+当前定位与约束见 [`README.md`](README.md) 和 [`AGENTS.md`](AGENTS.md)。
 
-## Archived Datasystem extract
+## 内容入口
 
-历史提取包已移至 [`archive/extract/for-datasystem/`](archive/extract/for-datasystem/README.md)，保留供查阅，不再作为当前工作入口。
+| 入口 | 用途 |
+|------|------|
+| [`rfc/README.md`](rfc/README.md) | 新问题分析、bugfix 方案、设计与验证记录；新专题统一进入这里 |
+| [`docs/`](docs/) | 可复用文档与操作指南 |
+| [`scripts/README.md`](scripts/README.md) | 必要的已有辅助工具 |
+| [`archive/README.md`](archive/README.md) | 历史 bugfix、workspace 和提取包 |
 
-## Workbench skills (canonical: `.skills/`)
+## 共享技能
 
-| Skill | When |
+正文位于 `.skills/`，Codex 从 `.agents/skills/` 发现，Claude Code 从 `.claude/skills/` 发现。入口指向同一份技能，详见 [`.skills/README.md`](.skills/README.md)。
+
+| Skill | 用途 |
 |-------|------|
-| **wb-build** | CMake/Bazel build, timing, module long-tail, optimization hints |
-| **wb-dev** | Developer loop: clang-format check, smoke, UT, ST, matrix gates |
-| **wb-daily** | Full daily run: all tests, coverage, perf regression, trend evidence |
-| **wb-perf** | Hotspot/regression diagnosis from perf, bpftrace, strace, metrics, nightlies |
-| **wb-html-publish** | yche.me HTML via xqyun `/var/www/html` git |
-| **wb-docs** | Reports, workbook sources, commit drafts |
+| `wb-build` | 既有 CMake/Bazel 构建与耗时分析 |
+| `wb-dev` | 按风险选择 lint、smoke、UT、ST 验证 |
+| `wb-daily` | 明确需要时执行既有每日全量流程 |
+| `wb-perf` | 性能定位与回归分析 |
+| `wb-docs` | 文档、报告与工作簿材料 |
+| `wb-html-publish` | 按明确发布需求维护 yche.me HTML |
 
-TDD / harness profile 验证（**tiantiyun**）：`bash scripts/harness/verify_skill.sh --skill wb-build`（或 `run_skill_verification_remote.sh`）  
-HTML 发布验证（**xqyun**）：`bash scripts/harness/verify_skill.sh --skill wb-html-publish`  
-GitCode / commit（**本地 WSL**）：`bash scripts/run_skill_local_verification.sh`  
-仪表盘：`python3 scripts/harness/render_skill_dashboard.py`
+## 已有脚本入口
 
-## Harness profiles
-
-`scripts/harness/profiles.yaml` is the single routing table:
-
-- `build.quick` / `build.full` → **wb-build**
-- `dev.quick` → **wb-dev**（默认，无 inline build）
-- `dev.default` → **wb-dev**（manual/nightly，含 build）
-- `daily.full` → **wb-daily**
-- `perf.hotspot` / `perf.regression` → **wb-perf**
-
-## Nodes (`scripts/config/nodes.yaml`)
-
-| Node | Use |
-|------|-----|
-| **tiantiyun-80c128g** | **Default build + smoke / UT / ST** |
-| **xqyun-32c32g** | Code sync, **yche.me** `/var/www/html` git |
-
-## Quick commands (see skills for full tables)
+按任务选用，不要求每个 RFC 执行完整流程：
 
 ```bash
 python3 scripts/harness/ds_harness.py build --backend cmake --dry-run --json
-python3 scripts/harness/ds_harness.py dev --profile dev.default --dry-run --json
-python3 scripts/harness/ds_harness.py daily --profile daily.full --dry-run --json
-python3 scripts/harness/ds_harness.py perf --profile perf.hotspot --dry-run --json
-python3 scripts/testing/verify/smoke/run_smoke.py --read-loop-sec 15
-bash scripts/testing/verify/smoke/run_smoke_remote.sh
-bash scripts/testing/verify/validate_kv_executor.sh --skip-build /path/to/build
-bash scripts/lint/check_cpp_line_width.sh --staged
-bash scripts/development/sync/publish_htmls_git.sh --help
+python3 scripts/harness/ds_harness.py dev --profile dev.quick --dry-run --json
+bash scripts/harness/verify_skill.sh --all --dry-run
 ```
 
-Harness profiles: `scripts/harness/profiles.yaml` + `scripts/harness/README.md`.
-
-## Sync
-
-```bash
-bash scripts/harness/sync_workspace_to_tiantiyun.sh          # → tiantiyun (skill verify)
-bash scripts/development/sync/sync_to_xqyun.sh               # → xqyun (daytime sync)
-bash scripts/development/sync/publish_htmls_git.sh pull
-```
-
-## Keep in workbench
-
-| Path | Role |
-|------|------|
-| `rfc/` | Process RFCs |
-| `bugfix/` | Incident review |
-| `scripts/` | Executable harness |
-| `archive/` | Old plans/results |
-
-## Adding a script
-
-1. Place under `scripts/<area>/`
-2. Add exactly one owner in `scripts/harness/profiles.yaml`
-3. Document path in the matching **wb-*** skill (`.skills/<name>/SKILL.md`) + `docs/agent/scripts-map.md`
+具体参数、节点与验证边界见 [`scripts/harness/README.md`](scripts/harness/README.md)、[`scripts/harness/profiles.yaml`](scripts/harness/profiles.yaml) 和 [`docs/agent/scripts-map.md`](docs/agent/scripts-map.md)。新增脚本仅在任务明确需要时加入，并同步对应技能与文档索引。
