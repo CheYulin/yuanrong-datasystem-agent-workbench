@@ -1,0 +1,9 @@
+EtcdAndCoordinator/MetadataRecoveryDisabledTest.
+  MetadataOwnerRestart/Etcd  # GetParam() = false
+  MetadataOwnerRestart/Coordinator  # GetParam() = true
+  UnrecoverableLocalDataClearedAfterMetadataOwnerRestart/Etcd  # GetParam() = false
+  UnrecoverableLocalDataClearedAfterMetadataOwnerRestart/Coordinator  # GetParam() = true
+  OtherWorkersRecoverMetadataBeforeClearingDataWithoutMetadata/Etcd  # GetParam() = false
+  OtherWorkersRecoverMetadataBeforeClearingDataWithoutMetadata/Coordinator  # GetParam() = true
+  OrphanLocalDataRequiresRecoveryOrClearDataWithoutMeta/Etcd  # GetParam() = false
+  OrphanLocalDataRequiresRecoveryOrClearDataWithoutMeta/Coordinator  # GetParam() = true

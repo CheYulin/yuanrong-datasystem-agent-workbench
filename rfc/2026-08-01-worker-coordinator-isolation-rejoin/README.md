@@ -6,7 +6,7 @@
 | Source branch | `feat/worker-coordinator-isolation-rejoin` |
 | Source baseline | `main/master@a90f6c6b718857367575068c83fb976494f6c751` |
 | Scope | Measure 2: worker keeps running during worker-coordinator isolation and rejoins after removal |
-| GitCode issue | `openeuler/yuanrong-datasystem#924` |
+| GitCode issue | `openeuler/yuanrong-datasystem#924`; follow-up correctness issue `yche-huawei/yuanrong-datasystem#25` |
 | GitCode PR | `openeuler/yuanrong-datasystem!1798` |
 | Worktree | `yuanrong-datasystem/.worktrees/worker-coordinator-isolation-rejoin-20260801` |
 
@@ -32,3 +32,13 @@ recorded as a follow-up risk unless review asks to include it.
 - Create the PR only after focused UT, selected ST, CMake build, Bazel build, clang-format, and clang-tidy evidence is
   available.
 - PR text must include UT/ST case names and per-case runtimes.
+
+
+## Current Boundary Refresh
+
+Updated on 2026-08-02:
+
+- Current PR implementation keeps Coordinator topology as the only authoritative routing state.
+- Peer `GetPeerHashRing` is consumed only as non-authoritative evidence: newer observed version is recorded for diagnostics, and missing/FAILED local member triggers rejoin-required.
+- Route correction from peer-observed hash rings, async peer probing, and cleanup retry/backoff are tracked in follow-up issue `openeuler/yuanrong-datasystem#925`; correctness closure is tracked by `yche-huawei/yuanrong-datasystem#25`.
+- Current code adds a peer-facing wrapper RPC `GetPeerHashRing` while reusing existing `GetHashRingReqPb/GetHashRingRspPb`; this is a v1 implementation contract update from the original "no new RPC/PB" wording.

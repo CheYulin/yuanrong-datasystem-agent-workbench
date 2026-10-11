@@ -1,0 +1,15 @@
+KVClientWriteRocksdbTest.
+  TestNoneModeVoluntaryScaleDown
+  EXCLUSIVE_LEVEL1_TestScaleDownFallsBackWhenEvictedCopyIsMissing
+  TestSyncModeVoluntaryScaleDown
+  TestASyncModeVoluntaryScaleDown
+KVCacheClientServiceDiscoverySwitchBackTest.
+  TestRecoverLocalWorker
+KVCacheMetaShardingTest.
+  AsyncDeleteMultiShardConsistency
+  RemoveMetaByWorkerFullShardCoverage
+KVClientEtcdDfxTest.
+  LEVEL1_TestStartingWorkerRejectsClientSetupBeforeReady
+  LEVEL1_KVClientRejectsReadWriteDuringIsolationAndRecovering
+KVClientTransportSetConnectOptionsTest.
+  MetaOwnerPolicyRoutesWritesToMetadataOwner

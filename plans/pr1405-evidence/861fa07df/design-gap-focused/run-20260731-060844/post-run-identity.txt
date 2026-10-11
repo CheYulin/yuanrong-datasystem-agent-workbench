@@ -1,0 +1,13 @@
+03cd63b4f09206ce5c0a61fb992bb0f06879e71c
+c13f1143835e08e71af39fe933d4df88673314d789d047de3d7657def3560201  -
+ M src/datasystem/master/object_cache/master_oc_service_impl.cpp
+ M src/datasystem/worker/object_cache/BUILD.bazel
+ M src/datasystem/worker/object_cache/CMakeLists.txt
+ D src/datasystem/worker/object_cache/recovery/object_cache_ownership_reconciliation.cpp
+ D src/datasystem/worker/object_cache/recovery/object_cache_ownership_reconciliation.h
+ M src/datasystem/worker/object_cache/recovery/object_cache_recovery_state.cpp
+ M src/datasystem/worker/object_cache/worker_oc_service_impl.cpp
+ M src/datasystem/worker/object_cache/worker_oc_service_impl.h
+ M tests/ut/worker/BUILD.bazel
+ D tests/ut/worker/object_cache/object_cache_ownership_reconciliation_test.cpp
+ M tests/ut/worker/object_cache/worker_oc_service_impl_test.cpp

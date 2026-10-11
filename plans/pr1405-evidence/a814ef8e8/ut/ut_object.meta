@@ -1,0 +1,7 @@
+name=ut_object
+binary=/home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1405-af58eb0c-validate/.clion-remote/pr1405-af58eb0c/build/tests/ut/ds_ut_object
+filter=*ControlBackendScopeClassifierTest*:*CentralMetadataAddressResolverTest*:*MigrateDataAdmissionTest*:*ObjectCacheOwnershipReconciliationTest*:*ObjectCacheRecoveryEvidenceTest*:*ObjectCacheRecoveryStateTest*:*ObjectCacheRecoveryStateDeathTest*:*WorkerControlBackendProbeTest*:*WorkerOcServiceImplTest*:*OCMetadataManagerTopologyTest*:*OCMigrateMetadataManagerTest*:*MetaDataRecoveryManagerTest*:*MetadataRecoverySelectorTest*:*MigrateDataDirectTest*:*ScaleDownNodeSelectorTest*:*MigrateDataHandlerTest*:*MigrateDataHandlerSpillTest*:*MigrateDataServiceTest*:*SlotRecoveryTest*:*SlotWorkerIntegrationTest*:*TopologyBusinessContractTest*:*WorkerOcServiceGetUbAdmissionTest*:*WorkerOcServiceImplReadyTopologyTest*
+selected=277
+timeout_s=300
+seconds=35
+exit=0

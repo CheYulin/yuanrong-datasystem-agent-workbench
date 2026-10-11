@@ -1,0 +1,6 @@
+name=metadata_l2
+filter=EtcdAndCoordinator/MetadataRecoveryL2Test.*:EtcdAndCoordinator/MetadataRecoveryDisabledL2Test.*
+selected=4
+timeout_s=420
+seconds=92
+exit=0

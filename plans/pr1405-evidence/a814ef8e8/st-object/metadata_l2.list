@@ -1,0 +1,6 @@
+EtcdAndCoordinator/MetadataRecoveryL2Test.
+  UnrecoverableL2DataClearedAfterMetadataOwnerRestart/Etcd  # GetParam() = false
+  UnrecoverableL2DataClearedAfterMetadataOwnerRestart/Coordinator  # GetParam() = true
+EtcdAndCoordinator/MetadataRecoveryDisabledL2Test.
+  UnrecoverableL2DataClearedAfterMetadataOwnerRestart/Etcd  # GetParam() = false
+  UnrecoverableL2DataClearedAfterMetadataOwnerRestart/Coordinator  # GetParam() = true

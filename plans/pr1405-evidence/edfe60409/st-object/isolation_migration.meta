@@ -1,0 +1,6 @@
+name=isolation_migration
+filter=WorkerPushMetaScaleOutFaultTest.*:WorkerPushMetaTest.*:WorkerStalePrimaryTest.*:WorkerPushMetaTransportTest.*:OCClientSingleWorkerSelfHealingTest.*:MigrationTargetIsolationTest.*:MigrationTargetOomTest.*:MigrationTargetDrainingTest.*:MigrationTargetCombinedFaultTest.*
+selected=18
+timeout_s=600
+seconds=273
+exit=0

@@ -1,0 +1,6 @@
+name=metadata_recovery
+filter=EtcdAndCoordinator/MetadataRecoveryTest.*
+selected=10
+timeout_s=600
+seconds=209
+exit=0

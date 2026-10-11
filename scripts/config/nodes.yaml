@@ -32,7 +32,7 @@ nodes:
     ssh_user: root
     workspace_root: ~/workspace/git-repos
     hermes_workspace_root: ~/agent/hermes-workspace
-    thirdparty_cache: ~/.cache/yuanrong-datasystem-third-party
+    thirdparty_cache: /home/cache/ds-thirdparty-cache
     pkg_manager: dnf
     web_root: /var/www/html
     description: "主开发节点（Cursor 日间 sync）+ yche.me 静态页发布"

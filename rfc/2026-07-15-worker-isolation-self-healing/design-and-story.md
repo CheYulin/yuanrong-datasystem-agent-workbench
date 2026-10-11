@@ -1185,9 +1185,38 @@ RUNNING -> DRAINING -> STOPPING
 
 隔离前对象 primary 在本 worker，隔离期间集群通过 `ChangePrimaryCopy` 将其它 local copy 转为 primary，并清理本 worker metadata。网络恢复后，本 worker 进入 `RECOVERING`，读取 master confirmed metadata，降级/清理本地旧 primary 状态；只有对账完成后才能作为副本或重新加入服务。
 
+## 本轮 TCP keepalive 切片验证
+
+本轮先落地 Story 1 的最小闭环，不引入完整 `WorkerServiceMode` 状态机:
+
+1. `EtcdStore` 在连续确认本地 keepalive 隔离后，继续复用 `HandleKeepAliveFailed()` 发布本 worker membership delete 事件。
+2. `EtcdStore` 增加本地隔离回调，由 worker 侧关闭 `TopologyServingAdmission`，确保业务准入先收紧。
+3. 全局 etcd 不可用时不触发本地隔离回调，不发布本地 worker delete 事件，避免把全局 outage 误判成本 worker 隔离。
+4. ST cluster 目标补齐 `datasystem_worker_bin` 依赖，保证直接构建 `ds_st_kv_cache`/`ds_st_object_cache` 时 worker runtime binary 存在。
+
+TDD 覆盖:
+
++ `EtcdKeepAliveIsolationTest.ConfirmedLocalIsolationPublishesDeleteAndIsolationCallbackOnce`
+  + 连续确认本地隔离后只发布一次 delete event，只关闭一次 admission，并把 health probe 置为 unhealthy。
++ `EtcdKeepAliveIsolationTest.GlobalEtcdOutageDoesNotPublishDeleteOrCloseAdmission`
+  + coordinator/etcd 整体不可达时不触发本地隔离，不关闭 admission，继续保留原 keepalive failure handling。
+
+回归覆盖:
+
++ topology/metadata/slot/notify-worker 相关 UT，确认现有恢复与隔离基础能力未被扰动。
++ KV ST 覆盖基础 KV Put/Get、多写多读、worker restart、etcd restart/crash、worker timeout 后从 etcd 取 meta。
++ Object ST 覆盖 worker crash/restart、client-worker heartbeat restart、metadata owner restart、TTL object failover/restart recovery。
+
+尚未由本轮切片覆盖:
+
++ Story 2 voluntary scale down 的 `DRAINING -> STOPPING` 显式状态化。
++ Story 3 hash ring passive scale down self 不 kill。
++ Story 4 TCP/etcd 恢复后的 `RECOVERING -> RUNNING` 编排。
++ Story 5/6 metadata ownership 对账、旧 primary 降级和残留数据不可见保障。
+
 ## 验收标准
 
-- [ ] local keepalive/network isolation 不再导致 worker 进程 `SIGKILL`。
+- [x] local keepalive/network isolation 不再导致 worker 进程 `SIGKILL`。
 - [ ] 非 `RUNNING` 状态下 Create/Put/Publish/Set/migration target/rebalance target 快速失败。
 - [ ] voluntary scale down 保持原有退出语义。
 - [ ] TCP/etcd 恢复后不会直接服务，必须进入 `RECOVERING` 并完成恢复/对账。

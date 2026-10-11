@@ -1,0 +1,7 @@
+name=ut_core
+binary=/home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1405-af58eb0c-validate/.clion-remote/pr1405-af58eb0c/build/tests/ut/ds_ut
+filter=*CoordinatorStoreBackendTest*:*TopologyControlHostTest*:*TopologyRecoveryManagerTest*:*CoordinatorTopologyRecoveryComponentTest*:*TopologyRecoveryReporterTest*:*WorkerAdmissionFacadeTest*:*WorkerIsolationCoordinatorTest*:*WorkerOCServerRecoveryEvidenceTest*:*WorkerRecoveryControllerTest*:*WorkerRecoveryEvidenceBuilderTest*:*WorkerRecoveryEvidenceTrackerTest*:*WorkerRuntimeFacadeTest*:*WorkerRuntimeFacadeTopologyAvailabilityTest*:*WorkerRuntimeStateTest*:*WorkerServiceAdmissionTest*:*WorkerServiceImplAdmissionTest*
+selected=144
+timeout_s=180
+seconds=1
+exit=0

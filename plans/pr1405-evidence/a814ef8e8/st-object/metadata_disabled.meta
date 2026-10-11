@@ -1,0 +1,6 @@
+name=metadata_disabled
+filter=EtcdAndCoordinator/MetadataRecoveryDisabledTest.*
+selected=8
+timeout_s=600
+seconds=143
+exit=0

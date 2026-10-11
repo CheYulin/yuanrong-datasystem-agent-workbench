@@ -1,15 +1,17 @@
 # PR2056 Client 双故障恢复检视修复
 
-- **Status**: In-Progress
+- **Status**: Implemented and locally validated
 - **目标 PR**: openeuler/yuanrong-datasystem !2056
-- **基线**: `c1146242627b1382120e59d4eac48f0f575b9f52`
+- **语义基线**: 历史可用版本 `53c2548301bca4ade95586d838e14b14dae8e3cd`
+- **代码基线**: 最新 `main/master` `1fdeb4d7d885019db8a25be17139290060d92775`，保留 53c2 隔离语义并逐提交适配
 - **目标**: 在不改变正常路径、不误判普通超时、不重放结果未知写请求的前提下，保证
   `enableLocalCache=true/false` 的长期 Client 在两个 Worker 被隔离后能够恢复。
 
 ## 1. 已确认边界
 
-本轮只补 Client 恢复闭环和门禁契约，不修改 Coordinator summary 聚合、主动隔离判定、ZMQ、
-大规模故障扩散和 Set Publish 结果未知语义。现有精确 `K_RPC_PEER_DEAD` 快速切换继续保留。
+本轮闭环 Coordinator summary 并发保护、剩余 reporter 下的双故障 quorum、Client HashRing 刷新/重选路、
+异步切换生命周期和 membership-to-topology 原子提交栅栏。ZMQ、大规模故障扩散和 Set Publish 结果未知
+语义不在本 PR 扩展；现有精确 `K_RPC_PEER_DEAD` 快速切换继续保留。
 
 恢复成功定义为：当前失败请求可以返回原错误；Coordinator 在 3 秒目标窗口内完成隔离后，Client
 收到新 HashRing、切换已被移除的绑定 Worker，后续业务重试在测试恢复门限内成功。不得自动重放
@@ -42,7 +44,19 @@
   请求继续使用 local-cache 绑定路径。
 - `enableLocalCache=false`: metadata failure handler 触发合并刷新；后续请求从新 ring 重新选择 metadata
   owner。如果绑定身份本身也被 ring 排除，同一个 hook 同时触发绑定 Worker 切换。
-- 本轮不修改 `ObjectMetadataClient::QueryWithRetry(address)` 的单次请求固定地址语义。
+- metadata owner 的连接失败、dispatch deadline、peer-dead、Client disconnect 和 owner-unavailable 不再在
+  固定旧 owner 上内部重试；它们返回 stale-route 信号，由外层 ObjectClient 在同一 API deadline 内根据
+  最新 ring 重选 owner。普通对象级失败和 dead replica 仍保持原有语义。
+
+### 2.4 并发故障 quorum 与提交栅栏
+
+- summary evidence 采用 reporter 反向索引，summary 更新不会覆盖其它 reporter 的并发证据；每轮直接
+  probe 有 128 个硬上限，候选 provider 的 sweep 缓存避免每页重扫。
+- quorum 上限按当前仍可报告的 eligible reporter 收敛，但 3 个及以上 Worker 的集群保留最少 2 票；
+  两 Worker 特例允许唯一 survivor 报告，从而覆盖两个 Worker 连续/近同时故障。
+- Coordinator 在最后候选复核时读取 membership 集合及 Store revision；topology CAS 在 Store 写锁内原子
+  校验同一 revision。复核到提交之间出现 membership 换代、TTL 删除或其它提交时，本轮只返回重试，
+  不发布基于旧 incarnation 的 Failure topology。
 
 ## 3. 性能、可靠性与可用性
 
@@ -58,6 +72,8 @@
 - Worker 是否退出服务以 Coordinator 发布的新 ring 为权威证据。
 - 异步任务捕获强引用；Submit 与 drain 使用同一 mutex 线性化，不新增裸指针生命周期。
 - 不跨 Worker 重放结果未知的 Publish。
+- membership revision fence 只位于 summary 驱动的 Failure commit，不进入普通请求或正常 topology hot path；
+  冲突只放弃本轮并由下一次 reconcile 重试。
 
 ### 可用性和 3 秒目标
 
@@ -77,6 +93,8 @@
 4. 旧 workerApi 的迟到 ring/任务不能切换新的当前 Worker。
 5. shutdown 与 ring 驱动切换并发时线程池排空，无 UAF、pending 残留或死锁。
 6. timeout 只合并请求刷新，不直接切换；peer-dead 仍立即切换。
+7. metadata owner 连接失败和 dispatch deadline 返回 stale-route，外层第二轮使用更新后的 owner。
+8. membership 在候选复核后换代时 topology CAS 被拒绝，旧 topology 保持不变。
 
 ### 默认看护 ST
 
@@ -87,11 +105,19 @@
 - 使用同一 Client 发起后续 Set/Get，连续成功；不得通过重建 Client 规避恢复；
 - 用例默认启用，作为一个稳定看护 case；3/4 Worker 长耗时测量继续 disabled。
 
-## 5. Commit 划分
+## 5. 最终 Commit 划分
 
-1. `test(client): guard two-worker recovery for both local-cache modes`
-2. `fix(client): switch bound worker after authoritative ring removal`
-3. 若门禁或检视发现独立问题，再增加对应单独 commit；禁止 squash 到 PR 原提交。
+1. `fix(cluster): isolate failed workers and refresh stale rings`
+2. `fix(client): refresh ring after direct Get recovery failures`
+3. `fix(client): switch bound worker after authoritative ring removal`
+4. `fix(cluster): preserve isolation quorum during concurrent failures`
+5. `fix(client): refresh authoritative ring after routed failures`
+6. `test(st): guard two-worker client recovery modes`
+7. `fix(client): reroute reads after metadata owner failures`
+8. `fix(cluster): fence isolation against membership changes`
+9. `refactor(client): keep metadata retry within codecheck limit`
+
+所有检视修复均为独立 commit，没有 squash 到原提交。
 
 ## 6. 验证和交付
 
@@ -102,6 +128,17 @@
 5. 推送仅到已验证的 `yche-huawei` fork PR 分支，并触发完整门禁。
 6. 门禁通过后重新运行 `ds-pr-review prepare`，按检视轮次复核；有问题逐条修复和回复，无新问题不发布
    噪声总结评论。
+
+### 6.1 Tiantiyun 最终验证（rebase 后）
+
+- CMake `ds_ut` 和 `ds_st_kv_cache` 从最新源码重新构建成功。
+- 112 个 routing/transport/topology/Store focused UT 全部通过。
+- 53c2/PR1997 的 5 个历史 focused ST 加 1 个默认双故障看护 ST 共 6/6 通过。
+- 双故障看护：两个 Worker 分别在 3324/3299 ms 隔离；`localcache=true` 最后失败 3348 ms，
+  `localcache=false` 最后失败 3567 ms，两个原 Client 均恢复。
+- Bazel 仅验证 `//tests/st/client/kv_cache:coordinator_active_failure_stop_resume_test` 源码构建闭包，不执行 ST。
+- openEuler 门禁 #9853 最终 SUCCESS：CodeCheck、license、SCA、x86、aarch64、UT/ST 和 Python example 通过；
+  aarch64 首轮偶发失败均在门禁自动重跑中通过。
 
 ## 7. 回滚
 

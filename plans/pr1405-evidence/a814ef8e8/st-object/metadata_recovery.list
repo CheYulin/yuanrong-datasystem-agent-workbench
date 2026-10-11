@@ -1,0 +1,11 @@
+EtcdAndCoordinator/MetadataRecoveryTest.
+  MetadataOwnerRestart/Etcd  # GetParam() = false
+  MetadataOwnerRestart/Coordinator  # GetParam() = true
+  UnrecoverableLocalDataClearedAfterMetadataOwnerRestart/Etcd  # GetParam() = false
+  UnrecoverableLocalDataClearedAfterMetadataOwnerRestart/Coordinator  # GetParam() = true
+  MetadataRecoveryBestEffortRetryDoesNotBlockAvailability/Etcd  # GetParam() = false
+  MetadataRecoveryBestEffortRetryDoesNotBlockAvailability/Coordinator  # GetParam() = true
+  FailoverRestoreObjectWithTtl/Etcd  # GetParam() = false
+  FailoverRestoreObjectWithTtl/Coordinator  # GetParam() = true
+  RestartRestoreObjectWithTtl/Etcd  # GetParam() = false
+  RestartRestoreObjectWithTtl/Coordinator  # GetParam() = true

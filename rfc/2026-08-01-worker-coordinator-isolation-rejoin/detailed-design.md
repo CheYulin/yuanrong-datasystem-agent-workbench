@@ -3,7 +3,7 @@
 | Attribute | Value |
 |---|---|
 | Created | 2026-08-01 from `措施二.md` and exact source inspection |
-| Modified | 2026-08-01 initial detailed design |
+| Modified | 2026-08-02 module graph and responsibility refresh |
 | Phase | Measure 2 |
 | Prerequisite | Measure 1 witness protects reachable workers from mistaken coordinator-side removal |
 
@@ -101,28 +101,85 @@ classDiagram
     WorkerOCServer --> WorkerOCServiceImpl
 ```
 
-### 4.2 Development View
+### 4.2 Module Relationship
+
+```mermaid
+flowchart TD
+    C["Coordinator<br/>ground truth topology / hashring / membership"]
+    T["TopologyEngine<br/>worker runtime topology state"]
+    WOS["WorkerOCServer<br/>admission + runtime wiring"]
+    WOC["WorkerOCServiceImpl<br/>ordinary RPC guard + local cleanup"]
+    DCB["DsCoordinationBackend<br/>keepalive / membership recreate"]
+    WLR["WorkerLeaderReconciler<br/>leader membership ensure"]
+    PEER["Peer Workers<br/>GetPeerHashRing"]
+    META["MetadataManagerHolder / OCMetadataManager<br/>local meta cleanup"]
+    DATA["WorkerOcServiceClearDataFlow<br/>local object cleanup"]
+    TRM["TopologyRecoveryManager<br/>coordinator delayed reconcile"]
+
+    C -->|"watch / exact read topology"| T
+    DCB -->|"backend availability evidence"| T
+    T -->|"availability callback"| WOS
+    WOS -->|"SetTopologyServingAdmission"| WOC
+
+    T -->|"RequiresMembershipRejoin"| DCB
+    T -->|"RequiresMembershipRejoin"| WLR
+    DCB -->|"PrepareMembershipRecreate"| WOC
+    WLR -->|"PrepareMembershipRecreate before Ensure"| WOC
+
+    WOC -->|"CleanupLocalStateForRejoin"| META
+    WOC -->|"CleanupLocalStateForRejoin"| DATA
+    WOC -->|"cleanup done"| DCB
+    WOC -->|"cleanup done"| WLR
+
+    WOS -->|"peer probe hook"| PEER
+    PEER -->|"GetPeerHashRing response<br/>higher version / missing local member"| T
+
+    TRM -->|"reconcile committed topology state"| C
+```
+
+### 4.3 Module Responsibilities
+
+| Module / Class | Responsibility | Boundary |
+|---|---|---|
+| `Coordinator` | Owns authoritative topology, hashring, membership, and committed topology recovery state. | Peer observations never override Coordinator ground truth. |
+| `TopologyEngine` | Converts exact topology reads and backend evidence into Worker availability, `RequiresMembershipRejoin`, and peer-observed diagnostics. | Does not install peer hash ring as routing state in this version. |
+| `WorkerOCServer` | Wires runtime callbacks: availability-to-admission, cleanup hook, and peer `GetPeerHashRing` probe hook. | Does not own object-cache cleanup details. |
+| `WorkerOCServiceImpl` | Guards ordinary business RPCs through existing health/admission checks and performs `CleanupLocalStateForRejoin`. | Cleanup is internal Worker logic, not a public RPC. |
+| `DsCoordinationBackend` | Recreates keepalive membership and resets watch after Coordinator recovery. | Calls cleanup gate before every membership recreate path. |
+| `WorkerLeaderReconciler` | Ensures leader membership through the coordinator leader path. | Also calls cleanup gate before `EnsureLeaderMembership`. |
+| `Peer Workers` | Serve peer-facing hash-ring observation through `GetPeerHashRing`, reusing existing `GetHashRing` request/response payloads. | Non-authoritative; only newer version/missing-local/failed-local evidence is consumed. |
+| `MetadataManagerHolder` / `OCMetadataManager` | Clear local OC/SC metadata associated with the old Worker identity. | Does not run survivor topology failure cleanup or ref rebuild. |
+| `WorkerOcServiceClearDataFlow` | Clears local object data for cold rejoin. | Does not query meta owners; ST keeps object counts small. |
+| `TopologyRecoveryManager` | Handles Coordinator-side delayed reconcile scheduling without blocking recovery-pool workers. | Review-driven performance fix; separate from Worker rejoin state machine. |
+
+### 4.4 Development View
 
 ```text
 src/datasystem/cluster/runtime/topology_engine.*
   Owns Worker topology publication, availability, peer refresh hook, and rejoin-required transition.
 src/datasystem/cluster/coordination_backend/ds_coordination_backend.*
   Owns membership lease recreation and watch invalidation; adds cleanup gate.
+src/datasystem/cluster/coordination_backend/worker_leader_reconciler.cpp
+  Applies the same cleanup gate before leader membership ensure.
 src/datasystem/worker/worker_oc_server.cpp
-  Wires admission, cleanup callback, and peer GetHashRing callback into existing builder.
+  Wires admission, cleanup callback, and peer GetPeerHashRing callback into existing builder.
 src/datasystem/worker/object_cache/worker_oc_service_impl.*
   Exposes internal cleanup entry and keeps business validation unchanged.
+src/datasystem/worker/object_cache/worker_worker_oc_service_impl.*
+  Provides peer GetPeerHashRing as a thin wrapper over WorkerOCServiceImpl::GetHashRing.
 src/datasystem/worker/object_cache/service/worker_oc_service_clear_data_flow.*
   Adds local clear-all primitive for cold rejoin.
+src/datasystem/coordinator/topology_recovery_manager.*
+  Owns delayed reconcile scheduling so recovery-pool workers are not occupied by timer sleep.
 tests/ut/cluster/*
   Covers topology and membership gate state transitions.
 tests/ut/worker/object_cache/*
-  Covers local cleanup and GetHashRing contract.
+  Covers local cleanup and GetPeerHashRing contract.
 tests/st/worker/object_cache/coordinator_backend_cluster_test.cpp
-  Holds fast Coordinator-backend smoke cases.
+  Holds Coordinator-backend process-level smoke cases.
 ```
 
-### 4.3 Key Interactions
+### 4.5 Key Interactions
 
 ```mermaid
 sequenceDiagram
@@ -147,7 +204,7 @@ sequenceDiagram
 | Recreate | Every `AutoCreateKeepAliveKey(true)` path checks cleanup readiness. |
 | Recover | Watch reset and exact topology reload reopen admission only after the new member is committed. |
 
-### 4.4 Dependency Graph
+### 4.6 Dependency Graph
 
 ```mermaid
 flowchart TB
@@ -160,7 +217,7 @@ flowchart TB
     Cleanup --> Data["Local object clear all"]
 ```
 
-### 4.5 Data Structures
+### 4.7 Data Structures
 
 | Structure | Owner | Concurrency |
 |---|---|---|
@@ -169,7 +226,7 @@ flowchart TB
 | peer-observed response | `TopologyEngine` local method scope | Records newest observed version for diagnostics and rejoin hints; not persisted, not published as Coordinator authority, and not installed as routing state |
 | local object key list | `WorkerOcServiceClearDataFlow` | Snapshot object ids before clearing; clear entries by existing object locks |
 
-### 4.6 Component Interfaces
+### 4.8 Component Interfaces
 
 | Interface | Shape | Rule |
 |---|---|---|

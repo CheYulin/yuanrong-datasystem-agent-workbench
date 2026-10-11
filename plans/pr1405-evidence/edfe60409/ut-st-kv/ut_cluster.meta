@@ -1,0 +1,7 @@
+name=ut_cluster
+binary=/home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1405-n0-9b99-validate/.clion-remote/pr1405-n0-9b99-validate/build/tests/ut/cluster_topology_contract_ut
+filter=*TopologyEngineDeathTest*:*TopologyEngineTest*:*TopologyPhase*:*TopologyController*:*TopologyControl*:*TopologyRecovery*:*CoordinatorTopology*
+selected=79
+timeout_s=240
+seconds=11
+exit=0

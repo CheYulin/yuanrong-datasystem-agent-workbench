@@ -1,0 +1,81 @@
+--- /home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1405-oneshot-squash-20260730/src/datasystem/master/object_cache/master_oc_service_impl.cpp	2026-07-31 03:24:57.437879426 +0800
++++ /home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/plans/pr1405-evidence/861fa07df/design-gap-focused/run-20260731-060844/remote-post/src/datasystem/master/object_cache/master_oc_service_impl.cpp	2026-07-31 06:10:57.913212747 +0800
+@@ -794,7 +794,8 @@
+     (void)rsp;
+     ScopedRequestContext ctx;
+     Timer timer;
+-    GetRequestContext()->timeoutDuration.Init(static_cast<int64_t>(FLAGS_node_dead_timeout_s) * 1000);
++    GetRequestContext()->timeoutDuration.Init(
++        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(FLAGS_node_dead_timeout_s)).count());
+     Raii outerResetDuration([]() { GetRequestContext()->timeoutDuration.Reset(); });
+     // This is called by worker when centralized master is used. Do sync reconciliation.
+     RETURN_IF_NOT_OK_PRINT_ERROR_MSG(akSkManager_->VerifySignatureAndTimestamp(req), "AK/SK failed.");
+--- /home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1405-oneshot-squash-20260730/src/datasystem/worker/object_cache/recovery/object_cache_recovery_state.cpp	2026-07-31 03:27:20.930788892 +0800
++++ /home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/plans/pr1405-evidence/861fa07df/design-gap-focused/run-20260731-060844/remote-post/src/datasystem/worker/object_cache/recovery/object_cache_recovery_state.cpp	2026-07-31 06:10:59.536812764 +0800
+@@ -332,7 +332,9 @@
+         try {
+             handler(generation, terminalStatus);
+         } catch (const std::exception &) {
++            // A user terminal handler must not unwind through the recovery state machine.
+         } catch (...) {
++            // Unknown handler failures remain contained by the recovery no-throw boundary.
+         }
+     }
+     return true;
+--- /home/t14s/workspace/git-repos/yuanrong-datasystem/.worktrees/pr1405-oneshot-squash-20260730/src/datasystem/worker/object_cache/worker_oc_service_impl.cpp	2026-07-31 04:56:54.241542921 +0800
++++ /home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/plans/pr1405-evidence/861fa07df/design-gap-focused/run-20260731-060844/remote-post/src/datasystem/worker/object_cache/worker_oc_service_impl.cpp	2026-07-31 06:11:04.798573450 +0800
+@@ -160,6 +160,7 @@
+ 
+ constexpr char CLUSTER_TOPOLOGY_SCHEMA_VERSION[] = "1";
+ constexpr char TOPOLOGY_READINESS_PROBE_KEY[] = "topology-readiness-probe";
++constexpr size_t TOPOLOGY_OPERATION_LOG_PREFIX_SIZE = 12;
+ 
+ std::string PendingOwnershipEvidenceDetail(ReconciliationQueryPb::EventType eventType)
+ {
+@@ -945,8 +946,9 @@
+                                  "topology ScaleIn deadline exceeded");
+         if (!primaryFailures.empty()) {
+             LOG(WARNING) << "CLUSTER_SCALE_IN action=give_up_primary_fallback"
+-                         << " operation_prefix=" << businessOperationId.substr(0, 12) << " retry_count=" << retryTime
+-                         << " fallback_count=" << primaryFailures.size() << " policy=immediate_data_migration";
++                         << " operation_prefix=" << businessOperationId.substr(0, TOPOLOGY_OPERATION_LOG_PREFIX_SIZE)
++                         << " retry_count=" << retryTime << " fallback_count=" << primaryFailures.size()
++                         << " policy=immediate_data_migration";
+             migrateIds.insert(migrateIds.end(), primaryFailures.begin(), primaryFailures.end());
+             primaryFailures.clear();
+         }
+@@ -2911,17 +2913,20 @@
+                     try {
+                         LOG(ERROR) << "Reconciliation completion callback threw: " << e.what();
+                     } catch (...) {
++                        // Failure reporting is best-effort and must not escape completion.
+                     }
+                 } catch (...) {
+                     try {
+                         LOG(ERROR) << "Reconciliation completion callback threw an unknown exception";
+                     } catch (...) {
++                        // Failure reporting is best-effort and must not escape completion.
+                     }
+                 }
+             }
+             try {
+                 LOG_IF_ERROR(status, "Reconciliation request failed for metadata owner " + masterAddress);
+             } catch (...) {
++                // Failure reporting is best-effort and must preserve at-most-once completion.
+             }
+         };
+         try {
+@@ -2943,11 +2948,13 @@
+             try {
+                 complete(Status(K_RUNTIME_ERROR, "Reconciliation request failed: " + std::string(e.what())));
+             } catch (...) {
++                // Completion after a task exception must not escape the worker thread.
+             }
+         } catch (...) {
+             try {
+                 complete(Status(K_RUNTIME_ERROR, "Reconciliation request failed with an unknown exception"));
+             } catch (...) {
++                // Completion after a task exception must not escape the worker thread.
+             }
+         }
+     };

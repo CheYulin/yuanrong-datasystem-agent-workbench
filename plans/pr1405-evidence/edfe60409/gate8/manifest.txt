@@ -1,0 +1,16 @@
+Fri Jul 31 02:53:30 CST 2026
+9b99a3169d0ca36e66d00d9a75ef1a60b4d2df74
+ src/datasystem/master/memory_rebalance_scheduler.cpp      |  8 --------
+ src/datasystem/master/resource_manager.cpp                | 10 +++++++++-
+ .../object_cache/data_migrator/strategy/node_selector.cpp |  5 +++++
+ .../object_cache/data_migrator/strategy/node_selector.h   |  6 ++++++
+ .../worker/object_cache/worker_oc_service_impl.cpp        |  6 +++++-
+ .../worker/object_cache/worker_request_manager.cpp        | 15 +++++++++++++++
+ tests/st/common/kvstore/etcd_store_test.cpp               |  4 ++--
+ 7 files changed, 42 insertions(+), 12 deletions(-)
+build_gate8_exit=0
+resource_exit=0
+etcd_exit=0
+st_kv_gate5_exit=0
+build_ds_ut_object_exit=0
+resource_ds_ut_object_exit=0

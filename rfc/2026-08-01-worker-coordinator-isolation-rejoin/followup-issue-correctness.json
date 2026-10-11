@@ -1,0 +1,26 @@
+{
+  "owner": "yche-huawei",
+  "repo": "yuanrong-datasystem",
+  "number": "25",
+  "url": "https://gitcode.com/yche-huawei/yuanrong-datasystem/issues/25",
+  "title": "【措施二 follow-up】冷重加正确性收口与关键 ST（不含路由纠偏）",
+  "state": "open",
+  "refreshed_at": "2026-08-02",
+  "current_status": "Items originally tracked here are covered by PR !1798 current code; keep open until PR merges, then close or supersede.",
+  "covered_in_pr_1798": [
+    "WorkerLeaderReconciler cleanup-gate TOCTOU recheck before Ensure/install",
+    "Bounded Reconciliation path while rejoin cleanup holds reconFlag writer fence",
+    "Process-level cold rejoin ST: CoordinatorBackendClusterTest.IsolatedWorkerRemovedThenColdRejoinsWithoutSuicide"
+  ],
+  "remaining_followup": {
+    "owner": "openeuler",
+    "repo": "yuanrong-datasystem",
+    "number": "925",
+    "scope": [
+      "peer-observed hash ring route correction",
+      "rejoin cleanup async retry/backoff/batching",
+      "shared or async peer refresh / scope probe performance work"
+    ]
+  },
+  "online_comment_refresh": "attempted via issue comment and issue body PATCH; GitCode API timed out, so online refresh success was not confirmed"
+}

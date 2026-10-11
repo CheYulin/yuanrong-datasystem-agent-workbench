@@ -1,5 +1,9 @@
 # PR2056 Client Recovery Review Fixes Implementation Plan
 
+> Status (2026-08-16): executed and superseded by the final commit/evidence inventory in `README.md`. The implementation
+> was rebased from the historical 53c2 semantics onto `main/master` `1fdeb4d7d`; review-driven quorum, metadata reroute,
+> and membership-revision fence commits were added independently after this original plan was written.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make long-lived Clients with `enableLocalCache=true` and `false` recover after their bound Worker and a second metadata-owner Worker are isolated, without per-timeout TCP probes or ambiguous write replay.
