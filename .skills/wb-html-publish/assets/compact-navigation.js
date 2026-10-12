@@ -3,24 +3,31 @@
  if(window.__ycheCompactNavigation)return;window.__ycheCompactNavigation=true;
  var panel,main,bar,links=[],headings=[],frame=0,native,nativeAvailable=false,nativeCollapsed=false,desktop=window.matchMedia('(min-width:801px)');
  function syncPanel(){
-  document.body.classList.toggle('yche-compact-collapsed',desktop.matches&&panel.hidden);
-  var button=bar.querySelector('.yche-toc-button');if(button)button.setAttribute('aria-expanded',String(!panel.hidden));
+  var visible=nativeAvailable?!nativeCollapsed:!panel.hidden;
+  document.body.classList.toggle('yche-compact-reserved',desktop.matches&&visible&&(!native||native.dataset.ycheNativeToc==='pure'));
+  var button=bar.querySelector('.yche-toc-button');if(button){button.setAttribute('aria-controls',nativeAvailable?native.id:panel.id);button.setAttribute('aria-expanded',String(visible));}
  }
  function nativeMode(){
-  document.body.classList.remove('yche-compact-native-collapsed');
-  nativeAvailable=!!native.getClientRects().length&&getComputedStyle(native).display!=='none';
+  nativeAvailable=!!native&&desktop.matches;
+  if(nativeAvailable&&native.dataset.ycheNativeToc!=='pure'){
+   var rect=native.getBoundingClientRect();nativeAvailable=rect.width>0&&rect.right>0&&rect.left<innerWidth&&getComputedStyle(native).visibility!=='hidden';
+  }
   document.body.classList.toggle('yche-compact-native-active',nativeAvailable);
   document.body.classList.toggle('yche-compact-native-collapsed',nativeAvailable&&nativeCollapsed);
-  var shared=document.getElementById('yche-reader-panel'),button=document.querySelector('.yche-toc-button');
-  if(nativeAvailable&&shared)shared.hidden=true;
-  if(button){button.setAttribute('aria-controls',nativeAvailable?native.id:'yche-reader-panel');button.setAttribute('aria-expanded',String(nativeAvailable?!nativeCollapsed:!!shared&&!shared.hidden));}
+  if(nativeAvailable)panel.hidden=true;
+  syncPanel();
  }
  function resizeContent(){requestAnimationFrame(function(){window.dispatchEvent(new Event('resize'));});}
  function toggleDirectory(event){
   var button=event.target.closest&&event.target.closest('.yche-toc-button');if(!button)return;
   event.preventDefault();event.stopImmediatePropagation();
-  if(native&&nativeAvailable){nativeCollapsed=!nativeCollapsed;nativeMode();if(!nativeCollapsed){var link=native.querySelector('a[href^="#"]');if(link)link.focus({preventScroll:true});}resizeContent();return;}
-  var current=document.getElementById('yche-reader-panel');if(!current)return;current.hidden=!current.hidden;button.setAttribute('aria-expanded',String(!current.hidden));if(!current.hidden){var first=current.querySelector('.yche-chapters a')||current.querySelector('button');if(first)first.focus({preventScroll:true});}resizeContent();
+  if(nativeAvailable){
+   if(native.dataset.ycheNativeToc==='pure'){nativeCollapsed=!nativeCollapsed;nativeMode();}
+   if(!nativeCollapsed){var link=native.querySelector('a[href^="#"]');if(link)link.focus({preventScroll:true});}
+  }else{
+   panel.hidden=!panel.hidden;syncPanel();if(!panel.hidden){var first=panel.querySelector('.yche-chapters a')||panel.querySelector('button');if(first)first.focus({preventScroll:true});}
+  }
+  resizeContent();
  }
  function updateActive(){
   frame=0;var threshold=(document.querySelector('.yche-fixed-header')||bar).getBoundingClientRect().bottom+24,index=0;
@@ -41,36 +48,43 @@
  function mode(){
   document.body.classList.toggle('yche-compact-pinned',desktop.matches);
   panel.hidden=!desktop.matches;
-  syncPanel();
-  scheduleActive();
+  nativeMode();scheduleActive();
  }
  function init(){
   panel=document.getElementById('yche-reader-panel');bar=document.getElementById('yche-reader-bar');
-  native=document.querySelector('.report-nav,[data-yche-native-toc],[data-yche-sidebar]');
-  if(native){
-   document.body.classList.add('yche-compact-page','yche-compact-native');
-   document.querySelectorAll('main h2,.content-area h2,.main h2,.content h2').forEach(function(h){
-    var auto=h.querySelector(':scope > .yche-section-number'),first=Array.from(h.children).find(function(child){return child!==auto;});
-    if(first&&first.tagName==='SPAN'&&/^\d+(?:\.\d+)*$/.test(first.textContent.trim())){
-     if(auto)auto.remove();
-     if(first.nextSibling&&(!first.nextSibling.textContent||!/^\s/.test(first.nextSibling.textContent)))first.after(document.createTextNode(' '));
-    }
-   });
-   native.setAttribute('data-yche-compact-directory','native');
-   if(!native.id)native.id='yche-native-chapters';
-   document.addEventListener('click',toggleDirectory,true);
-   nativeMode();window.addEventListener('resize',nativeMode,{passive:true});window.addEventListener('load',nativeMode,{once:true});return true;
-  }
-  if(!panel||!bar)return false;
-  main=document.querySelector('main,.content-area,.main,.content');
+  if(!panel||!bar||!document.querySelector('.yche-fixed-header'))return false;
+  native=Array.from(document.querySelectorAll('[data-yche-native-toc],.report-nav')).find(function(el){
+   return Array.from(el.querySelectorAll('a[href^="#"]')).filter(function(a){try{return !!document.getElementById(decodeURIComponent(a.hash.slice(1)));}catch(_){return false;}}).length>=2;
+  });
+  main=document.querySelector('main')||document.querySelector('.main-content')||document.querySelector('article')||document.querySelector('.content-area,.main,.content,.container');
+  document.body.style.setProperty('--yche-compact-original-left',getComputedStyle(document.body).paddingLeft);
   document.body.classList.add('yche-compact-page');
-  if(!main||/flex|grid/.test(getComputedStyle(document.body).display))return true;
-  main.classList.add('yche-compact-main');mode();labelLinks();
-  new MutationObserver(function(records){if(records.some(function(r){return Array.from(r.addedNodes).some(function(n){return n.nodeType===1&&n.matches('a');});}))labelLinks();}).observe(panel.querySelector('.yche-chapters'),{childList:true});
+  if(main)main.classList.add('yche-compact-main');
+  if(native){
+   native.dataset.ycheNativeToc=Array.from(native.querySelectorAll('input,select,textarea,button,[role="button"]')).some(function(control){return !control.hidden&&!control.matches('[data-nav-toggle],.wr-hide,.te-hide-nav,.te-expand')&&getComputedStyle(control).display!=='none';})?'interactive':'pure';
+   document.body.classList.add('yche-compact-native');
+   if(native.dataset.ycheNativeToc==='pure'){
+    native.setAttribute('data-yche-compact-directory','native');
+    if(main){main.classList.add('yche-compact-native-main');var parent=native.parentElement;if(parent!==document.body&&parent.contains(main)&&/grid|flex/.test(getComputedStyle(parent).display))parent.classList.add('yche-compact-native-layout');}
+   }
+   if(!native.id)native.id='yche-native-chapters';
+  }
+  document.querySelectorAll('main h2,.content-area h2,.main h2,.content h2,article h2').forEach(function(h){
+   var auto=h.querySelector(':scope > .yche-section-number'),first=Array.from(h.children).find(function(child){return child!==auto;});
+   if(first&&first.tagName==='SPAN'&&/^\d+(?:\.\d+)*$/.test(first.textContent.trim())){
+    if(auto)auto.remove();
+    if(first.nextSibling&&(!first.nextSibling.textContent||!/^\s/.test(first.nextSibling.textContent)))first.after(document.createTextNode(' '));
+   }
+  });
+  mode();labelLinks();
+  var chapters=panel.querySelector('.yche-chapters');
+  if(chapters)new MutationObserver(labelLinks).observe(chapters,{childList:true});
   document.addEventListener('click',toggleDirectory,true);
   panel.addEventListener('click',function(event){if(desktop.matches&&event.target.closest('a'))event.stopPropagation();},true);
   new MutationObserver(syncPanel).observe(panel,{attributes:true,attributeFilter:['hidden']});
-  desktop.addEventListener('change',mode);window.addEventListener('scroll',scheduleActive,{passive:true});window.addEventListener('resize',scheduleActive,{passive:true});return true;
+  desktop.addEventListener('change',mode);window.addEventListener('scroll',scheduleActive,{passive:true});window.addEventListener('resize',function(){nativeMode();scheduleActive();},{passive:true});return true;
  }
+
+ if(!/^(design|design-docs|perf|perf-reports|reliability|research|ops|codegraph|htmls|about|mooncake-ds-analysis|_archive|hermes|deployments|metrics|benchmarks)\//.test(location.pathname.replace(/^\//,'')))return;
  if(!init()){var observer=new MutationObserver(function(){if(init())observer.disconnect();});observer.observe(document.body||document.documentElement,{childList:true,subtree:true});}
 })();
