@@ -1,12 +1,16 @@
 # DataSystem / Mooncake / LMCache 同节点公平实验
 
-Status: In-Progress（统一 TCP 正式矩阵执行中；原生路径实验已完成并冻结）
+Status: In-Progress（统一 TCP 主矩阵、九格 PUT 资源专项及本地结果/协议核验已完成；报告/公开验收待完成，原生路径实验已完成并冻结）
 
 用户已授权立即执行，目标节点独占；使用 cgroup 隔离，参考 kvtest 的独立客户端、统一测量窗口、预置与清理不计入 GET 接口延迟的设计。产品源码保持发布 tag，不修改性能路径。
 
 原生路径归档报告：https://yche.me/perf/kvc-fair-20261020/index.html 。该 profile 的81个用例、216个有效主结果、9个独立PUT资源观察均通过；公开三视口验收369/369。
 
-当前主交付按用户补充要求统一 TCP：三产品两端点真实协议预检和共同smoke均已通过，独立81cell/216结果正式矩阵正在运行。配置、进度与最终核验分别见 [TCP计划](tcp-plan.md)、[TCP验证结果](tcp-validation.md) 和 [TCP交付核对](tcp-acceptance.md)。计划发布目录为 `/var/www/html/perf/kvc-tcp-20261020/`；不能把原生成绩替代或混入TCP统计。
+当前主交付按用户补充要求统一 TCP：三产品两端点真实协议预检和共同 smoke（6 cell、18 结果）均已通过。主矩阵完成 81 cell、216 标准结果、failed=[]、无 fatal，UTC 2026-10-19 20:41:54.554432→22:42:19.371899，墙钟 7224.817467 秒；本地原始结果与事件日志已交叉核对，72 组三重复、74,795,773 次成功请求、0 接口失败。
+
+九格 PUT 资源专项也已结束，UTC 22:42:44.441697→22:46:17.881811、墙钟213.440114秒、9/9成功、valid=true、failed=[]、monitor_exit=0，21192样本、0读取错误，9窗口覆盖且单窗至少58样本。取证、本地结果/协议核验与恢复凭据已完成，服务后验active、errors=[]且四cgroup均空；报告及公开浏览器/下载验收待闭合。专项不增加主三重复，20个短PUT主窗口CPU/coverage仍留空；缺少记录干扰排除审计项保持unknown，不宣称无未记录负载。
+
+配置、比较、资源限制与最终核验分别见 [TCP计划](tcp-plan.md)、[TCP验证结果](tcp-validation.md) 和 [TCP交付核对](tcp-acceptance.md)，当前阶段提交截至 `966b74a`。计划发布目录为 `/var/www/html/perf/kvc-tcp-20261020/`；不能把原生成绩替代或混入TCP统计，也不能把本地数据核验当成公开交付验收。
 
 ## 1. 交付与证据
 
@@ -18,7 +22,7 @@ Status: In-Progress（统一 TCP 正式矩阵执行中；原生路径实验已�
 - [测试验证结果](validation.md)：仅记录实际执行的结果，未完成项保持明确状态。
 - 分产品探索：[DataSystem](datasystem.md)、[Mooncake](mooncake.md)、[LMCache](lmcache.md)。
 
-本任务 RFC 放在当前目录；脚本明确按用户要求新增，最终位于 `scripts/experiments/kvc-fair/`。原始日志、下载、源码、二进制不进入本仓库。目标产物目录 `/home/worktrees/kvc-fair-20261020/`；本地取证目录 `/home/t14s/workspace/scratch/2026-10-20-kvc-compare/`。报告发布到 `xqyun-32c32g:/var/www/html/perf/`，复用现网模板与 ECharts。
+本任务 RFC 放在当前目录；脚本明确按用户要求新增，最终位于 `scripts/experiments/kvc-fair/`。原始日志、下载、源码、二进制不进入本仓库。统一 TCP 目标产物目录 `/home/worktrees/kvc-fair-tcp-20261020/`，本地取证目录 `/home/t14s/workspace/scratch/2026-10-20-kvc-tcp/`；原生基线仍保留在目标 `/home/worktrees/kvc-fair-20261020/` 和本地 `/home/t14s/workspace/scratch/2026-10-20-kvc-compare/`。报告发布到 `xqyun-32c32g:/var/www/html/perf/`，复用现网模板与 ECharts。
 
 ## 2. 工程边界
 
