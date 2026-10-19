@@ -1,8 +1,10 @@
 # DataSystem / Mooncake / LMCache 同节点公平实验
 
-Status: In-Progress
+Status: Completed
 
 用户已授权立即执行，目标节点独占；使用 cgroup 隔离，参考 kvtest 的独立客户端、统一测量窗口、预置与清理不计入 GET 接口延迟的设计。产品源码保持发布 tag，不修改性能路径。
+
+公开报告：https://yche.me/perf/kvc-fair-20261020/index.html 。81个用例、216个有效主结果、9个独立PUT资源观察均通过；公开三视口验收369/369。
 
 ## 1. 交付与证据
 
