@@ -1,22 +1,84 @@
 # 测试验证结果
 
-Status: In-Progress
+Status: 测量与完整性验收完成；页面验收待发布
 
-## 1. 环境与监控已验证项
+## 1. 验收结论与版本
 
-- 目标机为 80 逻辑 CPU / 40 物理核、双 NUMA，Intel Xeon Gold 6138，内存约 125 GiB；cgroup v2 的 cpuset、cpu、memory、io 控制器可用。
-- 固定服务端与客户端各 8 个不重叠物理核，NUMA 0；独立观察者使用 NUMA 1，CPU 1,3。cgroup 参数成功写入并读回。
-- iostat、mpstat、pidstat、dstat 的 4 秒自检正常结束；perf 能输出 cycles、instructions、上下文切换等事件。该机没有 /proc/pressure 或 cgroup pressure 文件，PSI 不可用。
-- 旧 `/dev/shm` 目录无打开文件或映射，归档已完成并通过 gzip/tar 校验，31 个目录源件释放 49,694,380,032 bytes（约 46.3 GiB），/dev/shm 剩余 84 KiB；6.0 GiB 归档保存在 /home/cache/kvc-fair-20261020/environment/，含 SHA256。
+81个用例全部完成，216/216个当前接口结果有效，组成72个三重复统计组。成功操作68,593,985次，接口错误0，未知成功/错误计数均为0。PUT完成2,709,504次新key插入，计时结束后精确读回2,106次；GET正式窗口内内容抽验13,543次。最大客户端起始偏差2,652.059μs。逐客户端桶合并、计数、参数、工作量和数据校验由独立后处理重新核对。
 
-## 2. 构建与真实产品 smoke
+| 产品 | 本轮发布源码 | 跟踪源码与实际路径 |
+|---|---|---|
+| DataSystem | v0.9.2.rc44；该系列尚无最终v0.9.2 | 跟踪源码未修改；checkout内仅额外存在未跟踪的运行环境.venv/；本机RPC控制与SHM数据路径 |
+| Mooncake | v0.3.13.post1 | 跟踪源码未修改；TCP，Master+双4GiB存储peer；wheel内部版本号以build.md说明为准 |
+| LMCache | v0.5.6 | 跟踪源码未修改；CPU MP SHM+ZMQ，两个独立4GiB实例；完整prepare/commit与读锁事务 |
 
-LMCache v0.5.6 CPU 原生模块已完成源码构建并成功导入。两个小容量 MP Server 的六项数据 smoke（两服务 × 1 KiB / 64 KiB / 1 MiB）通过精确 bytes、GET miss、EXIST hit/miss、重复 GET 与同步 PUT 验证；原始日志见分产品文档。三产品源码构建与原生数据 smoke 均已通过；公共驱动真实产品检查通过 DataSystem 8/8、Mooncake 8/8、LMCache 24/24，LMCache 另有 6 项双 4 GiB 原生检查。正式压力矩阵正在进行。
+三产品build_exit/smoke_exit均为0。DataSystem公共harness真实检查8/8、Mooncake8/8、LMCache24/24，LMCache另有6项双4GiB原生检查。自身native模块均由对应tag源码编译，Python/ETCD/PyTorch等第三方依赖允许发布二进制。完整SHA、编译器差异和制品哈希见[构建文档](build.md)。本机DataSystem产品工作区保持无diff，本次实现仅在agent-workbench中。
 
-## 3. 正式结果
+## 2. 并发8的接口切片
 
-正式矩阵 2026-10-20 00:58:56（北京时间）开始。首轮 LMCache 在 task root 工作目录启动时受到同名 Mooncake 目录的 Python namespace 干扰，9 个用例在测量前退出；已固定启动 wrapper 工作目录，不改变产品制品与测试热路径，将保留原始启动日志并补跑。当前不预填最终排名。正式结果由 `run_suite.py` 输出逐用例 JSON 和资源序列，完成后生成本节与网页报告。
+下表均为三次独立重复中位数；P99是各Run先合并所有客户端直方图得到桶上界，再对三个Run取中位，不能解释为跨重复请求池的P99。GET/PUT吞吐在同尺寸下与QPS等比例；1MiB时QPS数值等于MiB/s。
 
-## 4. 干扰操作与补跑策略
+| 接口 / 尺寸 | DataSystem QPS / P99 ms | Mooncake QPS / P99 ms | LMCache QPS / P99 ms |
+|---|---:|---:|---:|
+| GET 1 KiB | 26,687 / 0.504 | 13,810 / 7.602 | 722 / 15.991 |
+| GET 64 KiB | 24,839 / 0.549 | 11,822 / 7.602 | 824 / 14.287 |
+| GET 1 MiB | 10,861 / 1.393 | 2,457 / 8.258 | 856 / 14.025 |
+| PUT 1 KiB | 18,085 / 0.655 | 10,475 / 7.406 | 2,187 / 5.833 |
+| PUT 64 KiB | 15,257 / 0.778 | 10,790 / 5.964 | 2,128 / 6.029 |
+| PUT 1 MiB | 4,643 / 4.063 | 3,185 / 6.029 | 1,925 / 8.389 |
+| EXIST hit，1 KiB背景 | 47,542 / 0.283 | 110,241 / 0.121 | 1,884 / 6.554 |
+| EXIST miss，1 KiB背景 | 41,133 / 0.299 | 113,692 / 0.118 | 2,696 / 4.588 |
 
-两次中途取证同步记录在本地 operation-timings.jsonl：17:13:35.880862 UTC 开始、39.244156 秒；17:42:22.708883 UTC 开始、26.281186 秒，后者已主动终止。大批量日志读取可能引入后台 I/O，因此不假定其无影响。`identify_interference.py` 以 UTC 起止及前后 2 秒缓冲识别相交的整个用例生命周期；首轮结束后先归档原始记录，再重跑这些用例。被替换的成功结果保持原字节与 valid 字段，单列排除原因；不把它们伪记为接口错误。最终报告仅使用补跑后标准命名结果。此后完整取证只在所有测量停止后进行。
+在本轮并发8切片中，DataSystem的GET/PUT中位吞吐最高，Mooncake的EXIST hit/miss分别约为DataSystem的2.32/2.76倍。三者传输和接口事务不同，LMCache查询包含lookup/prefetch状态与读锁生命周期；这些是端到端原生调用成本，不能解释为相同底层RPC的排名。全部并发、原始重复与延迟范围见网页散点及analysis.md。
+
+## 3. 波动与并发趋势
+
+Mooncake的并发8、1KiB GET为37,930→13,276→13,810 QPS，P99为0.344→7.668→7.602ms；64KiB GET为27,646→11,799→11,822 QPS。最快单次的1KiB/64KiB GET超过DataSystem，因此不能把中位结果写成每次均领先，也不能剔除有效但较慢的重复。下降根因尚未验证，当前216个SDK窗口与已记录的两次取证动作前后2秒区间均无交集。
+
+只读资源对照显示：Mooncake这些GET窗口内存接近，server/client限流增量均0；慢态客户端约7.23–7.28核、快态约6.84–7.01核。两peer均有CPU活动，但无对象数记录，不能证明分布均衡。r0旧→重测的1KiB GET为13,678→37,930 QPS、64KiB为12,036→27,646；r1/r2未与已知取证相交仍处慢态。因此不能写“补跑消除了波动”或“波动仅由采集造成”，这些计数也不足以判定锁、调度或网络等待根因。
+
+并发8各组最大QPS范围/中位：DataSystem4.25%，LMCache3.54%；Mooncake的1KiB PUT/GET分别为183.1%/178.5%。DataSystem并发2的EXIST hit/miss也分别有23.4%/25.2%的跨度。样本数仅3，不作稳定性或统计显著性保证；网页保留各次点并提示当前筛选最大跨度。
+
+DataSystem GET 1MiB从并发2的3,186 QPS升至并发8的10,861，再到并发16降为8,435，P99升至4.063ms。Mooncake GET 1KiB从并发8的13,810降至并发16的2,108。LMCache GET 1MiB为226→856→1,136 QPS，P99同时增加。最优并发需按产品与尺寸选择，不能假定客户端越多越快。
+
+## 4. CPU、内存、磁盘与覆盖边界
+
+并发8、GET 1MiB的资源中位如下。CPU来自窗口内首末样本计数差分；内存先取窗内最大采样值，再对三次取中位。它们分别对应观测子区间平均CPU和采样峰值，不能冒充整个窗口的精确均值/瞬时峰值。
+
+| 产品 | server+client CPU核 | 匿名+SHM采样峰值 GiB | 总计费采样峰值 GiB | 采样跨度覆盖 |
+|---|---:|---:|---:|---:|
+| DataSystem | 8.91 | 3.44 | 3.58 | 95.45% |
+| Mooncake | 8.69 | 2.68 | 2.82 | 95.44% |
+| LMCache | 4.92 | 4.13 | 4.26 | 95.42% |
+
+匿名+SHM含数据池和独立SDK匿名堆，总计费另含普通文件缓存与内核开销；普通文件缓存可跨用例残留。shmem已包含在memory.stat.file内，不能再把file与shmem重复相加。逻辑容量均8GiB不意味着8GiB驻留；LMCache 1KiB chunk至少4KiB对齐也不意味着整个产品RSS固定扩大4倍。
+
+主监控有7,074个样本。81个PUT中51个短于10秒，20个SDK窗不足两个样本；对应CPU/事件增量保持未知。GET/EXIST均有足够点，观测跨度覆盖约90.05%–95.48%。独立完整性校验passed=true、errors=0；evidence_complete=false唯一告警即这20个短窗，不能将它写成所有资源均完整。
+
+九格独立PUT资源专项9/9通过，共17,895个轻采样点，SDK窗内43–2,998点，最小跨度覆盖97.8737%；不加入主三重复性能统计。实际采样间隔中位9.999886ms、P95 10.033072ms、最大15.581001ms；读取计数平均2.323946ms，含序列化/写入的循环工作平均2.613318ms。该观察者成本明确记录，采样器独占NUMA1核，与主性能阶段分离。
+
+主采样边界内server/client的oom、oom_kill、max、high增量均为0，计数无回退。iostat/mpstat/pidstat/dstat两段均正常退出；perf以SIGINT收尾，见原始manifest与日志。/home逻辑设备为253:2，避免把映射层与物理层I/O相加。该内核无PSI文件，未填0。磁盘包含元数据、日志和控制组件，不将内存KV负载误写成磁盘数据路径。
+
+## 5. 历史失败、干扰与补跑
+
+首轮LMCache从task root启动受同名mooncake目录Python namespace影响，9个用例均在测量前失败。仅修复start_server.sh中的工作目录；产品二进制、适配器、公共benchmark保持原哈希，补跑均通过。
+
+两次中途大日志取证：UTC17:13:35.880862起39.244156秒；17:42:22.708883起26.281186秒（后者主动终止）。停止首轮后按完整cell生命周期及前后2秒缓冲排除r0-mooncake-s65536-c8、r0-mooncake-s1024-c8、r1-lmcache-s1024-c8。先归档418,810,898 bytes，再原子改名保存10份旧有效接口JSON，整组重测；它们是采集干扰排除，不是接口失败。首轮失败日志、样本、参数和逐文件SHA全部保留。
+
+最终216个标准SDK窗口与上述已记录动作的交集为0，此后全部大日志同步均在主矩阵与专项停止后进行。原始归档与构建/脚本快照合计1,999个文件在本地逐一通过SHA256核对。不以这些检查证明不存在未记录的外部负载。
+
+## 6. 环境准备、收尾与耗时
+
+80逻辑CPU/40物理核，Xeon Gold6138、双NUMA，约125GiB内存。server/client各固定8个不重叠NUMA0物理核、12GiB上限、swap禁用；monitor用NUMA1的CPU1,3。三产品顺序运行，正式阶段无编译。
+
+旧tmpfs报告31个目录先归档，经gzip/tar校验后释放49,694,380,032 bytes（约46.3GiB）。6,344,576,528 bytes原归档仍保存在/home/cache/kvc-fair-20261020/environment/，结束时stat与原记录相符，未重读大文件SHA冒充再次内容验证。
+
+主实验北京时间00:58:56.725796开始、03:00:42.486301结束。两段执行墙钟7104.037602秒，含归档间隙总跨度7305.760505秒。资源专项另计，构建和清理分别计时；详情见[timing.md](timing.md)及timings.csv，嵌套区间不能相加。
+
+所有测量后，finish_environment.py在suite锁和全cgroup空检查下恢复原记录的setroubleshootd.service；实际after为active/running、Result=success，实验各组均空，/dev/shm仅余原有libpod_lock。未重建旧DBus transient服务，未删除源码/制品/旧压缩归档。恢复观测命令墙钟0.223150秒，原始environment-restored.json随证据包提供；这是当时状态观察，不保证服务永久active。
+
+## 7. 报告、脚本与适用范围
+
+公开地址：https://yche.me/perf/kvc-fair-20261020/index.html 。报告提供ECharts八图、编号章节、左侧导航、下方居中caption、逐Run JSON、完整统计表、耗时CSV、构建/脚本/验证文档、脚本ZIP与原始监控证据压缩包。
+
+可推广范围仅限锁定版本、同节点CPU、原始bytes、所述原生传输和事务。没有执行容量溢出、持久化、产品故障恢复、跨机、GPU、RDMA或推理TTFT测试。未运行产品C++ UT/ST或原生kvtest性能矩阵；参考kvtest窗口/隔离方法并实际运行本任务统一驱动，不能互相替代。

@@ -89,9 +89,9 @@ def main():
     elif args.action == "collect":
         ssh(["python3",root+"/capture_evidence.py","--root",root,"--suite",root+"/"+args.suite])
         destination=args.local_output/args.suite;destination.mkdir(parents=True,exist_ok=True)
-        run(["rsync","-a",args.target+":"+root+"/"+args.suite+"/",str(destination)+"/"])
+        run(["rsync","-az",args.target+":"+root+"/"+args.suite+"/",str(destination)+"/"])
         profile=args.local_output/args.profile_suite;profile.mkdir(parents=True,exist_ok=True)
-        run(["rsync","-a",args.target+":"+root+"/"+args.profile_suite+"/",str(profile)+"/"])
+        run(["rsync","-az",args.target+":"+root+"/"+args.profile_suite+"/",str(profile)+"/"])
         evidence=args.local_output/"timing-inputs"
         (evidence/"environment").mkdir(parents=True,exist_ok=True)
         (evidence/args.smoke_suite).mkdir(parents=True,exist_ok=True)
@@ -112,7 +112,10 @@ def main():
              "--environment",args.local_output/"timing-inputs/environment",
              "--orchestration",args.local_output/"timing-inputs"/args.smoke_suite,"--put-profile",args.local_output/args.profile_suite,
              "--operations",*operations,"--out",timings])
-        run(["python3",HERE/"report.py","--suite",args.local_output/args.suite,"--out",args.local_output/"report","--rfc",args.rfc,"--timings",timings/"timings.json","--raw-evidence","--put-profile",args.local_output/args.profile_suite])
+        report_command=["python3",HERE/"report.py","--suite",args.local_output/args.suite,"--out",args.local_output/"report","--rfc",args.rfc,"--timings",timings/"timings.json","--raw-evidence","--put-profile",args.local_output/args.profile_suite]
+        for operation_log in operations:
+            report_command += ["--operation-log",operation_log]
+        run(report_command)
     elif args.action == "publish":
         target="/var/www/html/perf/kvc-fair-20261020"
         run(["ssh",args.publication_host,shlex.join(["mkdir","-p",target])])

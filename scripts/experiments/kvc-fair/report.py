@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
+import uuid
 import zipfile
 
 
@@ -139,6 +141,78 @@ def rows_from_results(suite, samples):
     return rows
 
 
+def reproduction_archive(scripts, rfc, out):
+    archive = out / "reproduce.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
+        for path in sorted(scripts.rglob("*")):
+            relative = path.relative_to(scripts)
+            if len(relative.parts) > 1 and relative.parts[0] not in {"datasystem", "mooncake", "lmcache"}:
+                continue
+            if path.is_file() and not any(part.startswith(".") or part in {"source","evidence","__pycache__","venv","venv311"} for part in relative.parts) and path.suffix in {".py",".sh",".mjs",".js",".css",".html",".lock",".md",".json"}:
+                zipped.write(path, "kvc-fair/" + str(relative))
+        for path in sorted(rfc.glob("*.md")):
+            zipped.write(path, "kvc-fair/docs/" + path.name)
+    return archive
+
+
+def finalize_artifacts(out, gzip_paths=None, chmod_paths=None):
+    if gzip_paths is None:
+        gzip_paths = [path for path in sorted(out.iterdir()) if path.is_file() and path.suffix in {".html", ".js", ".css", ".json", ".jsonl", ".csv", ".md"}]
+    for path in gzip_paths:
+        target = Path(str(path) + ".gz")
+        temporary = target.with_name("." + target.name + "." + uuid.uuid4().hex + ".tmp")
+        try:
+            with temporary.open("xb") as stream:
+                stream.write(gzip.compress(path.read_bytes(), mtime=0))
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+    chmod_paths = None if chmod_paths is None else set(chmod_paths)
+    hashes = {}
+    for path in sorted(out.rglob("*")):
+        if path.is_file() and path.name != "SHA256SUMS":
+            if chmod_paths is None or path in chmod_paths:
+                path.chmod(0o644)
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(8 << 20), b""):
+                    digest.update(block)
+            hashes[str(path.relative_to(out))] = digest.hexdigest()
+    manifest = out / "SHA256SUMS"
+    manifest.write_text("".join(digest + "  " + name + "\n" for name, digest in hashes.items()))
+    manifest.chmod(0o644)
+    return hashes
+
+
+def operation_ledger(logs, cutoff_wall_ns, action):
+    records, sources, seen, duplicates, excluded = [], [], set(), 0, 0
+    for path in dict.fromkeys(Path(value).resolve(strict=True) for value in logs):
+        content = path.read_bytes()
+        sources.append({"path": str(path), "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+        for line_number, line in enumerate(content.decode("utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            if not isinstance(raw, dict) or "origin_log" in raw or raw.get("record_type") == "delivery_ledger_snapshot":
+                raise ValueError("Use original command logs, not a delivery ledger: " + str(path))
+            if (raw.get("end_wall_ns") or raw.get("start_wall_ns") or 0) > cutoff_wall_ns:
+                excluded += 1
+                continue
+            key = (str(path), json.dumps(raw, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
+            if key in seen:
+                duplicates += 1
+                continue
+            seen.add(key)
+            records.append({**raw, "origin_log": str(path), "origin_line": line_number})
+    whole, nanos = divmod(cutoff_wall_ns, 1_000_000_000)
+    cutoff_utc = datetime.datetime.fromtimestamp(whole, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + f".{nanos:09d}Z"
+    metadata = {"record_type": "delivery_ledger_snapshot", "snapshot_action": action, "cutoff_wall_ns": cutoff_wall_ns,
+                "cutoff_utc": cutoff_utc, "sources": sources, "included_records": len(records),
+                "duplicate_records_omitted": duplicates, "after_cutoff_records_omitted": excluded,
+                "scope": "Original input records observed before this delivery action; origin_log identifies each source. This action and subsequent operations are not assigned fabricated records or durations. The first JSONL row is snapshot metadata, not a timed command."}
+    return ("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in [metadata, *records])).encode("utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", type=Path, required=True)
@@ -148,7 +222,9 @@ def main():
     parser.add_argument("--timings", type=Path)
     parser.add_argument("--raw-evidence", action="store_true", help="Package the finished suite's raw logs and metadata")
     parser.add_argument("--put-profile", type=Path)
+    parser.add_argument("--operation-log", type=Path, action="append", default=[])
     args = parser.parse_args()
+    operation_cutoff = time.time_ns()
     args.out.mkdir(parents=True, exist_ok=True)
     verification_source = args.suite / "verification-final.json"
     if verification_source.exists():
@@ -229,6 +305,7 @@ def main():
     rendered = template.replace("{{VALID}}", str(len(valid))).replace("{{RECORDED}}", str(len(rows))).replace("{{FAILED}}", str(len(rows) - len(valid)))
     rendered = rendered.replace("{{STATUS}}", status)
     rendered = rendered.replace("{{PROFILE_DOWNLOAD}}", '<a href="put-profile.csv" download>PUT 补充资源 CSV</a>' if profile else "")
+    rendered = rendered.replace("{{OPERATIONS_LINK}}", '<a href="operations.jsonl" download>编排操作耗时 JSONL</a>' if args.operation_log else "")
     rendered = rendered.replace("{{VERIFICATION_LINK}}", '<a href="verification-final.json">最终完整性校验记录 ↗</a>' if verification_source.exists() else '<span>完整性校验待矩阵结束后执行</span>')
     rendered = rendered.replace("{{CELLS}}", f"{len(summary.get('completed', []))}/{len(plan)} 用例完成 · {len(summary.get('failed', []))} 用例待补跑 · 历史失败 {len(history)} 次")
     rendered = rendered.replace("{{RAW_EVIDENCE}}", '<a href="raw-evidence.tar.gz" download>原始监控、运行日志与会话证据</a>' if args.raw_evidence else '')
@@ -244,16 +321,9 @@ def main():
         raise RuntimeError("Missing packaged ECharts dependency; use the complete scripts directory")
     shutil.copy2(vendor, args.out / vendor.name)
     scripts = Path(__file__).resolve().parent
-    archive = args.out / "reproduce.zip"
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
-        for path in sorted(scripts.rglob("*")):
-            relative = path.relative_to(scripts)
-            if len(relative.parts) > 1 and relative.parts[0] not in {"datasystem", "mooncake", "lmcache"}:
-                continue
-            if path.is_file() and not any(part.startswith(".") or part in {"source","evidence","__pycache__","venv","venv311"} for part in relative.parts) and path.suffix in {".py",".sh",".mjs",".js",".css",".html",".lock",".md",".json"}:
-                zipped.write(path, "kvc-fair/" + str(relative))
-        for path in sorted(args.rfc.glob("*.md")):
-            zipped.write(path, "kvc-fair/docs/" + path.name)
+    reproduction_archive(scripts, args.rfc, args.out)
+    if args.operation_log:
+        (args.out / "operations.jsonl").write_bytes(operation_ledger(args.operation_log, operation_cutoff, "report"))
     if args.raw_evidence:
         if not summary.get("ended"):
             raise RuntimeError("Raw evidence packaging requires a stopped suite")
@@ -271,14 +341,7 @@ def main():
                         archive.add(path, arcname=str(Path("put-resource-profile") / path.relative_to(args.put_profile)), recursive=False)
     subprocess.run([sys.executable, str(Path(__file__).with_name("analyze_results.py")),
                     "--data", str(args.out / "data.json"), "--out", str(args.out)], check=True)
-    for path in sorted(args.out.iterdir()):
-        if path.is_file() and path.suffix in {".html", ".js", ".css", ".json", ".csv", ".md"}:
-            Path(str(path) + ".gz").write_bytes(gzip.compress(path.read_bytes(), mtime=0))
-    hashes = {}
-    for path in sorted(args.out.rglob("*")):
-        if path.is_file() and path.name != "SHA256SUMS":
-            hashes[str(path.relative_to(args.out))] = hashlib.sha256(path.read_bytes()).hexdigest()
-    (args.out / "SHA256SUMS").write_text("".join(digest + "  " + name + "\n" for name,digest in hashes.items()))
+    finalize_artifacts(args.out)
     print(json.dumps({"valid":len(valid),"recorded":len(rows),"samples":len(samples),"out":str(args.out)}))
 
 

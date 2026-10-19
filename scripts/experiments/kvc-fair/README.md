@@ -27,6 +27,8 @@ python3 workflow.py publish
 
 The downloaded ZIP carries `docs/`; when running from another layout pass `--rfc /absolute/path/to/rfc-topic`. Override `--local-output` for a different artifact root. Ports and cgroup identity are reserved for one experiment; the driver holds an exclusive lock. It deliberately does not support concurrent experiments on the same node.
 
+After public QA, `refresh_delivery.py --out /absolute/report --rfc /absolute/rfc-topic --operation-log /absolute/operation-timings.jsonl --operation-log /absolute/workflow-timings.jsonl` verifies every existing `SHA256SUMS` entry and prints a dry-run plan. Add `--apply` to refresh only Markdown docs, `reproduce.zip`, `operations.jsonl`, their gzip companions and the manifest. Every core artifact, including its existing gzip header/bytes and permissions, stays unchanged; core files must already be0644 and refreshed public files become0644. The ledger is rebuilt from the original input logs with `origin_log`/`origin_line` and a first metadata row stating its cutoff before the refresh; it neither appends duplicates nor fabricates its own timing. `report.py` also accepts repeated `--operation-log` arguments for the initial bundle. UI edits must be reviewed and checksummed before this tool is used; refresh never renders or edits the page, statistics, JavaScript, CSS or raw evidence tar.
+
 ## Results and failure handling
 
 - Raw measurements: target `formal-001/cells/<cell>/{put,get,exist_hit,exist_miss}.json`, per-client log histograms and fatal/error fields.

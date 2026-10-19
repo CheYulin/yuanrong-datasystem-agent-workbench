@@ -94,6 +94,27 @@ def command_text(command):
                                    env=dict(os.environ, GIT_OPTIONAL_LOCKS="0")).strip()
 
 
+def git_status(source, tracked_only=False):
+    command = ["git", "-C", str(source), "status", "--porcelain=v1",
+               "--untracked-files=no" if tracked_only else "--untracked-files=normal"]
+    return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT, timeout=15,
+                                   env=dict(os.environ, GIT_OPTIONAL_LOCKS="0")).rstrip("\n")
+
+
+def source_state(product, status, tracked_status):
+    lines = status.splitlines() if isinstance(status, str) else []
+    untracked = [line for line in lines if line.startswith("?? ")]
+    allowed = [line for line in untracked if product == "datasystem" and line == "?? .venv/"]
+    unexpected = [line for line in untracked if line not in allowed]
+    tracked_clean = tracked_status == "" and not any(not line.startswith("?? ") for line in lines)
+    return {"source_worktree_clean": status == "", "source_status_porcelain": status,
+            "source_tracked_worktree_clean": tracked_clean, "source_tracked_status_porcelain": tracked_status,
+            "source_untracked_status_porcelain": "\n".join(untracked) if isinstance(status, str) else None,
+            "source_allowed_untracked": allowed, "source_unexpected_untracked": unexpected,
+            "source_worktree_policy_valid": isinstance(status, str) and tracked_clean and not unexpected,
+            "source_worktree_policy": "Tracked source must be clean; only DataSystem's recipe-created untracked .venv/ directory is allowed. Full worktree cleanliness remains separately recorded."}
+
+
 def utc_ns(value):
     whole, ns = divmod(value, 1_000_000_000)
     return datetime.datetime.fromtimestamp(whole, datetime.timezone.utc).replace(microsecond=ns // 1000).isoformat()
@@ -135,20 +156,24 @@ def record(args):
 
     head = observe("git HEAD", lambda: command_text(["git", "-C", str(source), "rev-parse", "HEAD"]))
     tag_sha = observe("git tag", lambda: command_text(["git", "-C", str(source), "rev-parse", spec["tag"] + "^{commit}"]))
-    status = observe("git status", lambda: command_text(["git", "-C", str(source), "status", "--porcelain"]))
+    status = observe("git status", lambda: git_status(source))
+    tracked_status = observe("git tracked status", lambda: git_status(source, tracked_only=True))
+    state = source_state(args.product, status, tracked_status)
     artifacts = sorted({path for pattern in spec["artifacts"] for path in root.glob(pattern) if path.is_file() and not path.is_symlink()})
     missing = [name for name in spec["native_required"] if not any(name in p.name for p in artifacts)]
     if head != spec["sha"] or tag_sha != spec["sha"]:
         errors.append("actual HEAD/tag does not match the experiment's official pinned SHA")
-    if status != "":
-        errors.append("source working tree is not confirmed clean")
+    if not state["source_tracked_worktree_clean"]:
+        errors.append("tracked source working tree is not confirmed clean")
+    if not state["source_worktree_policy_valid"]:
+        errors.append("source status is unavailable or contains unapproved untracked paths: " + ", ".join(state["source_unexpected_untracked"]))
     if missing:
         errors.append("required native artifacts missing: " + ", ".join(missing))
     compiler = observe("compiler", lambda: compiler_probe(root, source, args.compiler))
     metadata = {
         "schema_version": 1, "product": args.product, "tag": spec["tag"], "pinned_sha": spec["sha"],
         "sha": head, "tag_sha": tag_sha, "official_source": spec["official_source"],
-        "source_directory": str(source), "source_worktree_clean": status == "", "source_status_porcelain": status,
+        "source_directory": str(source), **state,
         "python_executable": python, "python": observe("Python", lambda: command_text([python, "--version"])),
         "compiler": compiler["version"] if compiler else None, "compiler_probe": compiler,
         "build_started_wall_ns": args.started_wall_ns, "build_finished_wall_ns": args.finished_wall_ns,
@@ -178,7 +203,9 @@ def load_metadata(root):
         row = read_json(path)
         if row.get("product") != name or row.get("tag") != spec["tag"] or row.get("sha") != spec["sha"]:
             raise ValueError("build metadata pin mismatch: " + str(path))
-        if row.get("build_exit") != 0 or row.get("identity_valid") is not True or row.get("source_worktree_clean") is not True or not row.get("artifact_hashes"):
+        tracked_status = row.get("source_tracked_status_porcelain", "" if row.get("source_worktree_clean") is True else None)
+        state = source_state(name, row.get("source_status_porcelain"), tracked_status)
+        if row.get("build_exit") != 0 or row.get("identity_valid") is not True or not state["source_worktree_policy_valid"] or not row.get("artifact_hashes"):
             raise ValueError("build metadata is not a successful identified build: " + str(path))
         records[name] = row
     return records

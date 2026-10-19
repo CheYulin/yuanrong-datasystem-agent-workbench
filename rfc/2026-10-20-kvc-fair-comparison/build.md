@@ -43,3 +43,5 @@ flowchart TD
 ## 3. 复现入口与制品
 
 分产品完整命令、构建状态和依赖列表见 [datasystem.md](datasystem.md)、[mooncake.md](mooncake.md)、[lmcache.md](lmcache.md)。公共脚本设计见 [script-design.md](script-design.md)。每个产品保留源码 SHA、构建日志、退出码、Python 依赖锁、RPM 清单和制品 SHA256；报告构建进度与真实性以这些文件为准。
+
+DataSystem构建配方在checkout内建立运行环境`.venv/`，结束时完整工作树clean标记为false，跟踪源码仍无变化。复现metadata仅允许DataSystem精确的`?? .venv/`未跟踪目录；其它未知文件、跟踪源码修改或HEAD/tag SHA不符继续拒绝，不伪造完整工作树clean。

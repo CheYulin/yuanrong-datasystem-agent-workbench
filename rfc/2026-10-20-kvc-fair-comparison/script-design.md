@@ -1,6 +1,6 @@
 # 可复现流程与脚本设计说明
 
-Status: In-Progress
+Status: 已执行，测量与脚本完整性验证通过
 
 ## 1. 分层
 
@@ -39,6 +39,7 @@ flowchart LR
 | profile_put.py / light_monitor.py | 主矩阵后九个独立 PUT-only 资源窗，固定原驱动与配置，轻量高频采样，单列观察者成本与实际间隔 |
 | capture_evidence.py | 测量停止且 cgroup 为空后保存构建日志与脚本快照，重复收集只验证旧快照 |
 | report.py | 只消费实际结果，分离失败/短窗口、生成 CSV/JSON 与 ECharts 页面 |
+| refresh_delivery.py | QA 后先核验旧 SHA，仅刷新文档/复现 ZIP/带来源与截止边界的操作账本及派生 gzip/SHA；核心页面、统计、原始 tar、核心 gzip 字节及权限冻结，默认 dry-run |
 
 三者共享驱动实现、Python 版本、数据生成种子和 key 规则。产品差异集中在 `new_adapter(config)` 对象：`put(key, bytes)`、`get(key) -> bytes`、`exists(key) -> bool`、`close()`。每个对象属于唯一客户端进程，不在 fork 前创建。
 
@@ -71,7 +72,7 @@ stateDiagram-v2
 
 原始日志和资源序列放在目标机任务目录；仓库只保存脚本、小型锁文件与文档。结果记录每个客户端样本数、错误数、实际窗口、P99 桶边界、每秒成功数、校验次数与开始偏差。采样监控保存观察者开销；PSI 缺失或工具失败按不可用记录，不能填 0。
 
-PUT 每点固定 `min(2 GiB, 65536 * value_size)` 的新 key 数据，三个尺寸分别为 64 MiB / 2 GiB / 2 GiB。GET 与 EXIST 共用每用例预置总 64 MiB，EXIST 由新客户端连接已有数据验证；三个尺寸 GET 各自预置。重复次数 3，并发 2/8/16，正式时间窗口 20 秒，暖机 3 秒；PUT 为固定工作量窗口，短于 10 秒会明确标注。
+PUT 每点固定 `min(2 GiB, 65536 * value_size)` 的新 key 数据，三个尺寸分别为 64 MiB / 2 GiB / 2 GiB。GET 与 EXIST 共用每用例预置总 64 MiB，EXIST 由新客户端连接已有数据验证；三个尺寸 GET 各自预置。重复次数3，并发2/8/16；GET/EXIST正式20秒、暖机3秒。PUT为固定工作量窗口，暖机每客户端4次PUT+4次GET，短于10秒明确标注。
 
 ## 5. 执行约束
 
