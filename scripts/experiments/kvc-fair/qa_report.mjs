@@ -7,22 +7,31 @@ const playwrightModule=process.env.PLAYWRIGHT_MODULE || '/mnt/c/Users/T14S/.cach
 const {chromium}=await import(pathToFileURL(playwrightModule).href);
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {auditMatrix,auditCSV,auditRaw,auditPerformance,sameJSON,classifyNetwork} from './qa_integrity.mjs';
 
-// QA_REQUIRE_PROFILE=1 requires all nine real supplemental observations; QA_EXPECT_ROWS optionally pins primary row count.
+// QA_REQUIRE_PROFILE=1 requires nine real supplemental observations. QA_EXPECT_ROWS=216 also requires the exact three-repeat grid and81 completed cells.
 const base = process.env.QA_URL || 'http://127.0.0.1:18766/perf/kvc-fair-20261020/index.html';
 const requireProfile=process.env.QA_REQUIRE_PROFILE==='1';
 const expectedRows=process.env.QA_EXPECT_ROWS?Number(process.env.QA_EXPECT_ROWS):null;
 const out = process.env.QA_OUT || '/home/t14s/workspace/scratch/2026-10-20-kvc-compare-report-qa/evidence';
 await fs.mkdir(out, {recursive:true});
 const browser = await chromium.launch({executablePath:process.env.CHROME_BIN || '/home/t14s/.cache/puppeteer/chrome/linux-148.0.7778.97/chrome-linux64/chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const result={url:base,generated_utc:new Date().toISOString(),browserVersion:browser.version(),fixture:'Actual report input only; partial and complete primary matrices accepted. Supplemental observations remain independent.',requireProfile,expectedRows,viewports:[],links:[],errors:[]};
-const check=(state,name,pass,details={})=>{state.checks.push({name,pass,...details});};
+const result={url:base,generated_utc:new Date().toISOString(),browserVersion:browser.version(),fixture:'Actual report input only; partial and complete primary matrices accepted. Supplemental observations remain independent.',requireProfile,expectedRows,viewports:[],links:[],errors:[],networkPolicy:'Only three exact same-origin shared-site APIs (auth/status, comments, admin/pages) and favicon are optional; every failure is recorded with its reason. Every other HTTP or request failure is required.'};
+const check=(state,name,pass,details={})=>{state.checks.push({...details,name,pass});};
+const artifactCache=new Map();
+async function artifact(page,reference,{body=false}={}){
+  const url=new URL(reference,base).href,key=url+'|'+body;
+  if(!body&&artifactCache.has(url+'|true'))return artifactCache.get(url+'|true');
+  if(!artifactCache.has(key))artifactCache.set(key,(async()=>{const response=await page.request.get(url);return {url,status:response.status(),ok:response.ok(),...(body?{text:await response.text()}: {})};})());
+  return artifactCache.get(key);
+}
 function csvRecords(text){let quoted=false,count=0;for(let i=0;i<text.length;i++){if(text[i]==='"'){if(quoted&&text[i+1]==='"')i++;else quoted=!quoted;}else if(text[i]==='\n'&&!quoted)count++;}return count+(text.length&&!text.endsWith('\n')?1:0);}
 function inspectResourceSeries({profile=false,metric='memory'}={}){
   const d=window.KVC_DATA,p=profile?d.put_profile:d,index=Number(document.getElementById(profile?'put-profile-run':'timeline-run').value),row=p.rows[index];
   const samples=p.samples.filter(s=>s.mono_ns>=row.start_mono_ns&&s.mono_ns<=row.end_mono_ns),chart=window.KVC_CHARTS[profile?'put-profile':'timeline'],option=chart.getOption(),errors=[];
-  const memory=s=>['server','client'].every(role=>s[role].anon!=null&&s[role].shmem!=null)?(s.server.anon+s.server.shmem+s.client.anon+s.client.shmem)/(2**30):null;
-  const charged=s=>(s.server.memory+s.client.memory)/(2**30),rate=(s,role,key,scale)=>samples.length<2||s.prev_mono_ns<row.start_mono_ns||s[role][key]==null?null:s[role][key]/scale;
+  const valid=v=>Number.isFinite(v)&&v>=0;
+  const memory=s=>['server','client'].every(role=>valid(s[role].anon)&&valid(s[role].shmem))?(s.server.anon+s.server.shmem+s.client.anon+s.client.shmem)/(2**30):null;
+  const charged=s=>valid(s.server.memory)&&valid(s.client.memory)?(s.server.memory+s.client.memory)/(2**30):null,rate=(s,role,key,scale)=>samples.length<2||s.prev_mono_ns<row.start_mono_ns||s[role][key]==null?null:s[role][key]/scale;
   const definitions=profile&&metric==='cpu'?[['服务端 CPU',s=>rate(s,'server','cpu_usec_per_s',1e6),0],['客户端 CPU',s=>rate(s,'client','cpu_usec_per_s',1e6),0]]:profile&&metric==='io'?[['服务端写',s=>rate(s,'server','write_bytes_per_s',2**20),0],['客户端写',s=>rate(s,'client','write_bytes_per_s',2**20),0],['服务端读',s=>rate(s,'server','read_bytes_per_s',2**20),0],['客户端读',s=>rate(s,'client','read_bytes_per_s',2**20),0]]:[['匿名+SHM',memory,0],['总计费内存',charged,0],...(!profile?[['服务端 CPU',s=>rate(s,'server','cpu_usec_per_s',1e6),1],['客户端 CPU',s=>rate(s,'client','cpu_usec_per_s',1e6),1]]:[])];
   const axes=profile?[metric==='cpu'?'CPU 核':metric==='memory'?'GiB':'MiB/s']:['GiB','CPU 核'];
   if(option.xAxis?.[0]?.type!=='value'||option.xAxis?.[0]?.name!=='窗口秒')errors.push('x axis');
@@ -40,8 +49,8 @@ try {
     result.viewports.push(state);
     page.on('pageerror',e=>state.pageErrors.push(String(e)));
     page.on('console',m=>{if(['warning','error'].includes(m.type()))state.console.push({type:m.type(),text:m.text(),location:m.location()});});
-    page.on('response',r=>{if(r.status()>=400)state.httpErrors.push({status:r.status(),url:r.url(),expectedLocalApi:r.url().includes('/site-api/')});});
-    page.on('requestfailed',r=>state.failedRequests.push({url:r.url(),failure:r.failure()}));
+    page.on('response',r=>{if(r.status()>=400)state.httpErrors.push(classifyNetwork({status:r.status(),url:r.url()},base));});
+    page.on('requestfailed',r=>state.failedRequests.push(classifyNetwork({url:r.url(),failure:r.failure()},base)));
     await page.goto(base,{waitUntil:'networkidle'});
     await page.waitForFunction(()=>window.KVC_CHARTS&&document.querySelector('.yche-toc-button'));
     await page.waitForTimeout(700);
@@ -64,6 +73,23 @@ try {
       panelHidden:document.getElementById('yche-reader-panel').hidden
     }));
     state.initial=initial;
+    const pageData=await page.evaluate(()=>window.KVC_DATA),downloadedData=await artifact(page,'data.json',{body:true}),payload=JSON.parse(downloadedData.text);
+    check(state,'Downloaded data.json exactly matches the rendered payload',downloadedData.ok&&sameJSON(pageData,payload),{status:downloadedData.status,rows:payload.rows?.length});
+    const matrixAudit=auditMatrix(payload,{complete:expectedRows===216,expectedRows});
+    check(state,'Primary identity grid, validity and completed cells match the acceptance mode',matrixAudit.pass,matrixAudit);
+    if(width===1440){
+      const csv=await artifact(page,'summary.csv',{body:true}),csvAudit=auditCSV(csv.text,payload.rows);
+      check(state,'Primary CSV identities and every exported field match data.json',csv.ok&&csvAudit.pass,csvAudit);
+      const bindings=[];
+      for(const [profile,rows] of [[false,payload.rows],[true,payload.put_profile?.rows||[]]])for(const row of rows){
+        const response=await artifact(page,row.evidence,{body:true});
+        try{const audit=auditRaw(row,JSON.parse(response.text),{profile});bindings.push({...audit,status:response.status,pass:response.ok&&audit.pass});}
+        catch(error){bindings.push({pass:false,evidence:row.evidence,status:response.status,errors:[String(error)]});}
+      }
+      result.rawBindings=bindings;
+      check(state,'Every primary and supplemental raw result binds to its identity, window and measurements',bindings.length===payload.rows.length+(payload.put_profile?.rows?.length||0)&&bindings.every(r=>r.pass),{observations:bindings.length,failed:bindings.filter(r=>!r.pass)});
+      if(payload.put_profile){const csv=await artifact(page,'put-profile.csv',{body:true}),audit=auditCSV(csv.text,payload.put_profile.rows);check(state,'Supplemental CSV identities and every exported field match data.json',csv.ok&&audit.pass,audit);}
+    }
     check(state,'No horizontal page overflow',initial.scrollWidth<=width+1,{scrollWidth:initial.scrollWidth});
     check(state,'Exactly one visible chapter toggle',initial.tocButtons===1,{count:initial.tocButtons});
     check(state,'One shared header and no duplicate site navigation',initial.duplicateChrome.headers===1&&initial.duplicateChrome.siteNav<=1&&initial.duplicateChrome.readerBars<=1,initial.duplicateChrome);
@@ -97,7 +123,7 @@ try {
       check(state,'Missing PUT profile shows explicit waiting state without fabricated series',profileState.disabled&&profileState.options===0&&profileState.series===0&&profileState.note.includes('尚未提供')&&profileState.graphic.includes('等待补充'),state.profile);
     }else{
       const identities=profileState.rows.map(r=>r.product+':'+r.size),expected=['datasystem','mooncake','lmcache'].flatMap(p=>[1024,65536,1048576].map(s=>p+':'+s));
-      check(state,'Nine actual PUT observations are independent of the primary repeats',profileState.rows.length===9&&new Set(identities).size===9&&expected.every(id=>identities.includes(id))&&profileState.rows.every(r=>r.valid&&r.operation==='put'&&r.concurrency===8&&r.repeat===0&&r.evidence.startsWith('results/put-resource-profile/'))&&profileState.sampleCount>0&&!profileState.primaryContaminated&&!profileState.disabled&&profileState.options===9&&profileState.summary?.ended&&!profileState.summary?.fatal&&!profileState.summary?.failed?.length,state.profile);
+      check(state,'Nine actual PUT observations are independent of the primary repeats',profileState.rows.length===9&&new Set(identities).size===9&&expected.every(id=>identities.includes(id))&&profileState.rows.every(r=>r.valid&&r.operation==='put'&&r.concurrency===8&&r.repeat===0&&r.evidence.startsWith('results/put-resource-profile/'))&&profileState.sampleCount>0&&!profileState.primaryContaminated&&!profileState.disabled&&profileState.options===9&&profileState.summary?.ended&&profileState.summary?.valid===true&&!profileState.summary?.fatal&&!profileState.summary?.failed?.length,state.profile);
       for(let index=0;index<profileState.rows.length;index++){
         await page.locator('#put-profile-run').selectOption(String(index));
         for(const metric of ['cpu','memory','io']){
@@ -105,10 +131,10 @@ try {
           const audit=await page.evaluate(inspectResourceSeries,{profile:true,metric});
           check(state,`PUT observation ${index+1} ${metric} axes and points match actual source samples`,audit.pass&&audit.index===index&&audit.samples>=2,audit);
         }
-        const row=profileState.rows[index],url=new URL(row.evidence,base).href,response=await page.request.get(url),raw=await response.json();
-        check(state,'Supplemental raw PUT evidence is valid and separate',response.ok()&&raw.valid===true&&raw.parameters?.op==='put'&&raw.parameters?.concurrency===8,{url,status:response.status()});
+        const row=profileState.rows[index],response=await artifact(page,row.evidence,{body:true}),raw=JSON.parse(response.text);
+        check(state,'Supplemental raw PUT evidence is valid and separate',response.ok&&raw.valid===true&&raw.parameters?.op==='put'&&raw.parameters?.concurrency===8,{url:response.url,status:response.status});
       }
-      const response=await page.request.get(new URL('put-profile.csv',base).href),csv=await response.text();check(state,'PUT resource CSV has nine actual observations',response.ok()&&csvRecords(csv)-1===9,{status:response.status(),rows:csvRecords(csv)-1});
+      const response=await artifact(page,'put-profile.csv',{body:true}),csv=response.text;check(state,'PUT resource CSV has nine actual observations',response.ok&&csvRecords(csv)-1===9,{status:response.status,rows:csvRecords(csv)-1});
     }
     await page.locator('#put-profile').scrollIntoViewIfNeeded();await page.waitForTimeout(250);await screenshot('put-profile');
     await page.locator('#put-profile').screenshot({path:path.join(out,`${width}-put-profile-chart.png`)});
@@ -123,6 +149,15 @@ try {
     await page.locator('#metric').selectOption('qps');
     const put=await page.evaluate(()=>{const selected=window.KVC_DATA.rows.filter(r=>r.operation==='put'&&r.size===1024),valid=selected.filter(r=>r.valid),groups=new Map(),label={datasystem:'DataSystem',mooncake:'Mooncake',lmcache:'LMCache'},conc=[2,8,16];for(const r of valid){const key=label[r.product]+':'+r.concurrency;const a=groups.get(key)||[];a.push(r);groups.set(key,a);}const expectedBars=[...groups].filter(([,a])=>a.length===3&&new Set(a.map(r=>r.repeat)).size===3&&a.every(r=>Number.isFinite(r.qps))).map(([key,a])=>({key,value:a.map(r=>r.qps).sort((a,b)=>a-b)[1]}));const series=window.KVC_CHARTS.throughput.getOption().series,actualBars=series.filter(s=>s.type==='bar').flatMap(s=>s.data.map((v,i)=>({key:s.name+':'+conc[i],value:v}))).filter(p=>p.value!=null);return {rows:document.querySelectorAll('#results tr').length,expected:selected.length,expectedValid:valid.length,scatter:series.filter(s=>s.type==='scatter').reduce((n,s)=>n+s.data.length,0),expectedBars,actualBars,note:document.getElementById('selection-note').textContent};});
     check(state,'PUT filters and medians use actual three distinct valid repeats',put.rows===put.expected&&put.scatter===put.expectedValid&&put.actualBars.length===put.expectedBars.length&&put.expectedBars.every(e=>put.actualBars.some(a=>a.key===e.key&&a.value===e.value)),put);
+    for(const operation of ['put','get','exist_hit','exist_miss'])for(const size of operation.startsWith('exist')?[1024]:[1024,65536,1048576])for(const metric of operation.startsWith('exist')?['qps']:['qps','throughput_mib_s']){
+      await page.locator('#operation').selectOption(operation);
+      if(!operation.startsWith('exist'))await page.locator('#size').selectOption(String(size));
+      await page.locator('#metric').selectOption(metric);
+      const actual=await page.evaluate(()=>{const option=window.KVC_CHARTS.throughput.getOption(),conc=[2,8,16];return {unit:option.yAxis?.[0]?.name,bars:option.series.filter(s=>s.type==='bar').flatMap(s=>s.data.map((value,i)=>({key:s.name+':'+conc[i],value}))).filter(p=>p.value!=null),scatter:option.series.filter(s=>s.type==='scatter').flatMap(s=>s.data.map(p=>({name:s.name,identity:[p.row.operation,p.row.product,p.row.repeat,p.row.size,p.row.concurrency].join(':'),x:p.value[0],y:p.value[1]}))),tableRows:document.querySelectorAll('#results tr').length};});
+      const audit=auditPerformance(pageData.rows,{operation,size,metric,...actual});
+      check(state,`All-group medians and raw points: ${operation} ${size} ${metric}`,audit.pass&&actual.tableRows===pageData.rows.filter(r=>r.operation===operation&&r.size===size).length,audit);
+    }
+    await page.locator('#operation').selectOption('put');await page.locator('#size').selectOption('1024');await page.locator('#metric').selectOption('qps');
     await page.locator('#performance').scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
     await screenshot('performance');
@@ -140,21 +175,22 @@ try {
     await page.locator('details').evaluate(e=>e.open=true);
     const links=await page.evaluate(()=>{const selected=window.KVC_DATA.rows.filter(r=>r.operation===document.getElementById('operation').value&&r.size===Number(document.getElementById('size').value));return selected.map(r=>({url:new URL(r.evidence,location.href).href,valid:r.valid}));});
     for (const {url,valid} of links) {
-      const response=await page.request.get(url);const raw=await response.json();
-      result.links.push({viewport:width,kind:'raw-result',url,status:response.status(),valid:raw.valid});
-      check(state,'Raw JSON link preserves the actual result validity',response.ok()&&raw.valid===valid,{url,status:response.status()});
+      const response=await artifact(page,url,{body:true}),raw=JSON.parse(response.text);
+      result.links.push({viewport:width,kind:'raw-result',url,status:response.status,valid:raw.valid});
+      check(state,'Raw JSON link preserves the actual result validity',response.ok&&raw.valid===valid,{url,status:response.status});
     }
     const [download]=await Promise.all([page.waitForEvent('download'),page.locator('a[href="summary.csv"][download]').click()]);
     const csvFile=path.join(out,`${width}-summary.csv`);await download.saveAs(csvFile);
-    const csv=await fs.readFile(csvFile,'utf8');check(state,'CSV download returns every actual primary row',csvRecords(csv)-1===initial.rows,{suggestedFilename:download.suggestedFilename(),rows:csvRecords(csv)-1,expected:initial.rows});
+    const csv=await fs.readFile(csvFile,'utf8'),downloadAudit=auditCSV(csv,pageData.rows);check(state,'CSV download returns every actual primary row',csvRecords(csv)-1===initial.rows&&downloadAudit.pass,{suggestedFilename:download.suggestedFilename(),rows:csvRecords(csv)-1,expected:initial.rows,fieldAudit:downloadAudit});
     for(const name of ['data.json','reproduce.zip','SHA256SUMS','docs/build.md','docs/test-design.md','docs/validation.md','docs/script-design.md','analysis.md','analysis.json','timings.json','timings.csv','docs/timing.md']) {
-      const response=await page.request.get(new URL(name,base).href);result.links.push({viewport:width,kind:'artifact',name,status:response.status()});check(state,`Artifact link ${name}`,response.ok(),{status:response.status()});
+      const response=await artifact(page,name);result.links.push({viewport:width,kind:'artifact',name,status:response.status});check(state,`Artifact link ${name}`,response.ok,{status:response.status});
     }
     await page.locator('#reset').click();
     const reset=await page.evaluate(()=>({operation:document.getElementById('operation').value,size:document.getElementById('size').value,metric:document.getElementById('metric').value,disabled:document.getElementById('size').disabled}));
     check(state,'Reset restores GET / 1MiB / MiB/s',reset.operation==='get'&&reset.size==='1048576'&&reset.metric==='throughput_mib_s'&&!reset.disabled,reset);
     check(state,'No JavaScript page exceptions',state.pageErrors.length===0,{pageErrors:state.pageErrors});
-    check(state,'No failed core assets',state.httpErrors.filter(e=>!e.expectedLocalApi&&!e.url.endsWith('/favicon.ico')).length===0,{httpErrors:state.httpErrors});
+    check(state,'No failed core assets',state.httpErrors.filter(e=>e.classification==='required').length===0,{httpErrors:state.httpErrors});
+    check(state,'No failed required network requests',state.failedRequests.filter(e=>e.classification==='required').length===0,{failedRequests:state.failedRequests,optionalFeatureFailures:state.httpErrors.filter(e=>e.classification!=='required')});
     await context.close();
   }
 } catch(error) {result.errors.push(error.stack||String(error));}

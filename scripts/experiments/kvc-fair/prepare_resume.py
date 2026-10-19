@@ -17,7 +17,8 @@ import sys
 import uuid
 
 METADATA = ["summary.json", "status.json", "parameters.json", "products.json", "plan.json",
-            "script-hashes.json", "events.jsonl", "monitor.log", "environment.json"]
+            "script-hashes.json", "events.jsonl", "monitor.log", "environment.json",
+            "interference-audit.json", "operation-timings.jsonl"]
 TREES = ["resources", "cells", "builds"]
 LM_START_FIX = ("9eba24b220019fbf82cd00f278b81ef92e2a7d902908784d6b84456e6cecbc2e",
                 "e6af114cac8b531179b65e6b3797b12d67aae529632cf134d5fe69c35fa1f765")

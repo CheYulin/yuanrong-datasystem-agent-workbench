@@ -66,7 +66,7 @@ CSV中的空单元格对应 JSON null，不能当作0。单时刻环境快照标
 
 这些口径不能组成“三产品纯编译速度排名”。Mooncake失败尝试单独保留 `failed` 行，其起点已知、独立终点和耗时未知，仍包含在上层构建墙钟内，不重复相加。
 
-环境before→after是942.861811s的归档、校验、清理与服务停止聚合区间，不能推断其中压缩独占多少秒。已完成的两产品编排烟测summary为44.365739s，只是正确性编排耗时，不是正式吞吐结果。正式矩阵进行中，本章不预填其最终耗时。
+环境before→after是942.861811s的归档、校验、清理与服务停止聚合区间，不能推断其中压缩独占多少秒。已完成的两产品编排烟测summary为44.365739s，只是正确性编排耗时，不是正式吞吐结果。正式首轮 UTC 2026-10-19 16:58:56.725796→18:34:56.079606，墙钟 5759.353810s；完成72个 cell，9次启动失败。补跑与资源专项另记 session，不与该区间混合。
 
 ## 5. 验证记录
 
@@ -76,7 +76,7 @@ CSV中的空单元格对应 JSON null，不能当作0。单时刻环境快照标
 
 ## 6. 停止后的恢复证据归档
 
-`scripts/experiments/kvc-fair/prepare_resume.py` 为独立的 legacy suite 归档工具。默认只检查并输出计划；`--apply` 才提交归档。工具不停止进程、不清理 cgroup、不启动 suite、不执行输出的恢复命令。以下命令仅供已确认停止后的人工执行，本次开发和 fixture 验证没有在远端运行它。
+`scripts/experiments/kvc-fair/prepare_resume.py` 为独立的 legacy suite 归档工具。默认只检查并输出计划；`--apply` 才提交归档。工具不停止进程、不清理 cgroup、不启动 suite、不执行输出的恢复命令。本轮在首轮停止且四个 cgroup 排空后，已实际执行 dry-run 与 apply；随后另行启动原 driver 的原参数命令。
 
 ```bash
 python3 /home/worktrees/kvc-fair-20261020/prepare_resume.py \
@@ -84,10 +84,11 @@ python3 /home/worktrees/kvc-fair-20261020/prepare_resume.py \
   --suite /home/worktrees/kvc-fair-20261020/formal-001 \
   --approved-change 'lmcache/start_server.sh=人工授权：启动前切换到自身目录，修复相对路径导入失败' \
   --invalidate-cell r0-mooncake-s65536-c8 \
-  --invalidate-cell r0-mooncake-s1024-c8
+  --invalidate-cell r0-mooncake-s1024-c8 \
+  --invalidate-cell r1-lmcache-s1024-c8
 ```
 
-检查通过后，同一命令增加 `--apply`。上面的两项仅为已确认的首批相交 cell；第二次采集的完整相交清单需由停止后的原始 SDK 窗口判断后补齐。未要求排除时省略 `--invalidate-cell`。`--invalidation-reason` 可记录对应采集动作、时间与判定规则。
+检查通过后，同一命令增加 `--apply`。上面三项为停止后的全量原始事件确认的相交 cell；审计保存在 `interference-audit.json`。`--invalidation-reason` 记录采集动作与前后2秒缓冲规则。真实首轮归档复制418,810,898 bytes，manifest SHA256 为 `bd00a84cdb975abca3942d839736ad039f4c834700038efca9e13105d30eb69a`，10份旧有效接口结果保留原字节并标为采集干扰排除。
 
 工具全程持有原 `suite.lock` 的排他锁且不截断锁文件，要求父 cgroup 及 server/client/monitor 和所有子 cgroup 无任务、无 populated 状态。它再次检查归档期间源文件未变、cgroup 仍空。任一条件不满足即拒绝；不会终止现有任务来满足前提。
 

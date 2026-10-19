@@ -7,6 +7,19 @@ from pathlib import Path
 import statistics
 
 
+def memory_event_delta(samples, role):
+    if len(samples) < 2:
+        return None
+    events = [(sample.get(role) or {}).get('events') for sample in samples]
+    result = {}
+    for key in ['oom', 'oom_kill', 'max', 'high']:
+        values = [row.get(key) if isinstance(row, dict) else None for row in events]
+        complete = all(type(value) is int and value >= 0 for value in values)
+        monotonic = complete and all(b >= a for a, b in zip(values, values[1:]))
+        result[key] = values[-1] - values[0] if monotonic else None
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=Path, required=True)
@@ -32,10 +45,7 @@ def main():
                 result[key + '_max'] = max(values)
         result['qps_range_over_median'] = (result['qps_max'] - result['qps_min']) / result['qps_median']
         cells.append(result)
-    pressure = {}
-    for role in ['server', 'client']:
-        rows = [s[role]['events'] for s in data['samples'] if s.get(role, {}).get('events') is not None]
-        pressure[role] = {k: rows[-1].get(k, 0) - rows[0].get(k, 0) for k in ['oom', 'oom_kill', 'max', 'high']} if len(rows) >= 2 else None
+    pressure = {role: memory_event_delta(data['samples'], role) for role in ['server', 'client']}
     summary = {
         'measurement_count': len(data['rows']),
         'valid_measurements': sum(bool(r['valid']) for r in data['rows']),
@@ -45,6 +55,7 @@ def main():
         'completed_three_repeat_groups': len(cells),
         'samples': len(data['samples']),
         'cgroup_memory_event_delta': pressure,
+        'cgroup_memory_event_scope': 'First-to-last sampled suite span. Fewer than two samples, missing/noninteger counters or any counter decrease yield null, never zero-filled or negative deltas.',
         'total_successful_operations': sum((r.get('success') or 0) for r in data['rows']),
         'total_interface_failures': sum((r.get('failures') or 0) for r in data['rows']),
         'unknown_success_count_rows': sum(r.get('success') is None for r in data['rows']),
@@ -58,8 +69,8 @@ def main():
     text = ['# 正式测量统计', '',
             f"实际接口测量 {summary['measurement_count']}，有效 {summary['valid_measurements']}；完成用例 {summary['completed_cells']}，待补跑 {summary['remaining_failed_cells']}；历史失败尝试 {summary['historical_failures']}。",
             f"已报告成功操作合计 {summary['total_successful_operations']:,}，接口错误 {summary['total_interface_failures']:,}；另有成功计数未知 {summary['unknown_success_count_rows']} 行、错误计数未知 {summary['unknown_failure_count_rows']} 行；资源样本 {summary['samples']:,}。", '',
-            '下表每行固定同一接口、尺寸、并发与产品，汇总三次重复。P99 列为三次 Run P99 上界的中位值；原始 Run 各自先合并客户端直方图，不能把本表理解为跨重复请求池的 P99。CPU 与内存仅在三次都有采样时汇总。', '',
-            '| 接口 | bytes | 并发 | 产品 | QPS 中位 | MiB/s 中位 | P99 μs 中位 | QPS 范围/中位 | CPU 核中位 | 匿名+SHM GiB 中位 | 总计费 GiB 中位 | 短窗口次数 |',
+            '下表每行固定同一接口、尺寸、并发与产品，汇总三次重复。P99 列为三次 Run P99 上界的中位值；原始 Run 各自先合并客户端直方图，不能把本表理解为跨重复请求池的 P99。CPU 与内存仅在三次都有采样时汇总。CPU 对应首末采样点之间的平均值；内存先取窗口内最大采样值，再对三次取中位，均不冒充整个窗口的精确峰值或均值。', '',
+            '| 接口 | bytes | 并发 | 产品 | QPS 中位 | MiB/s 中位 | P99 μs 中位 | QPS 范围/中位 | CPU 核中位 | 匿名+SHM 采样峰值 GiB 中位 | 总计费采样峰值 GiB 中位 | 短窗口次数 |',
             '|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|']
     def fmt(value):
         return '不可用' if value is None else f'{value:,.2f}'
@@ -68,7 +79,7 @@ def main():
              fmt(row['qps_median']), fmt(row.get('throughput_mib_s_median')), fmt(row['p99_us_median']),
              f"{row['qps_range_over_median']:.1%}", fmt(row.get('total_cpu_cores_median')),
              fmt(row.get('peak_anon_shmem_gib_median')), fmt(row.get('peak_memory_gib_median')), str(row['short_windows'])]) + ' |')
-    text += ['', 'cgroup memory.events 在完整采样边界之间的增量：', '', '```json', json.dumps(pressure, indent=2), '```', '',
+    text += ['', 'cgroup memory.events 在首末采样边界之间的增量（采样不足两点、字段缺失或计数回退时为 null）：', '', '```json', json.dumps(pressure, indent=2), '```', '',
              '该增量包含启动、预置、正式测量和拆除；不将累计计数误当成某个请求窗口的事件。匿名+SHM 含数据池和 SDK 匿名堆，不含普通文件缓存；总计费内存还可能包含先前用例留下的文件缓存及内核开销。两者均按 server+client 相加，避免 SHM 在 RSS 中重复统计；它们不是业务净载荷。', '']
     (args.out / 'analysis.md').write_text('\n'.join(text))
     print(json.dumps({k:v for k,v in summary.items() if k not in {'groups','limits'}}))

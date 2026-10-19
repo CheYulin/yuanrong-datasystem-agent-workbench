@@ -27,6 +27,7 @@ flowchart LR
 | 文件 | 责任 |
 |---|---|
 | prepare_env.py | 对精确旧 tmpfs 清单检查 fd/maps；归档校验成功后才释放源目录；记录环境前后状态 |
+| finish_environment.py | 主矩阵与资源补测结束、全 cgroup 排空后恢复原记录的 troubleshooting 服务；记录实际 systemctl 状态、源码身份、SHM 条目与原归档 stat，不重读大归档、不重建 DBus transient、不删数据 |
 | cgroup.py | 创建本任务唯一 cgroup 树；在 exec 前迁移进程；固定 CPU/NUMA/内存与 swap |
 | benchmark.py | spawn 独立解释器与 SDK，阶段屏障，单调时钟计时，原始直方图与精确数据抽验 |
 | run_suite.py | 互斥运行、确定性随机产品/用例顺序、服务重置、失败留证、断点续跑、进程组超时清理 |

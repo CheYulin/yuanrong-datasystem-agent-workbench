@@ -9,6 +9,7 @@ Status: In-Progress
 - [构建文档](build.md)：发布版本、源码 SHA、依赖、构建命令与日志。
 - [测试脚本用例设计](test-design.md)：接口语义、拓扑、资源、计时与公平性边界。
 - [脚本设计说明](script-design.md)：一键流程、目录、状态和失败处理。
+- [阶段自检与验收](verification.md)：命令、风险边界和浏览器检查。
 - [过程耗时记录](timing.md)：各步骤的原始边界、命令墙钟与 SDK 测量窗口。
 - [测试验证结果](validation.md)：仅记录实际执行的结果，未完成项保持明确状态。
 - 分产品探索：[DataSystem](datasystem.md)、[Mooncake](mooncake.md)、[LMCache](lmcache.md)。

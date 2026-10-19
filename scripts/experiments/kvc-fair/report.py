@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import html
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -16,6 +17,27 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+
+
+def nonnegative(value):
+    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def known_sum(values):
+    values = list(values)
+    return sum(values) if values and all(nonnegative(value) for value in values) else None
+
+
+def counter_delta(values):
+    values = list(values)
+    if len(values) < 2 or not all(nonnegative(value) for value in values):
+        return None
+    return values[-1] - values[0] if all(b >= a for a, b in zip(values, values[1:])) else None
+
+
+def counter_rate(values, seconds, scale=1):
+    delta = counter_delta(values)
+    return delta / seconds / scale if delta is not None and nonnegative(seconds) and seconds > 0 else None
 
 
 def io_device(text, device):
@@ -52,8 +74,8 @@ def reduce_samples(path, device):
                 row[role] = {"cpu_usec": cpu.get("usage_usec"), "throttled_usec": cpu.get("throttled_usec"),
                              "memory": group.get("memory.current"), "shmem": mem.get("shmem"),
                              "anon": mem.get("anon"), "file": mem.get("file"),
-                             "read_bytes": io.get("rbytes", 0) if io is not None else None,
-                             "write_bytes": io.get("wbytes", 0) if io is not None else None,
+                             "read_bytes": (io.get("rbytes") if io else 0) if io is not None else None,
+                             "write_bytes": (io.get("wbytes") if io else 0) if io is not None else None,
                              "events": group.get("memory.events")}
             if samples:
                 row["prev_mono_ns"] = samples[-1]["mono_ns"]
@@ -61,11 +83,11 @@ def reduce_samples(path, device):
                 for role in ["server", "client", "monitor"]:
                     for metric in ["cpu_usec", "read_bytes", "write_bytes"]:
                         current, previous = row[role].get(metric), samples[-1][role].get(metric)
-                        row[role][metric + "_per_s"] = (current - previous) / dt if current is not None and previous is not None else None
+                        row[role][metric + "_per_s"] = counter_rate([previous, current], dt)
                 if "host_busy_ticks" in row and "host_busy_ticks" in samples[-1]:
-                    row["host_cpu_cores"] = (row["host_busy_ticks"] - samples[-1]["host_busy_ticks"]) / ticks / dt
-                    used = sum((row[role].get("cpu_usec_per_s") or 0) / 1e6 for role in ["server", "client", "monitor"])
-                    row["other_cpu_cores_estimate"] = max(0, row["host_cpu_cores"] - used)
+                    row["host_cpu_cores"] = counter_rate([samples[-1]["host_busy_ticks"], row["host_busy_ticks"]], dt, ticks)
+                    used = known_sum(row[role].get("cpu_usec_per_s") for role in ["server", "client", "monitor"])
+                    row["other_cpu_cores_estimate"] = max(0, row["host_cpu_cores"] - used / 1e6) if row["host_cpu_cores"] is not None and used is not None else None
             samples.append(row)
     return samples
 
@@ -97,21 +119,22 @@ def rows_from_results(suite, samples):
             right = bisect.bisect_right(times, row["end_mono_ns"])
             inside = samples[left:right]
             row["resource_samples"] = len(inside)
-            row["peak_memory_gib"] = max((s["server"]["memory"] + s["client"]["memory"]) / (1 << 30) for s in inside) if inside else None
-            app_memory = [sum(s[role][key] for role in ["server", "client"] for key in ["anon", "shmem"]) / (1 << 30)
-                          for s in inside if all(s[role].get(key) is not None for role in ["server", "client"] for key in ["anon", "shmem"])]
+            memory = [total / (1 << 30) for s in inside if (total := known_sum(s[role].get("memory") for role in ["server", "client"])) is not None]
+            row["peak_memory_gib"] = max(memory) if memory else None
+            app_memory = [total / (1 << 30) for s in inside
+                          if (total := known_sum(s[role].get(key) for role in ["server", "client"] for key in ["anon", "shmem"])) is not None]
             row["peak_anon_shmem_gib"] = max(app_memory) if app_memory else None
             if len(inside) >= 2:
                 first, last = inside[0], inside[-1]
                 seconds = (last["mono_ns"] - first["mono_ns"]) / 1e9
-                row["resource_span_s"] = seconds
-                row["resource_coverage"] = seconds / row["duration_s"]
+                row["resource_span_s"] = seconds if seconds > 0 else None
+                row["resource_coverage"] = seconds / row["duration_s"] if seconds > 0 and nonnegative(row["duration_s"]) and row["duration_s"] > 0 else None
                 for role in ["server", "client"]:
-                    row[role + "_cpu_cores"] = (last[role]["cpu_usec"] - first[role]["cpu_usec"]) / 1e6 / seconds
-                    row[role + "_throttle_ms"] = (last[role]["throttled_usec"] - first[role]["throttled_usec"]) / 1000
-                    a, b = last[role]["write_bytes"], first[role]["write_bytes"]
-                    row[role + "_write_mib_s"] = (a - b) / (1 << 20) / seconds if a is not None and b is not None else None
-                row["total_cpu_cores"] = row["server_cpu_cores"] + row["client_cpu_cores"]
+                    row[role + "_cpu_cores"] = counter_rate((s[role].get("cpu_usec") for s in inside), seconds, 1e6)
+                    throttle = counter_delta(s[role].get("throttled_usec") for s in inside)
+                    row[role + "_throttle_ms"] = throttle / 1000 if throttle is not None else None
+                    row[role + "_write_mib_s"] = counter_rate((s[role].get("write_bytes") for s in inside), seconds, 1 << 20)
+                row["total_cpu_cores"] = known_sum(row[role + "_cpu_cores"] for role in ["server", "client"])
         rows.append(row)
     return rows
 
@@ -146,6 +169,7 @@ def main():
         times = [s["mono_ns"] for s in profile_samples]
         indices = set()
         for row in profile_rows:
+            row.update(purpose="supplemental_resource_only", included_in_main_performance_repeats=False, observation_repetitions=1)
             indices.update(range(bisect.bisect_left(times, row["start_mono_ns"]), bisect.bisect_right(times, row["end_mono_ns"])))
             row["evidence"] = "results/put-resource-profile/" + Path(row["evidence"]).relative_to("results").as_posix()
         kept = []

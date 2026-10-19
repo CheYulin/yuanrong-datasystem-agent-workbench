@@ -248,14 +248,25 @@ class Collector:
             return
         sessions = []
         last_metadata = None
+        previous_summary_bytes = None
         for archive in archives:
             metadata = self.read_json(archive / "session.json")
             if not metadata:
                 continue
             last_metadata = metadata
+            summary_path = archive / "summary.json"
+            summary_bytes = summary_path.read_bytes() if summary_path.exists() else None
+            event_range = metadata.get("events_range") or {}
+            stale_summary = (summary_bytes is not None and previous_summary_bytes is not None
+                             and summary_bytes == previous_summary_bytes
+                             and event_range.get("end_byte", 0) > event_range.get("start_byte", 0))
+            if stale_summary:
+                self.issue(summary_path, "Archived session has new events but its summary still equals the preceding archived summary; its suite boundaries remain unknown")
             info = self.suite_session(archive, prefix + ":" + archive.name, metadata.get("events_range"), archived=True,
-                                      session_id=archive.name, exclusions={row["cell"] for row in metadata.get("invalidation_plan", [])})
+                                      session_id=archive.name, ignore_summary=stale_summary,
+                                      exclusions={row["cell"] for row in metadata.get("invalidation_plan", [])})
             sessions.append(info)
+            previous_summary_bytes = summary_bytes
         if last_metadata is None:
             self.issue(history, "No readable historical session metadata; current session kept separate")
             self.suite_session(supplied, prefix + ":current")

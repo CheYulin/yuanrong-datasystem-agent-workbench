@@ -36,11 +36,13 @@ The downloaded ZIP carries `docs/`; when running from another layout pass `--rfc
 - `report` generates actual-result CSV/JSON, per-run evidence links and ECharts figures; it does not synthesize missing or failed samples.
 - `publish` uploads the complete report, verifies SHA256 dependencies, adds exactly one homepage entry and one document metadata entry, and synchronizes gzip companions while preserving unrelated entries. It neither commits nor pushes the website repository automatically.
 
-After the experiment, restore the temporary SELinux troubleshooting service if it was active before cleanup:
+After both measurement summaries have ended and every experiment cgroup is empty, record the final environment and restore only the troubleshooting service named in the original cleanup record:
 
 ```bash
-ssh tiantiyun-80c128g systemctl start setroubleshootd.service
+python3 workflow.py restore --environment-root /home/cache/kvc-fair-20261020/environment
 ```
+
+`finish_environment.py` holds `suite.lock`, verifies both ended boundaries and empty parent/descendant cgroups, and saves `formal-001/environment-restored.json`. The record includes UTC/monotonic command timing, before/after `systemctl` output, all three source SHAs/status, immediate `/dev/shm` entries and archive existence/stat bytes. It retains the archive's historical SHA without rereading its content. A successful start is not a promise that the unit stays active; the actual state at observation is recorded. DBus transient units are not recreated, and no archived/shared-memory data is deleted. Existing final evidence is never overwritten; an identical repeat returns `already_recorded` without another start. Omit `--restore` when directly calling the helper for a read-only JSON preview; preview does not write the final record. `collect` copies the final JSON both with the suite and into local `timing-inputs/environment/`.
 
 The private archived reports are retained under `/home/cache/kvc-fair-20261020/environment/`. Do not delete the archive as part of normal experiment teardown.
 

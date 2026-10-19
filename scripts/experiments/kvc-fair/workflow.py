@@ -47,7 +47,7 @@ def main():
         run(["ssh",args.target,shlex.join(command)])
     if args.action == "stage":
         ssh(["mkdir","-p",root,root+"/scripts/datasystem",root+"/mooncake",root+"/lmcache",root+"/configs"])
-        files = [HERE/name for name in ["benchmark.py","cgroup.py","monitor.py","run_suite.py","prepare_env.py","build_metadata.py","timed.py","capture_evidence.py","prepare_resume.py","profile_put.py","light_monitor.py"]]
+        files = [HERE/name for name in ["benchmark.py","cgroup.py","monitor.py","run_suite.py","prepare_env.py","build_metadata.py","timed.py","capture_evidence.py","prepare_resume.py","profile_put.py","light_monitor.py","finish_environment.py"]]
         run(["scp",*files,args.target+":"+root+"/"])
         for name in ["mooncake","lmcache"]:
             run(["rsync","-a",str(HERE/name)+"/",args.target+":"+root+"/"+name+"/"])
@@ -97,6 +97,7 @@ def main():
         (evidence/args.smoke_suite).mkdir(parents=True,exist_ok=True)
         for name in ["environment-before.json","environment-cleanup.json"]:
             run(["scp",args.target+":"+args.environment_root+"/"+name,evidence/"environment"/name])
+        run(["scp",args.target+":"+root+"/"+args.suite+"/environment-restored.json",evidence/"environment/environment-restored.json"])
         for name in ["summary.json","events.jsonl","plan.json"]:
             run(["scp",args.target+":"+root+"/"+args.smoke_suite+"/"+name,evidence/args.smoke_suite/name])
     elif args.action == "report":
@@ -119,8 +120,9 @@ def main():
         run(["scp",HERE/"publish.py",args.publication_host+":/tmp/kvc-fair-publish.py"])
         run(["ssh",args.publication_host,"python3 /tmp/kvc-fair-publish.py"])
     elif args.action == "restore":
-        code = "import json,subprocess; from pathlib import Path; p=Path("+repr(args.environment_root+"/environment-cleanup.json")+"); d=json.loads(p.read_text()); units=d.get('temporarily_stopped_units',[]); unit='setroubleshootd.service'; should=unit in units; print(json.dumps({'unit':unit,'restore_recorded_active_unit':should})); subprocess.run(['systemctl','start',unit],check=True) if should else None"
-        ssh(["python3","-c",code])
+        ssh(["python3",root+"/finish_environment.py","--root",root,"--environment-root",args.environment_root,
+             "--suite",root+"/"+args.suite,"--profile-suite",root+"/"+args.profile_suite,
+             "--out",root+"/"+args.suite+"/environment-restored.json","--restore"])
 
 
 if __name__ == "__main__":
