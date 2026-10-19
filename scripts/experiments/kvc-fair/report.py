@@ -141,6 +141,17 @@ def rows_from_results(suite, samples):
     return rows
 
 
+def failure_history_text(history, tcp_verification=None):
+    if tcp_verification is None:
+        return f"历史失败 {len(history)} 次"
+    if tcp_verification.get("passed") is not True:
+        raise ValueError("TCP failure history requires passed protocol verification")
+    revisions = tcp_verification["execution"]["preflight_changes"]["revisions"]
+    if not isinstance(revisions, list):
+        raise ValueError("Verified TCP preflight revisions must be a list")
+    return f"性能用例历史失败 {len(history)} 次 · 协议预检历史失败 {len(revisions)} 轮"
+
+
 def reproduction_archive(scripts, rfc, out):
     archive = out / "reproduce.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
@@ -317,7 +328,7 @@ def main():
     rendered = rendered.replace("{{PROFILE_DOWNLOAD}}", '<a href="put-profile.csv" download>PUT 补充资源 CSV</a>' if profile else "")
     rendered = rendered.replace("{{OPERATIONS_LINK}}", '<a href="operations.jsonl" download>编排操作耗时 JSONL</a>' if args.operation_log else "")
     rendered = rendered.replace("{{VERIFICATION_LINK}}", '<a href="verification-final.json">最终完整性校验记录 ↗</a>' if verification_source.exists() else '<span>完整性校验待矩阵结束后执行</span>')
-    rendered = rendered.replace("{{CELLS}}", f"{len(summary.get('completed', []))}/{len(plan)} 用例完成 · {len(summary.get('failed', []))} 用例待补跑 · 历史失败 {len(history)} 次")
+    rendered = rendered.replace("{{CELLS}}", f"{len(summary.get('completed', []))}/{len(plan)} 用例完成 · {len(summary.get('failed', []))} 用例待补跑 · {failure_history_text(history, tcp_verification)}")
     rendered = rendered.replace("{{RAW_EVIDENCE}}", '<a href="raw-evidence.tar.gz" download>原始监控、运行日志与会话证据</a>' if args.raw_evidence else '')
     build_rows = ""
     for b in builds:

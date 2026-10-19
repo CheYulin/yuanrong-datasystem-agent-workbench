@@ -36,16 +36,21 @@ function inspectTCPPresentation(){
   const links=[...document.querySelectorAll('a[href]')].map(link=>({href:link.getAttribute('href'),text:link.textContent.trim()}));
   return {profile:window.KVC_DATA.transport_profile,title:document.title,
     hero:document.querySelector('.hero')?.textContent||'',
+    quality:document.getElementById('quality')?.textContent||'',
     scope:document.getElementById('scope')?.closest('section').querySelector('.notice')?.textContent||'',
     topology:window.KVC_CHARTS.topology.getZr().storage.getDisplayList().filter(element=>element.type==='tspan'&&!element.ignore).map(element=>element.style.text).join('\n'),links};
 }
-function auditTCPPresentation(visible){
+function auditTCPPresentation(visible,data){
   const has=href=>visible.links.some(link=>link.href===href);
+  const revisions=data.tcp_verification?.execution?.preflight_changes?.revisions;
+  const verifiedCounts=data.tcp_verification?.passed===true&&Array.isArray(revisions);
+  const history=verifiedCounts?`性能用例历史失败 ${data.failure_history?.length||0} 次 · 协议预检历史失败 ${revisions.length} 轮`:null;
   return {
     'TCP payload profile and page title agree':visible.profile==='tcp'&&visible.title.includes('同节点统一 TCP 实验')&&visible.hero.includes('对象数据与控制均经 TCP'),
     'TCP scope describes the three configured data paths':visible.scope.includes('统一 TCP 数据通路')&&visible.scope.includes('关闭进程间共享内存通信')&&visible.scope.includes('MP pickle payload 经 ZMQ/TCP'),
     'Visible topology uses DataSystem RPC/TCP and LMCache Pickle/TCP labels':visible.topology.includes('DataSystem · 2 Workers + ETCD')&&visible.topology.includes('RPC / TCP 数据')&&visible.topology.includes('LMCache · 2 CPU MP Servers')&&visible.topology.includes('Pickle / ZMQ TCP')&&!visible.topology.includes('RPC 控制 + SHM 数据')&&!visible.topology.includes('SHM + RPC'),
     'TCP-specific design and validation links are present':has('docs/tcp-plan.md')&&has('docs/tcp-validation.md'),
+    'TCP hero and quality distinguish verified protocol rounds from performance cell failures':verifiedCounts&&visible.hero.includes(history)&&visible.quality.includes(history),
     'The separate native baseline remains linked':visible.links.some(link=>link.href==='../kvc-fair-20261020/index.html'&&link.text.includes('原生 SHM/TCP 基线')),
     'TCP protocol verification and original evidence downloads are linked':has('tcp-verification.json')&&has('raw-evidence.tar.gz')&&has('operations.jsonl')&&has('reproduce.zip')&&has('SHA256SUMS')
   };
@@ -105,7 +110,7 @@ try {
     if(tcp){
       const presentation=await page.evaluate(inspectTCPPresentation);
       state.tcpPresentation=presentation;
-      for(const [name,pass] of Object.entries(auditTCPPresentation(presentation)))check(state,name,pass,presentation);
+      for(const [name,pass] of Object.entries(auditTCPPresentation(presentation,payload)))check(state,name,pass,presentation);
       const verification=await artifact(page,'tcp-verification.json',{body:true});
       let verified=null,verificationError=null;
       try{verified=JSON.parse(verification.text);}catch(error){verificationError=String(error);}

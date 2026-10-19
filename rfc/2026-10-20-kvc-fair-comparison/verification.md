@@ -56,3 +56,5 @@
 热路径保持共同 benchmark 和三个适配器冻结；修订仅涉及预检观测及 Mooncake 同一已构建 ELF 的启动与执行位。严格 PID/start_ticks/pidfd 停止器未放宽。新的 cgroup 与全局 flock 继续约束并发，权限事务的提交点/回滚通过负测。原始 stage 不覆盖；失败预检不充当产品接口错误或有效性能结果。产品源码及构建/测试路径未改变，`.repo_context` 无需更新。产品故障恢复、C++ UT/ST 和推理性能未测试。
 
 TCP 后处理阶段追加自检：`python3 -m unittest -v test_tcp_workflow.py test_tcp_retry.py test_collect_timings_tcp.py` 67/67，13.011s；新增计时 fixtures 验证失败/当前协议尝试、仅权限修订、wall-only恢复和缺失结束边界，fresh stage 验证0644源launcher部署0755而源文件不变。原生真实计时1213个step与旧collector逐字典一致，issues=0。新 QA 通过 `node --check` 与15项隔离展示/链接 fixtures；完整TCP浏览器验收仍待最终实测。额外将原生formal-001输入TCP verifier，实际拒绝（rc=1、passed=false、缺少tcp-stage.json），不能拿原生成绩补足TCP证据。后处理和离线检查均在本地执行，未读取或复制进行中的目标机实验。
+
+报告失败计数修订（测量热路径外）：TCP hero/quality 分开显示性能用例历史失败次数与 `tcp_verification.execution.preflight_changes.revisions` 中已核验的协议预检失败轮数；不改结果或失败数组。原生文字保持原样。7项Python及19项JavaScript隔离fixtures通过，覆盖0/5轮预检、已有性能失败、未核验拒绝与原生回归。实际执行 `python3 -m py_compile scripts/experiments/kvc-fair/report.py`、两个JS `node --check` 与 `git diff --check` 通过；完整真实页面验收仍待正式矩阵和资源专项完成。
