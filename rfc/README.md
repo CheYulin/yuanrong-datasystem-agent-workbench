@@ -29,6 +29,7 @@
 
 | 日期 | RFC | Status | 落地位置（datasystem） |
 |------|-----|--------|-----------------------|
+| 2026-10-20 | [2026-10-20-kvc-fair-comparison/](2026-10-20-kvc-fair-comparison/README.md) | **In-Progress** | DataSystem rc44 / Mooncake / LMCache 发布源码构建、双服务 CPU 实验、公共脚本与 ECharts 报告 |
 | 2026-09-13 | [2026-09-13-urma-wr-outstanding-token/](2026-09-13-urma-wr-outstanding-token/README.md) | **In-Progress** | PR !2422：进程级 capacity=100，准入预算 5000us、WR 退役阈值 5000ms；2026-10-09 当前设计与验证见 [detailed-design](2026-09-13-urma-wr-outstanding-token/detailed-design.md)、[validation-report](2026-09-13-urma-wr-outstanding-token/validation-report.md) |
 | 2026-08-15 | [2026-08-15-ds-trace-bottleneck-report/](2026-08-15-ds-trace-bottleneck-report/README.md) | **In-Progress** | `scripts/ds_trace_bottleneck.py`：消费 `ds-trace-triage` run-directory，生成 TopN 主问题关键瓶颈分析与自包含 ECharts 页面 |
 | 2026-08-11 | [2026-08-11-active-isolation-correctness/](2026-08-11-active-isolation-correctness/README.md) | **In-Progress** | Issue [#1032](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1032)：修复 topology 误清 failure summary，并让 metadata publish 失败触发 bounded Client ring refresh |
