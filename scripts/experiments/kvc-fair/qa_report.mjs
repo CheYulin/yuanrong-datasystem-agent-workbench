@@ -130,7 +130,10 @@ try {
       check(state,'Raw protocol/provenance archive is downloadable without fetching its large body',raw.ok&&Number.isFinite(raw.contentLength)&&raw.contentLength>0,raw);
       if(checkPublicBaseline){
         const baseline=await artifactHead(page,'../kvc-fair-20261020/index.html');
-        check(state,'Public native baseline link remains available',baseline.ok&&Number.isFinite(baseline.contentLength)&&baseline.contentLength>0,baseline);
+        const fallback=baseline.ok&&baseline.contentLength==null?await artifact(page,'../kvc-fair-20261020/index.html',{body:true}):null;
+        const nativeHTML=fallback?.ok&&fallback.bytes>0&&/<html(?:\s|>)/i.test(fallback.text)&&/<title>[^<]*DataSystem[^<]*Mooncake[^<]*LMCache[^<]*· 同节点 CPU 实验<\/title>/i.test(fallback.text);
+        const available=Boolean(baseline.ok&&(Number.isFinite(baseline.contentLength)&&baseline.contentLength>0||nativeHTML));
+        check(state,'Public native baseline link remains available',available,{...baseline,...(fallback?{fallbackStatus:fallback.status,fallbackBytes:fallback.bytes,fallbackSHA256:fallback.sha256}: {})});
       }
     }
     const matrixAudit=auditMatrix(payload,{complete:expectedRows===216,expectedRows});

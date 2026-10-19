@@ -138,7 +138,7 @@ TCP_REPLAY=(python3 tcp_workflow.py
 
 `probe` 单独启动服务，以独立进程验证两接入端点的完整 bytes/EXIST 与实际 TCP syscall。DataSystem 的三尺寸、两接入端点各自留证，实际载荷可路由到配置内的任一 Worker；接入端点和实际载荷端点分开记录。只有整体协议门禁成功且共同 smoke 正常结束，`run` 才能开始。正式窗内不运行 strace，每个 cell 重新启动空服务，81 cell、216 个接口结果、72 组三次重复及九个独立 PUT 资源窗继续沿用原工作负载与配额。
 
-本文写入时已确认第 6 次整体协议门禁成功，三产品均通过，单调时钟墙钟 **47.3834 s**；LMCache 两个 1 MiB 载荷探测均完成 TCP 收发与完整 bytes 校验。共同 smoke 的 6 cell、18 个接口结果已通过，于 UTC 20:41:39 结束；正式 TCP 矩阵约于 UTC 20:41:45 启动，仍待完成。资源补测、恢复、报告与发布尚未确认完成。协议墙钟含 tracing、启动与清理，不能用于性能排名。
+第 6 次整体协议门禁成功，三产品均通过，单调时钟墙钟 **47.3834 s**；LMCache 两个 1 MiB 载荷探测均完成 TCP 收发与完整 bytes 校验。共同 smoke 的 6 cell、18 个接口结果已通过。独立正式矩阵在 UTC 2026-10-19 20:41:54.554432 至 22:42:19.371899 完成 81 cell / 216 结果，随后九格资源专项、恢复、取证和原始结果验证均完成；公开页面已发布，最终验收状态见 [TCP交付核对](tcp-acceptance.md)。协议墙钟含 tracing、启动与清理，不能用于性能排名。
 
 ## 8. TCP 预检修正与内存语义
 
@@ -161,3 +161,17 @@ LMCache 的 TCP wrapper 使用 `--shm-name '' --no-l1-use-lazy` 与原生 CPU MP
 | 本地 `timings/timings.json`、`timings/timings.csv` | collect 后由 `collect_timings.py` 统一整理，复用构建区间单列 reused 来源，未知边界保持 null |
 
 `restore` 等主矩阵和资源补测结束、cgroup 排空后，按本阶段 `environment-tcp` 记录恢复实际曾停止的服务；`collect` 之后把当前/历史协议、修正链、脚本快照和环境证据带回本地。`report` 在生成任何页面之前重新调用只读 TCP 发布门禁，而非只信旧的 passed JSON。SDK 窗口、编排命令、预检修正、复制和原始构建来源分别保留，父子区间不能相加，也不能把预检失败计入产品构建时间或正式 QPS/P99。
+
+## 10. 报告证明绑定与交付验收
+
+完整 `tcp-verification.json` 保留独立验证器的全部输出，包括逐尺寸实际介质证明；`data.json/data.js` 只保留确定性摘要、完整执行修订链和 `full_evidence={path,sha256,bytes}`。摘要避免把约 10 MiB 的底层证明在页面数据里重复保存。SHA 和字节数根据已写入的完整文件精确计算，包含末尾换行；证明没有删减。浏览器重新下载完整 JSON，以实际响应内容重算 SHA/字节数，再从该内容重建摘要逐字段对照，不能只检查 `passed=true`。
+
+| 脚本 | 验收职责与边界 |
+| --- | --- |
+| `qa_report.mjs` | 1440/900/390 三视口、ECharts 筛选/resize、216 主结果和 9 专项的原 JSON 绑定、TCP 专属标签与证明；原生报告 HTML 的 HEAD 无长度时 GET 小页面并核对固定原生标题，原始大 tar 仍仅 HEAD 检查下载性 |
+| `refresh_delivery.py` | 默认预览，`--apply` 时先验现有完整 SHA 清单，只刷新 docs、操作 ledger 和复现 ZIP；本轮 254 个核心文件的内容、gzip 头及权限逐项保持不变，不重新生成图或测量数据 |
+| `commit_publication.py` | 先预览再 `--apply`，临时 Git index 只纳入本报告与自己的首页/metadata 条目，保全网站原有工作区改动；拒绝大于 20 MiB 的提交文件，原始 tar 留在网站而不提交 Git |
+
+`reproduce.zip` 的根目录为 `kvc-fair/`，其中 `docs/` 含本轮文档，脚本通过相对 import 使用；实际清洁解压后验证 CRC、安全唯一文件路径、Python 编译、CLI 帮助、shell 语法及 74 项离线工具测试。最终仅更新文档或验收脚本时，对照已测试脚本逐项 SHA，并单列变化脚本自己的实际验收证据；不能把旧 ZIP 测试冒充新脚本测试。
+
+页面核心通过验收后，后续公开 QA、发布和文档刷新耗时进入操作 ledger；其首行明确快照截止点，自身及之后命令没有伪造持续时间。公开 QA 的规则误判和被主动停止的尝试保存原脚本、JSON/截图及退出记录，不改写为成功，也不计入正式接口失败或五轮协议预检失败。
