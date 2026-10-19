@@ -7,6 +7,7 @@ const playwrightModule=process.env.PLAYWRIGHT_MODULE || '/mnt/c/Users/T14S/.cach
 const {chromium}=await import(pathToFileURL(playwrightModule).href);
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {auditMatrix,auditCSV,auditRaw,auditPerformance,sameJSON,classifyNetwork} from './qa_integrity.mjs';
 
 // QA_REQUIRE_PROFILE=1 requires nine real supplemental observations. QA_EXPECT_ROWS=216 also requires the exact three-repeat grid and81 completed cells.
@@ -25,12 +26,17 @@ const artifactCache=new Map();
 async function artifact(page,reference,{body=false}={}){
   const url=new URL(reference,base).href,key=url+'|'+body;
   if(!body&&artifactCache.has(url+'|true'))return artifactCache.get(url+'|true');
-  if(!artifactCache.has(key))artifactCache.set(key,(async()=>{const response=await page.request.get(url);return {url,status:response.status(),ok:response.ok(),...(body?{text:await response.text()}: {})};})());
+  if(!artifactCache.has(key))artifactCache.set(key,(async()=>{const response=await page.request.get(url),bytes=body?await response.body():null;return {url,status:response.status(),ok:response.ok(),...(body?{text:bytes.toString('utf8'),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}: {})};})());
   return artifactCache.get(key);
 }
 async function artifactHead(page,reference){
   const url=new URL(reference,base).href,response=await page.request.head(url),headers=response.headers();
   return {url,status:response.status(),ok:response.ok(),contentLength:headers['content-length']==null?null:Number(headers['content-length'])};
+}
+function compactTCPVerification(verification,fullEvidence){
+  if(fullEvidence?.path!=='tcp-verification.json'||typeof fullEvidence?.sha256!=='string'||!/^[0-9a-f]{64}$/.test(fullEvidence.sha256)||!Number.isSafeInteger(fullEvidence?.bytes)||fullEvidence.bytes<=0)throw Error('TCP verification reference requires its exact relative path, SHA256 and positive bytes');
+  const keys=['schema_version','generated_utc','suite','protocol_evidence','passed','errors','checks','scope','execution'];
+  return {summary_format:'kvc-tcp-verification-summary-v1',...Object.fromEntries(keys.map(key=>[key,verification[key]])),full_evidence:fullEvidence};
 }
 function inspectTCPPresentation(){
   const links=[...document.querySelectorAll('a[href]')].map(link=>({href:link.getAttribute('href'),text:link.textContent.trim()}));
@@ -114,7 +120,8 @@ try {
       const verification=await artifact(page,'tcp-verification.json',{body:true});
       let verified=null,verificationError=null;
       try{verified=JSON.parse(verification.text);}catch(error){verificationError=String(error);}
-      check(state,'Downloaded TCP verification exactly matches the passed payload evidence',verification.ok&&verified?.passed===true&&payload.tcp_verification?.passed===true&&sameJSON(verified,payload.tcp_verification),{status:verification.status,error:verificationError});
+      const reference={path:'tcp-verification.json',sha256:verification.sha256,bytes:verification.bytes};
+      check(state,'Full TCP verification SHA/reference and deterministic compact payload agree',verification.ok&&verified?.passed===true&&payload.tcp_verification?.passed===true&&sameJSON(reference,payload.tcp_verification?.full_evidence)&&sameJSON(compactTCPVerification(verified,reference),payload.tcp_verification),{status:verification.status,error:verificationError,reference});
       for(const name of ['docs/tcp-plan.md','docs/tcp-validation.md','operations.jsonl']){
         const response=await artifact(page,name,{body:true});
         check(state,`TCP artifact ${name} is available and nonempty`,response.ok&&response.text.trim().length>0,{status:response.status});

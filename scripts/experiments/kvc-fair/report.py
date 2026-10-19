@@ -152,6 +152,18 @@ def failure_history_text(history, tcp_verification=None):
     return f"性能用例历史失败 {len(history)} 次 · 协议预检历史失败 {len(revisions)} 轮"
 
 
+def compact_tcp_verification(verification, full_evidence):
+    if (full_evidence.get("path") != "tcp-verification.json"
+            or not isinstance(full_evidence.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", full_evidence.get("sha256", "")) is None
+            or type(full_evidence.get("bytes")) is not int or full_evidence["bytes"] <= 0):
+        raise ValueError("TCP verification reference requires its exact relative path, SHA256 and positive bytes")
+    keys = ("schema_version", "generated_utc", "suite", "protocol_evidence",
+            "passed", "errors", "checks", "scope", "execution")
+    return {"summary_format": "kvc-tcp-verification-summary-v1",
+            **{key: verification[key] for key in keys}, "full_evidence": full_evidence}
+
+
 def reproduction_archive(scripts, rfc, out):
     archive = out / "reproduce.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
@@ -238,6 +250,7 @@ def main():
     args = parser.parse_args()
     operation_cutoff = time.time_ns()
     tcp_verification = None
+    tcp_summary = None
     if args.transport_profile == "tcp":
         from verify_tcp import verify_tcp
         tcp_verification = verify_tcp(argparse.Namespace(suite=args.suite,
@@ -246,7 +259,12 @@ def main():
             raise RuntimeError("TCP report requires independently verified protocol evidence: " + json.dumps(tcp_verification.get("errors"), ensure_ascii=False))
     args.out.mkdir(parents=True, exist_ok=True)
     if tcp_verification:
-        (args.out / "tcp-verification.json").write_text(json.dumps(tcp_verification, ensure_ascii=False, indent=2) + "\n")
+        verification_file = args.out / "tcp-verification.json"
+        verification_file.write_text(json.dumps(tcp_verification, ensure_ascii=False, indent=2) + "\n")
+        verification_bytes = verification_file.read_bytes()
+        tcp_summary = compact_tcp_verification(tcp_verification, {
+            "path": verification_file.name, "sha256": hashlib.sha256(verification_bytes).hexdigest(),
+            "bytes": len(verification_bytes)})
     verification_source = args.suite / "verification-final.json"
     if verification_source.exists():
         shutil.copy2(verification_source, args.out / verification_source.name)
@@ -302,7 +320,7 @@ def main():
     timing_source = args.timings or args.suite.parent / "timings" / "timings.json"
     timings = json.loads(timing_source.read_text()) if timing_source.exists() else {"steps": [], "issues": ["Timing evidence not supplied"]}
     payload = {"generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "transport_profile": args.transport_profile, "rows": rows,
-               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history,"put_profile":profile,"tcp_verification":tcp_verification}
+               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history,"put_profile":profile,"tcp_verification":tcp_summary}
     (args.out / "timings.json").write_text(json.dumps(timings, ensure_ascii=False, indent=2))
     timing_csv = timing_source.with_suffix(".csv")
     if timing_csv.exists():
