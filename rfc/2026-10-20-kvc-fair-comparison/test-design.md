@@ -1,6 +1,6 @@
 # 测试脚本用例设计
 
-Status: 已执行，测量与脚本完整性验证通过
+Status: 原生 profile 已执行并通过；统一 TCP profile 真实协议门禁与共同烟测通过，正式矩阵执行中。
 
 ## 1. 比较对象与拓扑
 
@@ -95,3 +95,34 @@ sequenceDiagram
 主三重复保留 1 秒主机/进程/原生工具监控。已经观察到部分固定量 PUT 窗口短于采样间隔，因此另设 3 产品 × 3 尺寸 × 并发 8 × 单次的九个独立 PUT 资源用例，仍调用冻结 benchmark 与相同逻辑字节量、原生服务配置和 cgroup；只有主矩阵成功结束、实验组为空才启动。它们标为 `supplemental_resource_only`，QPS/P99 不参与主三重复统计。
 
 轻采样器只在独立观察者核约每 10 ms 读取 cgroup CPU/内存/I/O，不增加全主机 /proc 或 perf 采集；记录实际间隔和读取、序列化/写入成本分位数，不把标称周期当作实测保证。各 SDK 窗口至少两点才通过本阶段资源覆盖检查。网页单独选择 CPU、匿名+SHM/总计费、磁盘曲线；原始 profile、单次完整桶和采样序列都保留。
+
+## 7. 统一 TCP profile 的追加约束
+
+第1节的 SHM 描述只属于独立保留的原生基线。本轮追加 TCP profile：DataSystem 关闭客户端 SHM IPC，Mooncake classic TCP 且 `MC_STORE_MEMCPY=0`，LMCache 使用空 shm_name 的 CPU MP Pickle/ZMQ TCP。容量、CPU/内存配额、矩阵、确定性数据、计时和正确性标准完全沿用上节，216 条 TCP 结果单独统计。原生结果与 TCP 结果不能补齐彼此缺测、求合并中位数或混入三次重复。
+
+真实链路门禁先对三个产品各两个客户端执行1 MiB fresh PUT、完整 GET、EXIST hit/miss，并由 strace 对真实 TCP fd 的成功 syscall 返回字节计数；每客户端最低8 MiB包含四次 PUT+GET 的有效载荷。DataSystem 另按两个客户端×三尺寸核对 PUT/GET 各自时间窗、唯一 payload 前缀、实际 GET materialization 日志、SDK无可写共享映射及运行 Worker 参数。SDK绑定的入口 Worker 与 routed 存储 Worker 可以不同，载荷仅允许流向配置中的两个 Worker。
+
+协议门禁带跟踪开销，全部停止并排空实验 cgroup 后再进行共同烟测及正式矩阵；正式SDK窗口不运行strace。通过门禁不能替代三次重复的性能证据，也不能单凭网卡累计字节证明对象走TCP。失败门禁、诊断假设失效和脚本部署失败均保留原始日志、摘要、参数修订和耗时，不能加入当前成功接口结果或当作产品正确性故障。
+
+```mermaid
+sequenceDiagram
+    participant H as 公共 bytes 驱动
+    participant A as LMCache TCP 适配器
+    participant P as CPU MP Server
+    H->>A: put(key, bytes)
+    A->>P: TCP PREPARE_STORE
+    P-->>A: 分配成功，空SHM context
+    A->>A: bytearray与CPU tensor，官方pickle序列化
+    A->>P: TCP COMMIT_STORE + 完整载荷
+    P-->>A: commit ACK
+    A-->>H: 同步返回
+    H->>A: get(key)
+    A->>P: TCP lookup / PREPARE_RETRIEVE
+    P-->>A: 官方pickle tensor载荷
+    A->>A: 反序列化并构造独立bytes
+    A->>P: TCP COMMIT_RETRIEVE
+    P-->>A: 读锁释放ACK
+    A-->>H: 完整bytes
+```
+
+pickle 序列化、所有客户端构造/复制和同步 ACK 均包含于对应 API 调用。LMCache 非SHM私有内存池启动全量触页，两个4 GiB池的驻留基线与原生SHM不同，CPU/内存比较必须展示该差异。两独立 MP 实例的容量与并发约束不改变其元数据拓扑。

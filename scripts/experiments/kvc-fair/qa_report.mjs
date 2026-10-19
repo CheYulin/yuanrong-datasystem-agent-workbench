@@ -11,6 +11,9 @@ import {auditMatrix,auditCSV,auditRaw,auditPerformance,sameJSON,classifyNetwork}
 
 // QA_REQUIRE_PROFILE=1 requires nine real supplemental observations. QA_EXPECT_ROWS=216 also requires the exact three-repeat grid and81 completed cells.
 const base = process.env.QA_URL || 'http://127.0.0.1:18766/perf/kvc-fair-20261020/index.html';
+const expectedTransport=process.env.QA_EXPECT_TRANSPORT||(/\/kvc-tcp-[^/]+\//.test(new URL(base).pathname)?'tcp':null);
+if(expectedTransport&&!['native','tcp'].includes(expectedTransport))throw Error('QA_EXPECT_TRANSPORT must be native or tcp');
+const checkPublicBaseline=process.env.QA_CHECK_BASELINE==='1'||process.env.QA_CHECK_BASELINE!=='0'&&/(^|\.)yche\.me$/.test(new URL(base).hostname);
 const requireProfile=process.env.QA_REQUIRE_PROFILE==='1';
 const expectedRows=process.env.QA_EXPECT_ROWS?Number(process.env.QA_EXPECT_ROWS):null;
 const out = process.env.QA_OUT || '/home/t14s/workspace/scratch/2026-10-20-kvc-compare-report-qa/evidence';
@@ -24,6 +27,28 @@ async function artifact(page,reference,{body=false}={}){
   if(!body&&artifactCache.has(url+'|true'))return artifactCache.get(url+'|true');
   if(!artifactCache.has(key))artifactCache.set(key,(async()=>{const response=await page.request.get(url);return {url,status:response.status(),ok:response.ok(),...(body?{text:await response.text()}: {})};})());
   return artifactCache.get(key);
+}
+async function artifactHead(page,reference){
+  const url=new URL(reference,base).href,response=await page.request.head(url),headers=response.headers();
+  return {url,status:response.status(),ok:response.ok(),contentLength:headers['content-length']==null?null:Number(headers['content-length'])};
+}
+function inspectTCPPresentation(){
+  const links=[...document.querySelectorAll('a[href]')].map(link=>({href:link.getAttribute('href'),text:link.textContent.trim()}));
+  return {profile:window.KVC_DATA.transport_profile,title:document.title,
+    hero:document.querySelector('.hero')?.textContent||'',
+    scope:document.getElementById('scope')?.closest('section').querySelector('.notice')?.textContent||'',
+    topology:window.KVC_CHARTS.topology.getZr().storage.getDisplayList().filter(element=>element.type==='tspan'&&!element.ignore).map(element=>element.style.text).join('\n'),links};
+}
+function auditTCPPresentation(visible){
+  const has=href=>visible.links.some(link=>link.href===href);
+  return {
+    'TCP payload profile and page title agree':visible.profile==='tcp'&&visible.title.includes('同节点统一 TCP 实验')&&visible.hero.includes('对象数据与控制均经 TCP'),
+    'TCP scope describes the three configured data paths':visible.scope.includes('统一 TCP 数据通路')&&visible.scope.includes('关闭进程间共享内存通信')&&visible.scope.includes('MP pickle payload 经 ZMQ/TCP'),
+    'Visible topology uses DataSystem RPC/TCP and LMCache Pickle/TCP labels':visible.topology.includes('DataSystem · 2 Workers + ETCD')&&visible.topology.includes('RPC / TCP 数据')&&visible.topology.includes('LMCache · 2 CPU MP Servers')&&visible.topology.includes('Pickle / ZMQ TCP')&&!visible.topology.includes('RPC 控制 + SHM 数据')&&!visible.topology.includes('SHM + RPC'),
+    'TCP-specific design and validation links are present':has('docs/tcp-plan.md')&&has('docs/tcp-validation.md'),
+    'The separate native baseline remains linked':visible.links.some(link=>link.href==='../kvc-fair-20261020/index.html'&&link.text.includes('原生 SHM/TCP 基线')),
+    'TCP protocol verification and original evidence downloads are linked':has('tcp-verification.json')&&has('raw-evidence.tar.gz')&&has('operations.jsonl')&&has('reproduce.zip')&&has('SHA256SUMS')
+  };
 }
 function csvRecords(text){let quoted=false,count=0;for(let i=0;i<text.length;i++){if(text[i]==='"'){if(quoted&&text[i+1]==='"')i++;else quoted=!quoted;}else if(text[i]==='\n'&&!quoted)count++;}return count+(text.length&&!text.endsWith('\n')?1:0);}
 function inspectResourceSeries({profile=false,metric='memory'}={}){
@@ -75,6 +100,27 @@ try {
     state.initial=initial;
     const pageData=await page.evaluate(()=>window.KVC_DATA),downloadedData=await artifact(page,'data.json',{body:true}),payload=JSON.parse(downloadedData.text);
     check(state,'Downloaded data.json exactly matches the rendered payload',downloadedData.ok&&sameJSON(pageData,payload),{status:downloadedData.status,rows:payload.rows?.length});
+    const tcp=expectedTransport==='tcp'||payload.transport_profile==='tcp';
+    if(expectedTransport&&expectedTransport!=='tcp')check(state,'Requested transport profile matches payload',payload.transport_profile===expectedTransport,{expected:expectedTransport,actual:payload.transport_profile});
+    if(tcp){
+      const presentation=await page.evaluate(inspectTCPPresentation);
+      state.tcpPresentation=presentation;
+      for(const [name,pass] of Object.entries(auditTCPPresentation(presentation)))check(state,name,pass,presentation);
+      const verification=await artifact(page,'tcp-verification.json',{body:true});
+      let verified=null,verificationError=null;
+      try{verified=JSON.parse(verification.text);}catch(error){verificationError=String(error);}
+      check(state,'Downloaded TCP verification exactly matches the passed payload evidence',verification.ok&&verified?.passed===true&&payload.tcp_verification?.passed===true&&sameJSON(verified,payload.tcp_verification),{status:verification.status,error:verificationError});
+      for(const name of ['docs/tcp-plan.md','docs/tcp-validation.md','operations.jsonl']){
+        const response=await artifact(page,name,{body:true});
+        check(state,`TCP artifact ${name} is available and nonempty`,response.ok&&response.text.trim().length>0,{status:response.status});
+      }
+      const raw=await artifactHead(page,'raw-evidence.tar.gz');
+      check(state,'Raw protocol/provenance archive is downloadable without fetching its large body',raw.ok&&Number.isFinite(raw.contentLength)&&raw.contentLength>0,raw);
+      if(checkPublicBaseline){
+        const baseline=await artifactHead(page,'../kvc-fair-20261020/index.html');
+        check(state,'Public native baseline link remains available',baseline.ok&&Number.isFinite(baseline.contentLength)&&baseline.contentLength>0,baseline);
+      }
+    }
     const matrixAudit=auditMatrix(payload,{complete:expectedRows===216,expectedRows});
     check(state,'Primary identity grid, validity and completed cells match the acceptance mode',matrixAudit.pass,matrixAudit);
     if(width===1440){

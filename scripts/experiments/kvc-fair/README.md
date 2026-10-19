@@ -27,6 +27,52 @@ python3 workflow.py publish
 
 The downloaded ZIP carries `docs/`; when running from another layout pass `--rfc /absolute/path/to/rfc-topic`. Override `--local-output` for a different artifact root. Ports and cgroup identity are reserved for one experiment; the driver holds an exclusive lock. It deliberately does not support concurrent experiments on the same node.
 
+## Separate TCP reproduction
+
+The commands above reproduce the original native-path experiment. The additional TCP experiment reuses those pinned source-built binaries and SDKs, then uses separate runtime inputs and results. It does not rebuild products or replace the completed native measurements. From this directory, the TCP sequence is:
+
+```bash
+python3 tcp_workflow.py stage
+python3 tcp_workflow.py prepare
+python3 tcp_workflow.py probe
+python3 tcp_workflow.py smoke
+python3 tcp_workflow.py run
+python3 tcp_workflow.py profile
+python3 tcp_workflow.py restore
+python3 tcp_workflow.py collect
+python3 tcp_workflow.py report
+python3 tcp_workflow.py publish
+```
+
+| Boundary | Default location / rule |
+| --- | --- |
+| Preserved native baseline / builds | `/home/worktrees/kvc-fair-20261020`; original results, build metadata and native scripts remain unchanged |
+| TCP runtime / results | `/home/worktrees/kvc-fair-tcp-20261020`; `formal-tcp-001`, `orchestration-tcp-smoke`, `put-resource-profile-tcp-001` are separate |
+| Active TCP environment record | `/home/cache/kvc-fair-20261020/environment-tcp`; preparation records the state before this TCP phase and restoration uses that record |
+| Local TCP evidence | `~/workspace/scratch/2026-10-20-kvc-tcp`; separate from the native local output |
+| Mutual exclusion | Both roots' `suite.lock` names refer to the same inode; fixed ports and cgroups cannot be used concurrently |
+| Publication destination | `xqyun-32c32g:/var/www/html/perf/kvc-tcp-20261020`; the native report path remains separate |
+
+`stage` requires a completed successful native suite, revalidates native artifact hashes and preserves the immutable `tcp-stage.json`. It copies scripts/configuration and links the existing private product installations. `prepare` requires a fresh environment record; neither action is an overwrite or reset command. The entrypoint exposes `--target`, `--base`, `--root` and `--local-output`; its TCP environment directory is fixed to the location above. Do not reuse existing output/environment directories for an independent reproduction.
+
+`probe` starts both service endpoints per product, checks complete fresh PUT/GET bytes and EXIST hit/miss, and records independent TCP syscall evidence under `protocol-gate-001/`. DataSystem additionally checks three sizes at each of two SDK entry endpoints; routed storage may use either configured worker, so actual payload endpoints are recorded separately. `run` refuses to start until the protocol gate is valid and the common smoke has ended without failures. Protocol tracing stops before performance measurement; services restart empty for each formal cell. The TCP matrix keeps the original workload and quotas: 81 cells, 216 operation results and 72 three-repeat groups. The nine PUT resource observations remain separate.
+
+The confirmed checkpoint for this documentation is: protocol attempt 6 passed all three products in **47.3834 s**, including LMCache's two 1 MiB TCP payload/full-byte probes; the common smoke passed 6 cells / 18 operation results and ended at 20:41:39 UTC. The formal TCP matrix started at approximately 20:41:45 UTC and remains pending completion. The protocol interval includes correctness tracing and service lifecycle work. A completed TCP performance matrix, report or publication is not claimed by this checkpoint.
+
+If a terminal protocol preflight fails **before formal measurement**, use the guarded retry entrypoint after reviewing the correction:
+
+```bash
+python3 tcp_workflow.py retry-probe
+```
+
+The transaction takes the shared lock, requires empty cgroups and refuses any existing formal events/summary/provenance/cells. Only `tcp_stage.py`, `tcp_protocol_gate.py`, `tcp_probe_ds_sizes.py` and the lifecycle launcher `mooncake/launch_master.sh` may change. The launcher executes the same built ELF directly so its captured startup identity remains valid; any deployment chmod is applied **after** `copy2`. Permission-only corrections are allowed and recorded. This changes diagnostics or lifecycle handling; product binaries, adapters, benchmark code and workload configuration cannot change through this path.
+
+Failed protocol directories remain under `formal-tcp-001/protocol-history/attempt-NNNN/`. Before/after helper bodies, permission records and SHA chains remain in `preflight-history/` and `preflight-changes.json`; the original stage is retained. A historical permission record written before a content copy is labeled as a sequencing bug, not proof that its executable mode took effect. `verify_tcp.py` requires later correction, the final launcher SHA and its actual captured 0755 mode. Its 16 recent temporary verifier fixtures cover endpoint routing and audit/mode rejection; they are offline tool tests and provide no TCP performance evidence.
+
+LMCache TCP uses the official CPU MP pickle path with `--shm-name '' --no-l1-use-lazy`. Each server's private 4 GiB pool is eagerly filled at startup, so the aggregate 8 GiB pool is physically charged before the workload; this resource baseline differs from the earlier SHM allocator. CPU tensor/bytes construction, serialization/deserialization, copies and native completion ACKs all remain inside the adapter's SDK-call latency. The pools and their process overhead are measured in this TCP phase rather than borrowed from the native resource results.
+
+Each outer TCP command appends UTC endpoints, monotonic wall duration and exit status to local `operation-timings.jsonl`; delegated workflow actions also append `workflow-timings.jsonl`. Target protocol attempts retain `summary.json` and `operations.jsonl`, and correction transactions retain their own duration in `preflight-changes.json`. `collect` preserves current and historical evidence; `report` creates `timings/timings.json` and `timings/timings.csv`, rechecks the primary/profile results and calls the read-only TCP release gate before rendering. Reused build intervals keep their original timestamps and are marked as reused provenance. Nested engineering intervals must not be added to SDK windows or counted as fresh TCP compile time.
+
 After public QA, `refresh_delivery.py --out /absolute/report --rfc /absolute/rfc-topic --operation-log /absolute/operation-timings.jsonl --operation-log /absolute/workflow-timings.jsonl` verifies every existing `SHA256SUMS` entry and prints a dry-run plan. Add `--apply` to refresh only Markdown docs, `reproduce.zip`, `operations.jsonl`, their gzip companions and the manifest. Every core artifact, including its existing gzip header/bytes and permissions, stays unchanged; core files must already be0644 and refreshed public files become0644. The ledger is rebuilt from the original input logs with `origin_log`/`origin_line` and a first metadata row stating its cutoff before the refresh; it neither appends duplicates nor fabricates its own timing. `report.py` also accepts repeated `--operation-log` arguments for the initial bundle. UI edits must be reviewed and checksummed before this tool is used; refresh never renders or edits the page, statistics, JavaScript, CSS or raw evidence tar.
 
 ## Results and failure handling

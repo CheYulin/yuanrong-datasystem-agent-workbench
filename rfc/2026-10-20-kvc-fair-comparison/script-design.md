@@ -1,6 +1,6 @@
 # 可复现流程与脚本设计说明
 
-Status: 已执行，测量与脚本完整性验证通过
+Status: 原生路径已执行并通过完整性验证；TCP 补充实验已通过整体协议门禁及共同 smoke，正式 TCP 矩阵已启动、尚未完成。
 
 ## 1. 分层
 
@@ -83,3 +83,56 @@ PUT 每点固定 `min(2 GiB, 65536 * value_size)` 的新 key 数据，三个尺�
 完整口径见 [timing.md](timing.md)。`workflow.py` 为每条外部命令追加 UTC 起止与本机单调时钟持续时间；正式接口窗口来自客户端自身记录，不能与编排墙钟混为一谈。恢复前归档已结束会话的监控、运行参数与失败启动日志，历史失败不因补跑成功而删除。最终原始证据压缩包保留全部会话及 native 工具日志。
 
 新版复现驱动会先验证 `resume-provenance.json`：参数、产品命令、适配器、配置、解释器与运行脚本不一致则在启动监控或覆写 metadata 前拒绝续跑；实际逐接口参数也须相符。该 bookkeeping 改进只用于后续复现，不部署到本次正在运行的远端驱动。本次 legacy 续跑使用原驱动，先归档会话并独立核对初始核心脚本哈希、参数、制品及已批准的 LMCache cwd 单行修复。
+
+## 7. 独立 TCP 流程
+
+新增要求与协议证据边界见 [tcp-plan.md](tcp-plan.md)。TCP 复用原生阶段已实际构建并锁定 SHA 的二进制与 SDK，保留原构建时间和 smoke 记录作为来源，不声称重新构建。以下入口从脚本目录执行；原 `workflow.py` 命令继续用于原生路径：
+
+```bash
+python3 tcp_workflow.py stage
+python3 tcp_workflow.py prepare
+python3 tcp_workflow.py probe
+python3 tcp_workflow.py smoke
+python3 tcp_workflow.py run
+python3 tcp_workflow.py profile
+python3 tcp_workflow.py restore
+python3 tcp_workflow.py collect
+python3 tcp_workflow.py report
+python3 tcp_workflow.py publish
+```
+
+| 层次 | 输入、状态与边界 |
+| --- | --- |
+| 原生基线 | `/home/worktrees/kvc-fair-20261020`，已有源码制品、原脚本、原始结果与环境归档保持不变 |
+| TCP 运行根 | `/home/worktrees/kvc-fair-tcp-20261020`，独立脚本、配置、服务目录、结果和不可覆盖的 `tcp-stage.json` |
+| 当前环境 | `/home/cache/kvc-fair-20261020/environment-tcp`，记录 TCP 阶段开始前实际活动的服务与环境；恢复只依据本阶段记录 |
+| 共同锁与资源 | 两根目录的 `suite.lock` 是同 inode 硬链接；相同端口/cgroup 只能由一个流程独占，不能并行跑两个 profile |
+| 本地证据与发布 | `~/workspace/scratch/2026-10-20-kvc-tcp`；发布目标为 `xqyun-32c32g:/var/www/html/perf/kvc-tcp-20261020`，与原生报告分开 |
+
+`stage` 先确认原生 suite 已成功结束、重验复用制品 SHA，再复制本轮脚本和配置、链接私有安装目录。`prepare` 使用新的本阶段环境记录并建立同一资源约束，已有记录不能直接覆盖。入口提供 `--target`、`--base`、`--root`、`--local-output`；TCP 环境目录目前固定为上表路径，独立复现不能覆盖正在使用或已留证的目录。
+
+`probe` 单独启动服务，以独立进程验证两接入端点的完整 bytes/EXIST 与实际 TCP syscall。DataSystem 的三尺寸、两接入端点各自留证，实际载荷可路由到配置内的任一 Worker；接入端点和实际载荷端点分开记录。只有整体协议门禁成功且共同 smoke 正常结束，`run` 才能开始。正式窗内不运行 strace，每个 cell 重新启动空服务，81 cell、216 个接口结果、72 组三次重复及九个独立 PUT 资源窗继续沿用原工作负载与配额。
+
+本文写入时已确认第 6 次整体协议门禁成功，三产品均通过，单调时钟墙钟 **47.3834 s**；LMCache 两个 1 MiB 载荷探测均完成 TCP 收发与完整 bytes 校验。共同 smoke 的 6 cell、18 个接口结果已通过，于 UTC 20:41:39 结束；正式 TCP 矩阵约于 UTC 20:41:45 启动，仍待完成。资源补测、恢复、报告与发布尚未确认完成。协议墙钟含 tracing、启动与清理，不能用于性能排名。
+
+## 8. TCP 预检修正与内存语义
+
+预检失败后，先保留旧失败，再使用 `python3 tcp_workflow.py retry-probe`。事务必须持有共同锁、全部 cgroup 为空，且正式 `events.jsonl`、summary、provenance、cells 均不存在。允许变更的路径只有 `tcp_stage.py`、`tcp_protocol_gate.py`、`tcp_probe_ds_sizes.py`、`mooncake/launch_master.sh`；最后一项只负责生命周期入口，直接执行同一个已构建 master ELF 以保持本轮启动身份。产品源码/二进制、adapter、benchmark 和工作负载配置不能通过此事务更改。
+
+部署执行位在复制完成后设置，避免 `copy2` 把 launcher 再变为 0644。只有权限变化也可构成独立修正，仍须记录对应内容 SHA。原 `tcp-stage.json` 保留，失败整轮移到 `formal-tcp-001/protocol-history/attempt-NNNN/`；修正前后文件、逐文件摘要与权限记录分别保存到 `preflight-history/`、`preflight-changes.json`。早期“先记录/设置权限、后复制内容”的错误记录明确标为历史顺序缺陷，不宣称当时权限已生效；最终门禁要求后续纠正、最终内容 SHA 和实际快照 0755 模式一致。
+
+`verify_tcp.py` 在原 `verify_results.py` 的 216/81/72 完整性校验之上，重算协议 raw trace、完整字节、实际 Materialize、配置与执行清单，并验证受限修正链。近期增加的 16 项临时 fixtures 只验证端点白名单、权限修正与拒绝篡改逻辑；它们是离线工具测试，没有运行产品，也不是 TCP 吞吐或延迟成绩。
+
+LMCache 的 TCP wrapper 使用 `--shm-name '' --no-l1-use-lazy` 与原生 CPU MP pickle。每个实例的私有 4 GiB 池在启动时填充触页，两实例合计 8 GiB 在工作负载前已产生物理内存计费，不能沿用原 SHM 模式仅预留地址、按需触页的资源基线。tensor/bytes 构造、pickle 序列化/反序列化、副本和提交 ACK 均计入对应 SDK 调用延迟；服务额外开销继续由 cgroup 真实采样观测。
+
+## 9. TCP 过程耗时输出
+
+| 记录 | 耗时口径 |
+| --- | --- |
+| 本地 `operation-timings.jsonl` | TCP 入口调用的实际 UTC 起止、单调时钟持续时间和退出状态 |
+| 本地 `workflow-timings.jsonl` | 委托给公共 workflow 的 profile/restore/collect/report/publish 等命令；可能嵌套于上一层 |
+| 当前及历史协议目录的 `summary.json`、`operations.jsonl` | 每轮整体门禁和服务、tracing、探测命令；成功与失败均保留 |
+| `formal-tcp-001/preflight-changes.json` | 每次修正事务的起止、持续时间、文件/权限变更与失败轮归档位置 |
+| 本地 `timings/timings.json`、`timings/timings.csv` | collect 后由 `collect_timings.py` 统一整理，复用构建区间单列 reused 来源，未知边界保持 null |
+
+`restore` 等主矩阵和资源补测结束、cgroup 排空后，按本阶段 `environment-tcp` 记录恢复实际曾停止的服务；`collect` 之后把当前/历史协议、修正链、脚本快照和环境证据带回本地。`report` 在生成任何页面之前重新调用只读 TCP 发布门禁，而非只信旧的 passed JSON。SDK 窗口、编排命令、预检修正、复制和原始构建来源分别保留，父子区间不能相加，也不能把预检失败计入产品构建时间或正式 QPS/P99。

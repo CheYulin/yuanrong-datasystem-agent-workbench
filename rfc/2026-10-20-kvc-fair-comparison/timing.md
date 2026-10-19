@@ -34,6 +34,7 @@ python3 collect_timings.py \
 | `estimated/additive` | 是否估计；本轮包含嵌套区间，所有行均不可直接求和 |
 | `session_id/archived` | 原始执行 session 与是否来自历史归档；不把重跑前后当作一段 SDK 窗口 |
 | `excluded_from_comparison/exclusion_reason_kind/original_valid` | 采集干扰排除标记及原始 valid；有效旧结果可为 superseded_interference，不能算接口失败 |
+| `transport_profile/process_stage/attempt_label/revision_number/reused_source_build` | TCP 预检、命令、修订/权限修正与恢复的归属，或原构建复用标记；不生成新的 SDK 样本 |
 
 CSV中的空单元格对应 JSON null，不能当作0。单时刻环境快照标为 `observed`，耗时保持 null。尚未开始的 plan 用例保留 `pending`；正在执行但无结束事件的用例/命令保留 `running`、结束时间和耗时均为 null，不用“当前时间减开始时间”冒充完成耗时。
 
@@ -48,7 +49,7 @@ CSV中的空单元格对应 JSON null，不能当作0。单时刻环境快照标
 | `harness_wall` | benchmark JSON的wall_start_ns→wall_end_ns，包含harness内部工作，不包含记录起点之前的Python import |
 | `sdk_window` | measure_start_wall_ns作为UTC锚点，加同进程measure_end_mono_ns−measure_start_mono_ns；不包含预填/预热/后验校验/close |
 | `teardown_estimate` | cell结束→下一cell开始或suite_complete，只是含关闭、空cgroup检查、summary写入和调度间隙的上界估计 |
-| `local_operation` | timed.py/workflow.py记录的命令墙钟，以本地monotonic持续时间为准，UTC起止用于放到时间线上 |
+| `local_operation` | timed.py/workflow.py 的命令及 TCP 工程预检区间，按 `process_stage/clock_domain` 区分；已有 monotonic 持续时间与 UTC 起止分别保留，只有墙钟的恢复凭据明确标为 `target_wall_clock` |
 
 **不能把目标机 monotonic 纳秒直接转换成 Unix 时间，也不能把不同主机的 monotonic 计数相减。** UTC统一由原始时区明确的ISO时间或Unix wall纳秒生成；SDK结束位置只使用该SDK自己的wall起点和monotonic差值。原始before/after时间字符串另存于 `source_timestamps`，保留原始环境快照证据。
 
@@ -155,3 +156,33 @@ PUT专项完整阶段180.271725s，九格成功。实际采样周期p50 9.999886
 ## 12. 交付耗时
 
 停止后的压缩取证同步34.632646s，最终报告生成25.509673s；公开浏览器完整验收143.474242s，均为本机monotonic命令墙钟。发布、提交预览和文档/ZIP刷新等步骤见operations.jsonl，第一行是delivery_ledger_snapshot元数据，后续行才是操作。每次刷新记录cutoff与各原日志SHA，不给该次刷新自身或后续操作补造耗时。最终网页的timings.csv是打包前1192项分层记录快照，与后续交付ledger分工明确。
+
+## 13. TCP 协议预检、修订和恢复耗时
+
+传入 TCP suite 目录即可自动识别以下记录，不新增 CLI 参数；原 `tcp_workflow.py collect` 完成取证后，`report` 阶段使用同一个采集入口。采集只读本地已收集文件，不访问目标机、不执行协议门禁、不运行压测或恢复操作。
+
+| suite 内的源证据 | 计时与状态口径 |
+| --- | --- |
+| `protocol-history/attempt-NNNN/summary.json` | 每个失败/历史协议轮次独立一行；UTC 来自 `start/end_wall_ns`，若同一原进程的 `start/end_mono_ns` 齐全，耗时用两者差值，否则保留原 `duration_s`；无结束时不补耗时 |
+| `protocol-evidence/summary.json` | 当前已收集协议门禁的整体区间，口径同上；结束后按原 `valid/fatal` 标注 completed/failed/unknown，不因后续重试成功而改写历史失败 |
+| 上述各目录的 `operations.jsonl` | 每条真实命令分别保留 argv、开始/结束、已记录的 monotonic 墙钟和退出码；有结束但退出码缺失为 unknown，无结束时 duration/end 为 null；不完整 JSONL 行进入 `issues[]` |
+| `preflight-changes.json#/revisions` | 包含修订前校验、失败轮归档、helper 复制和部署权限修正的实际修订区间，结束点早于最终 audit JSON 发布；`changes=[]` 但有权限变化的修订仍保留；不把外层命令与本区间相加 |
+| `failed-preflight-history/*/failure.json` | 失败/回滚凭据单列；只有结束时刻而缺少开始/耗时的记录保持相应 null，不从目录名或归档时间推断 |
+| `linked-master-recovery.json` | 本轮凭据只记录 wall 起止，使用二者差值并标 `target_wall_clock`，不冒称 monotonic；精确 PID 检查、SIGTERM 和 cgroup 核验观察保留，不补造逐 PID 耗时或退出码 |
+
+这些行使用 `local_operation` 以兼容现有 ECharts 过程时间线，并分别带 `process_stage=protocol_gate/protocol_command/preflight_correction/preflight_correction_failure/guarded_recovery`。每个源路径、attempt 和 revision 的 ID 独立，显式 `--operations` 与自动发现同一个 JSONL 时仅收一次。CSV 同样保留上述归属字段；全部行的 `additive=false`，协议整体、内部命令、修订与外层操作可能嵌套，不能直接求和。它们不进入 `sdk_window`、接口样本数量、QPS/P99 或产品编译时间。
+
+归档轮次中没有结束记录的命令标为 `interrupted_unknown_end`，当前轮次无结束的命令标为 `running`；两者的未知结束和耗时都为 null。已有明确错误/非零退出码时保留 failed，不因缺少结束时间而覆盖失败事实。
+
+若 suite 的 `tcp-stage.json` 明确声明 `source_builds_reused=true`，`builds/` 中的原始 UTC 与耗时继续保留，并标为 `reused_build/reused_build_total/reused_native_build/reused_build_attempt`、`reused_source_build=true`。这些是先前固定源码构建的来源证据；本次 TCP 运行没有重新编译，不能把旧构建起止挪到 TCP 阶段或统计成 TCP 编译耗时。原生 suite 没有此声明时维持原有构建分类和数值。
+
+本节说明新增采集口径，未为正在执行的 TCP 正式矩阵提供完成结论。离线回归命令：
+
+```bash
+cd scripts/experiments/kvc-fair
+python3 -m unittest -v test_collect_timings_tcp.py
+```
+
+六个用例覆盖历史失败与当前成功、monotonic 与 wall 不同的区间、权限变化而内容不变的修订、缺少结束/退出码/开始的记录、损坏 JSONL 尾行、按源去重、wall-only 恢复、构建复用、CLI 自动识别及 JSON/CSV 一致性；临时 fixture 源文件前后 SHA 相同，未使用产品进程或目标节点。
+
+另在已保存的本地原生证据上与修改前采集器逐项对照，1213 个 step 字典完全一致，涵盖 ID、UTC、耗时、状态、分类、时钟和 session 元数据。该数值属于这次本地回归快照，包含后续操作 ledger 条目，不改写第 12 节交付打包时的 1192 行截止口径，也不表示新增接口性能样本。

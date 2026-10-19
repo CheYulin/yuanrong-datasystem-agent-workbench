@@ -66,6 +66,9 @@ class Collector:
         self.source_timestamps = []
         self.session_summaries = []
         self.overall_sessions = []
+        self.operation_sources = set()
+        self.tcp_suites = set()
+        self.source_builds_reused = False
 
     def issue(self, evidence, message):
         self.issues.append({"evidence": str(evidence), "message": message})
@@ -124,6 +127,7 @@ class Collector:
         if not directory.exists():
             self.issue(directory, "Build summaries unavailable")
             return
+        first_step = len(self.steps)
         paths = [directory] if directory.is_file() else sorted(directory.glob("*.json"))
         for path in paths:
             raw = self.read_json(path)
@@ -164,6 +168,11 @@ class Collector:
                          start=start, status="failed", evidence=[str(path) + "#/timing_scope/failed_attempt_exit"],
                          scope="Failed USE_HTTP=OFF source-build attempt is included in the parent build wall interval; its separate finish time and duration are unavailable.",
                          product=key, reported_exit=timing["failed_attempt_exit"])
+        if self.source_builds_reused:
+            for row in self.steps[first_step:]:
+                row.update(category="reused_" + row["category"], name="Reused original " + row["name"],
+                           reused_source_build=True, transport_profile="tcp",
+                           scope="Original pinned build timestamps and duration reused as provenance; no TCP rebuild occurred and this is not TCP preparation/compile time. " + row["scope"])
 
     def environment(self, supplied, suite):
         paths = []
@@ -196,16 +205,97 @@ class Collector:
                          start=utc_ns(raw["wall_ns"]), status="observed", evidence=[str(path) + "#/wall_ns"],
                          scope="Source wall-clock anchor for environment command collection; collection finish and duration were not recorded.", kind="instant")
 
-    def operations(self, paths):
+    def operations(self, paths, **context):
         for path in dict.fromkeys(paths):
+            source = str(Path(path).resolve())
+            if source in self.operation_sources:
+                continue
+            self.operation_sources.add(source)
             for index, raw in enumerate(self.read_lines(path), 1):
                 start, end = utc_ns(raw.get("start_wall_ns")), utc_ns(raw.get("end_wall_ns"))
                 status = "running" if end is None else "failed" if raw.get("error") or raw.get("returncode") not in (0, None) else "completed" if raw.get("returncode") == 0 else "unknown"
+                if context and end is None:
+                    status = ("failed" if raw.get("error") or raw.get("returncode") not in (0, None) else
+                              "interrupted_unknown_end" if context.get("archived") else "running")
                 duration = raw.get("duration_s") if end else None
-                self.add(f"operation:{Path(path)}:{index}", raw.get("step", "Recorded command"), "local_operation",
+                label = "TCP protocol " + context["attempt_label"] + f" command {index}" if context.get("process_stage") == "protocol_command" else "Recorded command"
+                scope = ("TCP correctness/preflight command; includes strace, service lifecycle or diagnostic work and is excluded from performance/build statistics. Command wrapper elapsed comes from its source-process monotonic clock; includes startup, wait and wrapper exception handling; not SDK operation latency." if context else
+                         "Command wrapper wall interval measured by local monotonic clock; includes command startup, wait and wrapper exception handling; not SDK operation latency.")
+                self.add(f"operation:{Path(path)}:{index}", raw.get("step", label), "local_operation",
                          start, end, duration, status, [raw["_evidence"]],
-                         "Command wrapper wall interval measured by local monotonic clock; includes command startup, wait and wrapper exception handling; not SDK operation latency.",
-                         clock="local_monotonic_elapsed_with_wall_endpoints", argv=raw.get("argv"), reported_exit=raw.get("returncode"))
+                         scope,
+                         clock="source_process_monotonic_elapsed_with_wall_endpoints" if context else "local_monotonic_elapsed_with_wall_endpoints",
+                         argv=raw.get("argv"), reported_exit=raw.get("returncode"), **context)
+
+    def tcp_preflight(self, supplied):
+        supplied = Path(supplied)
+        directory = supplied.parent if supplied.is_file() else supplied
+        identity = str(directory.resolve())
+        if identity in self.tcp_suites:
+            return
+        self.tcp_suites.add(identity)
+        stage_path = directory / "tcp-stage.json"
+        if stage_path.exists():
+            stage = self.read_json(stage_path) or {}
+            self.source_builds_reused |= stage.get("source_builds_reused") is True
+        history = directory / "protocol-history"
+        attempts = [(path.name, path, True) for path in sorted(history.glob("attempt-*"))
+                    if path.is_dir() and re.fullmatch(r"attempt-\d{4,}", path.name)]
+        current = directory / "protocol-evidence"
+        if current.is_dir():
+            attempts.append(("current", current, False))
+        for label, path, archived in attempts:
+            context = {"transport_profile": "tcp", "attempt_label": label, "archived": archived}
+            summary_path = path / "summary.json"
+            raw = self.read_json(summary_path) or {}
+            if raw:
+                start, end = utc_ns(raw.get("start_wall_ns")), utc_ns(raw.get("end_wall_ns"))
+                duration = raw.get("duration_s") if end else None
+                if end and raw.get("start_mono_ns") is not None and raw.get("end_mono_ns") is not None:
+                    duration = (raw["end_mono_ns"] - raw["start_mono_ns"]) / 1e9
+                status = ("failed" if raw.get("fatal") else "interrupted_unknown_end" if archived else "running") if end is None else (
+                    "failed" if raw.get("fatal") or raw.get("valid") is False else "completed" if raw.get("valid") is True else "unknown")
+                self.add("tcp:protocol:" + str(path), "TCP protocol gate " + label, "local_operation",
+                         start, end, duration, status, [str(summary_path)],
+                         "Whole TCP protocol/correctness preflight attempt, including strace and lifecycle cleanup; overlaps its command rows. Historical failures remain failures; excluded from SDK/performance/build totals.",
+                         clock="target_protocol_monotonic_elapsed_with_wall_endpoints", process_stage="protocol_gate",
+                         original_valid=raw.get("valid"), source_error=raw.get("fatal"), **context)
+            if (path / "operations.jsonl").exists():
+                self.operations([path / "operations.jsonl"], process_stage="protocol_command", **context)
+        audit_path = directory / "preflight-changes.json"
+        if audit_path.exists():
+            audit = self.read_json(audit_path) or {}
+            for index, raw in enumerate(audit.get("revisions", []), 1):
+                start, end = utc_ns(raw.get("start_wall_ns")), utc_ns(raw.get("end_wall_ns"))
+                status = "failed" if raw.get("error") else "completed" if end else "unknown"
+                self.add(f"tcp:preflight:{audit_path}:{index}", f"TCP preflight correction {raw.get('number', index)}",
+                         "local_operation", start, end, raw.get("duration_s") if end else None, status,
+                         [str(audit_path) + f"#/revisions/{index - 1}"],
+                         "Recorded preflight correction transaction through its pre-publication boundary: validation, failed-attempt archive, helper copies and deployment mode changes; includes permission-only revisions. Audit JSON publication and outer wrapper may extend beyond this interval. Excluded from performance and build time.",
+                         clock="target_preflight_monotonic_elapsed_with_wall_endpoints", process_stage="preflight_correction",
+                         transport_profile="tcp", revision_number=raw.get("number"), protocol_archive=raw.get("protocol_archive"),
+                         helper_changes=raw.get("changes", []), deployment_permissions=raw.get("deployment_permissions", []))
+        for path in sorted((directory / "failed-preflight-history").glob("*/failure.json")):
+            raw = self.read_json(path) or {}
+            if raw:
+                self.add("tcp:preflight-failure:" + str(path), "TCP preflight correction failure " + path.parent.name,
+                         "local_operation", start=utc_ns(raw.get("start_wall_ns")), end=utc_ns(raw.get("end_wall_ns")),
+                         status="failed", evidence=[str(path)],
+                         scope="Recorded failed/rolled-back correction receipt; missing start and elapsed duration stay null, not inferred from directory/archive timestamps.",
+                         clock="target_wall_clock", process_stage="preflight_correction_failure", transport_profile="tcp",
+                         source_error=raw.get("error"), rolled_back=raw.get("rolled_back"))
+        recovery_path = directory / "linked-master-recovery.json"
+        if recovery_path.exists():
+            raw = self.read_json(recovery_path) or {}
+            if raw:
+                start, end = utc_ns(raw.get("start_wall_ns")), utc_ns(raw.get("end_wall_ns"))
+                duration = (raw["end_wall_ns"] - raw["start_wall_ns"]) / 1e9 if start and end else None
+                self.add("tcp:linked-master-recovery:" + str(recovery_path), "TCP linked master guarded recovery",
+                         "local_operation", start, end, duration,
+                         "failed" if raw.get("error") else "completed" if end else "unknown", [str(recovery_path)],
+                         "Recovery receipt records wall-clock start/end only, not monotonic elapsed. Receipt is emitted after exact PID/start-ticks/executable/cgroup checks, SIGTERM completion and empty-cgroup assertions; per-PID signal durations and a process exit code were not recorded. Excluded from SDK/performance/build time.",
+                         clock="target_wall_clock", process_stage="guarded_recovery", transport_profile="tcp",
+                         recovery_observations=raw.get("operations", []), reported_exit=raw.get("returncode"))
 
     def result(self, path, raw, prefix, number=0, excluded=False, session_id=None, archived=False):
         params = raw.get("parameters", {})
@@ -238,6 +328,7 @@ class Collector:
                      clock="target_monotonic_elapsed_with_explicit_wall_anchor", valid=raw.get("valid"), **fields)
 
     def suite(self, supplied, prefix="formal"):
+        self.tcp_preflight(supplied)
         path = Path(supplied)
         directory = path.parent if path.is_file() else path
         history = directory / "history"
@@ -443,6 +534,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     collector = Collector()
+    collector.tcp_preflight(args.suite)
     collector.builds(args.builds or args.suite / "builds")
     collector.environment(args.environment, args.suite)
     collector.operations(args.operations)
@@ -462,14 +554,16 @@ def main():
                         "Unknown starts/ends/durations are null; running/pending cells are not assigned elapsed-to-now durations.",
                         "Teardown is an estimated event envelope unless exact stop events exist; compression/delete/warmup substages are not invented.",
                         "Rows overlap: suite, cell, command, harness, SDK and build-total rows must not be summed or compared as equal-scope compiler benchmarks.",
-                        "Live input files are read sequentially, not as an atomic snapshot; event state may precede a newly completed result file."]}
+                        "Live input files are read sequentially, not as an atomic snapshot; event state may precede a newly completed result file.",
+                        "TCP protocol attempts, failed preflights, helper/mode corrections and guarded recovery are engineering intervals, separate from SDK windows and compile time; nested rows must not be summed.",
+                        "Reused source builds retain original timestamps and durations as provenance, with reused_* categories; they are not new TCP builds."]}
     json_path = args.out if args.out.suffix == ".json" else args.out / "timings.json"
     csv_path = json_path.with_suffix(".csv")
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_temp = json_path.with_suffix(json_path.suffix + ".tmp")
     json_temp.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n")
     json_temp.replace(json_path)
-    fields = ["id", "name", "category", "product", "cell", "operation", "attempt", "session_id", "archived", "excluded_from_comparison", "exclusion_reason_kind", "original_valid", "start_utc", "end_utc", "duration_s", "status", "clock_domain", "estimated", "additive", "scope", "evidence"]
+    fields = ["id", "name", "category", "product", "cell", "operation", "attempt", "session_id", "archived", "transport_profile", "process_stage", "attempt_label", "revision_number", "reused_source_build", "reported_exit", "excluded_from_comparison", "exclusion_reason_kind", "original_valid", "start_utc", "end_utc", "duration_s", "status", "clock_domain", "estimated", "additive", "scope", "evidence"]
     csv_temp = csv_path.with_suffix(csv_path.suffix + ".tmp")
     with csv_temp.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")

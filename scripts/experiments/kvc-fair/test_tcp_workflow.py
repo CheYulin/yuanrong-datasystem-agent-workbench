@@ -65,6 +65,8 @@ class StageTests(unittest.TestCase):
                              "stop": ["python3", str(self.base / name / "runtime.py"), "stop"],
                              "env": {"FIXTURE_ROOT": str(self.base)}})
         (self.bundle / "lmcache/start_server_tcp.sh").write_text("# distinct TCP fixture\n")
+        (self.bundle / "mooncake/launch_master.sh").write_text("# launcher source intentionally nonexecutable\n")
+        (self.bundle / "mooncake/launch_master.sh").chmod(0o644)
         self.manifest = self.bundle / "products.json"
         self.manifest.write_text(json.dumps({"products": products}))
         self.args = argparse.Namespace(base=self.base, root=self.root, bundle=self.bundle, cgroup=self.cgroup)
@@ -91,6 +93,8 @@ class StageTests(unittest.TestCase):
         self.assertTrue((self.root / "datasystem").is_symlink())
         self.assertEqual((self.root / "datasystem").resolve(), self.base / "datasystem")
         self.assertEqual((self.root / "lmcache/start_server.sh").read_text(), "# distinct TCP fixture\n")
+        self.assertEqual((self.root / "mooncake/launch_master.sh").stat().st_mode & 0o777, 0o755)
+        self.assertEqual((self.bundle / "mooncake/launch_master.sh").stat().st_mode & 0o777, 0o644)
         products = {item["name"]: item for item in json.loads((self.root / "products.json").read_text())["products"]}
         self.assertEqual(products["datasystem"]["start"][-2:], ["--transport", "tcp"])
         self.assertEqual(products["mooncake"]["env"]["MC_STORE_MEMCPY"], "0")
