@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Refresh delivery metadata after QA; preserve every core byte and permission."""
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -13,7 +14,7 @@ import tempfile
 import time
 import zipfile
 
-from report import finalize_artifacts, operation_ledger, reproduction_archive
+from report import finalize_artifacts, operation_ledger, reproduction_archive, version_zip_href
 
 
 def digest(path):
@@ -77,8 +78,16 @@ def refresh(args):
         raise ValueError("Output, RFC and scripts must be existing directories")
     before = verify_manifest(out)
     frozen = core_inventory(before)
+    version_link = getattr(args, "version_download_link", False)
+    controlled = {"index.html", "index.html.gz"} if version_link else set()
+    if controlled and not controlled <= before.keys():
+        raise RuntimeError("Versioned ZIP download requires existing index.html and index.html.gz")
     if any(value["mode"] != 0o644 for value in frozen.values()):
         raise RuntimeError("Core files must already be public 0644; refresh preserves their permissions")
+    original_html = (out / "index.html").read_bytes() if version_link else None
+    if version_link:
+        version_zip_href(original_html.decode("utf-8"), before["reproduce.zip"]["sha256"])
+    expected_core = dict(frozen)
     docs = sorted(rfc.glob("*.md"))
     if not docs or any(path.is_symlink() or not path.is_file() for path in docs):
         raise ValueError("RFC Markdown inputs must be regular files and nonempty")
@@ -92,6 +101,12 @@ def refresh(args):
               "docs": [path.name for path in docs], "ledger_snapshot": snapshot,
               "planned_updates": ["docs/*.md", "docs/*.md.gz", "reproduce.zip", "operations.jsonl", "operations.jsonl.gz", "SHA256SUMS"],
               "scope": "No report rendering, benchmark, statistics, raw-tar rebuild, UI edit or remote action. This ledger stops before the refresh itself."}
+    if version_link:
+        report.update(version_download_link=True, frozen_core_files=len(frozen) - len(controlled),
+                      controlled_core_files=sorted(controlled),
+                      core_scope="Only the unique reviewed ZIP download href and its mtime=0 gzip may change; every other core byte and permission is frozen.",
+                      scope="No report rendering, benchmark, statistics, raw-tar rebuild or remote action. Only the unique ZIP download href is versioned; this ledger stops before the refresh itself.")
+        report["planned_updates"] += sorted(controlled)
     if not args.apply:
         return report
     with tempfile.TemporaryDirectory(prefix="." + out.name + ".delivery-", dir=out.parent) as temporary:
@@ -101,7 +116,7 @@ def refresh(args):
         for name in before:
             source, target = out / name, stage / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            if mutable(name):
+            if mutable(name) or name in controlled:
                 saved = backup / name
                 saved.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, saved)
@@ -123,14 +138,20 @@ def refresh(args):
         gzip_paths = [stage / "operations.jsonl", *(stage / "docs" / source.name for source in docs)]
         if (stage / "reproduce.zip.gz").exists():
             gzip_paths.append(stage / "reproduce.zip")
-        chmod_paths = {stage / name for name in before if mutable(name)} | set(gzip_paths) | {Path(str(path) + ".gz") for path in gzip_paths}
+        if version_link:
+            expected_html = version_zip_href(original_html.decode("utf-8"), digest(stage / "reproduce.zip")).encode("utf-8")
+            (stage / "index.html").write_bytes(expected_html)
+            gzip_paths.append(stage / "index.html")
+            expected_core["index.html"] = {"sha256": hashlib.sha256(expected_html).hexdigest(), "mode": before["index.html"]["mode"]}
+            expected_core["index.html.gz"] = {"sha256": hashlib.sha256(gzip.compress(expected_html, mtime=0)).hexdigest(), "mode": before["index.html.gz"]["mode"]}
+        chmod_paths = {stage / name for name in before if mutable(name) or name in controlled} | set(gzip_paths) | {Path(str(path) + ".gz") for path in gzip_paths}
         finalize_artifacts(stage, gzip_paths=gzip_paths, chmod_paths=chmod_paths)
         staged = verify_manifest(stage)
-        if core_inventory(staged) != frozen:
+        if core_inventory(staged) != expected_core:
             raise RuntimeError("Staged core bytes or permissions changed; original delivery was not modified")
         if verify_manifest(out) != before:
             raise RuntimeError("Original delivery changed while staging; refresh was not committed")
-        updates = [name for name in staged if mutable(name) and name != "SHA256SUMS"] + ["SHA256SUMS"]
+        updates = [name for name in staged if (mutable(name) or name in controlled) and name != "SHA256SUMS"] + ["SHA256SUMS"]
         committed = []
         try:
             for name in updates:
@@ -139,7 +160,7 @@ def refresh(args):
                 os.replace(stage / name, target)
                 committed.append(name)
             after = verify_manifest(out)
-            if core_inventory(after) != frozen or any(value["mode"] != 0o644 for value in after.values()):
+            if core_inventory(after) != expected_core or any(value["mode"] != 0o644 for value in after.values()):
                 raise RuntimeError("Post-refresh core or public-file permission assertion failed")
         except BaseException:
             for name in reversed(committed):
@@ -148,8 +169,11 @@ def refresh(args):
                 else:
                     (out / name).unlink()
             raise
-    report.update(core_unchanged=True, public_file_mode="0644", files_updated=updates,
+    report.update(core_unchanged=core_inventory(after) == frozen, public_file_mode="0644", files_updated=updates,
                   sha256sums=digest(out / "SHA256SUMS"), ledger_records=snapshot["included_records"])
+    if version_link:
+        report.update(frozen_core_unchanged=all(after[name] == value for name, value in frozen.items() if name not in controlled),
+                      controlled_core_changes=[{"path": name, "before": before[name], "after": after[name], "changed": before[name] != after[name]} for name in sorted(controlled)])
     return report
 
 
@@ -159,6 +183,7 @@ def main():
     parser.add_argument("--rfc", type=Path, required=True)
     parser.add_argument("--scripts", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--operation-log", type=Path, action="append", required=True)
+    parser.add_argument("--version-download-link", action="store_true", help="Allow only the reviewed ZIP href SHA256 query and its index.html.gz to change")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:

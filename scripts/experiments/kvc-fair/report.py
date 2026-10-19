@@ -164,6 +164,16 @@ def compact_tcp_verification(verification, full_evidence):
             **{key: verification[key] for key in keys}, "full_evidence": full_evidence}
 
 
+def version_zip_href(source, checksum):
+    if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
+        raise ValueError("ZIP download version requires a lowercase SHA256")
+    anchors = re.findall(r"<a\b[^>]*>", source, flags=re.IGNORECASE)
+    links = [tag for tag in anchors if re.search(r'''\bhref\s*=\s*["'][^"']*reproduce\.zip(?:[?&#][^"']*)?["']''', tag, flags=re.IGNORECASE)]
+    if len(links) != 1 or re.fullmatch(r'<a href="reproduce\.zip(?:\?sha256=[0-9a-f]{64})?" download>', links[0]) is None:
+        raise ValueError("Expected exactly one reviewed reproduce.zip download anchor")
+    return source.replace(links[0], '<a href="reproduce.zip?sha256=' + checksum + '" download>', 1)
+
+
 def reproduction_archive(scripts, rfc, out):
     archive = out / "reproduce.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
@@ -372,7 +382,10 @@ def main():
         raise RuntimeError("Missing packaged ECharts dependency; use the complete scripts directory")
     shutil.copy2(vendor, args.out / vendor.name)
     scripts = Path(__file__).resolve().parent
-    reproduction_archive(scripts, args.rfc, args.out)
+    archive = reproduction_archive(scripts, args.rfc, args.out)
+    if args.transport_profile == "tcp":
+        index = args.out / "index.html"
+        index.write_bytes(version_zip_href(index.read_bytes().decode("utf-8"), hashlib.sha256(archive.read_bytes()).hexdigest()).encode("utf-8"))
     if args.operation_log:
         (args.out / "operations.jsonl").write_bytes(operation_ledger(args.operation_log, operation_cutoff, "report"))
     if args.raw_evidence:

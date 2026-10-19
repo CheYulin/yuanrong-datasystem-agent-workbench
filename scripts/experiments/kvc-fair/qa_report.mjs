@@ -26,7 +26,7 @@ const artifactCache=new Map();
 async function artifact(page,reference,{body=false}={}){
   const url=new URL(reference,base).href,key=url+'|'+body;
   if(!body&&artifactCache.has(url+'|true'))return artifactCache.get(url+'|true');
-  if(!artifactCache.has(key))artifactCache.set(key,(async()=>{const response=await page.request.get(url),bytes=body?await response.body():null;return {url,status:response.status(),ok:response.ok(),...(body?{text:bytes.toString('utf8'),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}: {})};})());
+  if(!artifactCache.has(key))artifactCache.set(key,(async()=>{const response=await page.request.get(url),bytes=body?await response.body():null;return {url,status:response.status(),ok:response.ok(),...(body?{text:bytes.toString('utf8'),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),contentLength:response.headers()['content-length']==null?null:Number(response.headers()['content-length'])}: {})};})());
   return artifactCache.get(key);
 }
 async function artifactHead(page,reference){
@@ -38,8 +38,18 @@ function compactTCPVerification(verification,fullEvidence){
   const keys=['schema_version','generated_utc','suite','protocol_evidence','passed','errors','checks','scope','execution'];
   return {summary_format:'kvc-tcp-verification-summary-v1',...Object.fromEntries(keys.map(key=>[key,verification[key]])),full_evidence:fullEvidence};
 }
+function versionedZIPLink(links){
+  const copies=links.filter(link=>/(?:^|\/)reproduce\.zip(?:[?#]|$)/i.test(link.href));
+  const match=copies.length===1&&copies[0].download&&/^reproduce\.zip\?sha256=([0-9a-f]{64})$/.exec(copies[0].href);
+  return match?{href:copies[0].href,sha256:match[1]}:null;
+}
+function auditVersionedZIP(reference,response,manifest){
+  const entries=manifest?.text?.split(/\r?\n/).map(line=>/^([0-9a-f]{64})  reproduce\.zip$/.exec(line)).filter(Boolean)||[];
+  return {pass:Boolean(reference&&response?.ok&&response.bytes>0&&(response.contentLength==null||response.contentLength===response.bytes)&&manifest?.ok&&entries.length===1&&response.sha256===reference.sha256&&response.sha256===entries[0][1]),
+    reference,status:response?.status??null,bytes:response?.bytes??null,contentLength:response?.contentLength??null,sha256:response?.sha256??null,manifestStatus:manifest?.status??null,manifestEntries:entries.length,manifestSHA256:entries[0]?.[1]??null};
+}
 function inspectTCPPresentation(){
-  const links=[...document.querySelectorAll('a[href]')].map(link=>({href:link.getAttribute('href'),text:link.textContent.trim()}));
+  const links=[...document.querySelectorAll('a[href]')].map(link=>({href:link.getAttribute('href'),text:link.textContent.trim(),download:link.hasAttribute('download')}));
   return {profile:window.KVC_DATA.transport_profile,title:document.title,
     hero:document.querySelector('.hero')?.textContent||'',
     quality:document.getElementById('quality')?.textContent||'',
@@ -58,7 +68,7 @@ function auditTCPPresentation(visible,data){
     'TCP-specific design and validation links are present':has('docs/tcp-plan.md')&&has('docs/tcp-validation.md'),
     'TCP hero and quality distinguish verified protocol rounds from performance cell failures':verifiedCounts&&visible.hero.includes(history)&&visible.quality.includes(history),
     'The separate native baseline remains linked':visible.links.some(link=>link.href==='../kvc-fair-20261020/index.html'&&link.text.includes('原生 SHM/TCP 基线')),
-    'TCP protocol verification and original evidence downloads are linked':has('tcp-verification.json')&&has('raw-evidence.tar.gz')&&has('operations.jsonl')&&has('reproduce.zip')&&has('SHA256SUMS')
+    'TCP protocol verification and original evidence downloads are linked':has('tcp-verification.json')&&has('raw-evidence.tar.gz')&&has('operations.jsonl')&&!!versionedZIPLink(visible.links)&&has('SHA256SUMS')
   };
 }
 function csvRecords(text){let quoted=false,count=0;for(let i=0;i<text.length;i++){if(text[i]==='"'){if(quoted&&text[i+1]==='"')i++;else quoted=!quoted;}else if(text[i]==='\n'&&!quoted)count++;}return count+(text.length&&!text.endsWith('\n')?1:0);}
@@ -112,11 +122,18 @@ try {
     const pageData=await page.evaluate(()=>window.KVC_DATA),downloadedData=await artifact(page,'data.json',{body:true}),payload=JSON.parse(downloadedData.text);
     check(state,'Downloaded data.json exactly matches the rendered payload',downloadedData.ok&&sameJSON(pageData,payload),{status:downloadedData.status,rows:payload.rows?.length});
     const tcp=expectedTransport==='tcp'||payload.transport_profile==='tcp';
+    let reproductionHref='reproduce.zip';
     if(expectedTransport&&expectedTransport!=='tcp')check(state,'Requested transport profile matches payload',payload.transport_profile===expectedTransport,{expected:expectedTransport,actual:payload.transport_profile});
     if(tcp){
       const presentation=await page.evaluate(inspectTCPPresentation);
       state.tcpPresentation=presentation;
       for(const [name,pass] of Object.entries(auditTCPPresentation(presentation,payload)))check(state,name,pass,presentation);
+      const zipReference=versionedZIPLink(presentation.links);
+      reproductionHref=zipReference?.href??null;
+      const zipped=zipReference?await artifact(page,zipReference.href,{body:true}):null;
+      const manifest=await artifact(page,'SHA256SUMS',{body:true});
+      const zipAudit=auditVersionedZIP(zipReference,zipped,manifest);
+      check(state,'Versioned ZIP download body matches its URL SHA256 and unique manifest entry',zipAudit.pass,zipAudit);
       const verification=await artifact(page,'tcp-verification.json',{body:true});
       let verified=null,verificationError=null;
       try{verified=JSON.parse(verification.text);}catch(error){verificationError=String(error);}
@@ -244,7 +261,7 @@ try {
     const csvFile=path.join(out,`${width}-summary.csv`);await download.saveAs(csvFile);
     const csv=await fs.readFile(csvFile,'utf8'),downloadAudit=auditCSV(csv,pageData.rows);check(state,'CSV download returns every actual primary row',csvRecords(csv)-1===initial.rows&&downloadAudit.pass,{suggestedFilename:download.suggestedFilename(),rows:csvRecords(csv)-1,expected:initial.rows,fieldAudit:downloadAudit});
     for(const name of ['data.json','reproduce.zip','SHA256SUMS','docs/build.md','docs/test-design.md','docs/validation.md','docs/script-design.md','analysis.md','analysis.json','timings.json','timings.csv','docs/timing.md']) {
-      const response=await artifact(page,name);result.links.push({viewport:width,kind:'artifact',name,status:response.status});check(state,`Artifact link ${name}`,response.ok,{status:response.status});
+      const reference=name==='reproduce.zip'?reproductionHref:name,response=reference?await artifact(page,reference):{ok:false,status:null};result.links.push({viewport:width,kind:'artifact',name,reference,status:response.status});check(state,`Artifact link ${name}`,response.ok,{status:response.status,reference});
     }
     await page.locator('#reset').click();
     const reset=await page.evaluate(()=>({operation:document.getElementById('operation').value,size:document.getElementById('size').value,metric:document.getElementById('metric').value,disabled:document.getElementById('size').disabled}));
