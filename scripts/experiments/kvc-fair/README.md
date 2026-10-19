@@ -4,7 +4,7 @@ Scope: the pinned 2026-10-20 DataSystem rc44, Mooncake release and LMCache relea
 
 ## Reproduce
 
-Prerequisites: SSH aliases for the experiment and publication hosts; Rocky Linux 9 x86_64, root cgroup v2 access, GCC11 and GCC Toolset15, CMake, Python3, git, curl, rsync, gzip/tar; at least 60GiB disk space and 32GiB available RAM. Product dependency installation is scripted and recorded. Existing unrelated workloads must be stopped or isolated before measurement.
+Prerequisites: SSH aliases for the experiment and publication hosts; Rocky Linux 9 x86_64, root cgroup v2 access, GCC11 and GCC Toolset15, CMake, Python3, git, curl, rsync, gzip/tar; ETCD v3.5.9 at `/usr/local/bin/etcd` (preinstalled binary dependency for DataSystem); at least 60GiB disk space and 32GiB available RAM. Product dependency installation is scripted and recorded. Existing unrelated workloads must be stopped or isolated before measurement.
 
 From this directory, run each action in order (long actions remain attached and return a nonzero status on failure):
 
@@ -14,12 +14,15 @@ python3 workflow.py build
 python3 workflow.py prepare
 python3 workflow.py smoke
 python3 workflow.py run
+python3 workflow.py restore
 python3 workflow.py collect
 python3 workflow.py report
 python3 workflow.py publish
 ```
 
-`stage` copies only scripts/locks, not source trees or caches. `build` pins and source-builds products sequentially, installing each product into its private venv; Mooncake bootstraps the shared CPython3.11.15. No product repository is pushed. `prepare` preserves only the exact inactive historical tmpfs directories in its allowlist before freeing them, and configures this experiment's cgroup. `smoke` performs real product data/EXIST checks in small windows; these numbers must never be used as ranked results. `run` executes the full fixed matrix. Resume uses the same `--suite`; valid complete cells are skipped, failed cells restart fresh services and retain previous JSON.
+`stage` copies only scripts/locks, not source trees or caches. `build` pins and source-builds products sequentially, installing each product into its private venv; Mooncake bootstraps the shared CPython3.11.15. No product repository is pushed. `prepare` preserves only the exact inactive historical tmpfs directories in its allowlist before freeing them, and configures this experiment's cgroup. `smoke` performs real product data/EXIST checks in small windows; these numbers must never be used as ranked results. `run` executes the full fixed matrix. Resume uses the same `--suite`; first archive the finished session with `prepare_resume.py` so native monitor and server logs retain each attempt. Valid complete cells are skipped; failed cells restart fresh services and retain previous JSON. Do not resume a running suite.
+
+`collect` first acquires the suite lock and requires empty experiment cgroups and an ended summary; it snapshots source-build logs and scripts, then copies the matrix plus environment and correctness-smoke timing evidence; `report` runs `collect_timings.py` before rendering. Override `--environment-root` and `--smoke-suite` when collecting an earlier recorded run. Local command walls are appended to `workflow-timings.jsonl`; keep that ledger for the retrospective. `restore` starts the troubleshooting service after all measurements.
 
 The downloaded ZIP carries `docs/`; when running from another layout pass `--rfc /absolute/path/to/rfc-topic`. Override `--local-output` for a different artifact root. Ports and cgroup identity are reserved for one experiment; the driver holds an exclusive lock. It deliberately does not support concurrent experiments on the same node.
 
@@ -45,3 +48,13 @@ The private archived reports are retained under `/home/cache/kvc-fair-20261020/e
 Three trials; concurrency2/8/16; 1KiB/64KiB/1MiB. Pure PUT inserts `min(2GiB,65536*size)` fresh bytes before a post-measure finish/validation barrier. GET and EXIST use64MiB of preloaded bytes, warmup3s, measurement20s. EXIST measures hits and misses separately at1KiB. Full bytes materialization and native completion acknowledgments are part of the API latency. PUT windows shorter than10s are labeled. Histogram percentiles use64buckets per power-of-two interval and expose upper/lower bounds.
 
 Eight physical NUMA0 cores each for all product services and all clients,12GiB cgroup each, swap disabled. Monitoring uses two NUMA1 cores. The comparison is native same-node RPC/SHM or TCP, with raw bytes adapter costs included; it does not represent a common network transport, GPU KV cache, cross-node RDMA, inference latency or fault recovery test.
+
+## LMCache helper: offline harness fixture
+
+`lmcache/fake_mechanics_backend.py` is a 553-byte, process-local dictionary fixture used by `lmcache/harness_correctness.py --kind fake`. It checks the common driver's counters, histogram merging, stage barriers and rejection of intentionally incorrect GET bytes. It requires no LMCache installation, server or network. Its QPS is test output only and must never be presented as DataSystem, Mooncake or LMCache performance. The summary explicitly records `rankable: false`.
+
+```bash
+python3 lmcache/harness_correctness.py --kind fake --output /tmp/kvc-fake-helper-check-20261020
+```
+
+Choose a new output directory for each check. The separate `--kind real` helper uses the existing `lmcache/adapter_lmcache.py` and requires prepared real services; it is not part of the offline fixture check. Both adapter paths are checked before the helper creates evidence.

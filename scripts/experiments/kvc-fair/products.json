@@ -12,7 +12,9 @@
         "--cgroup",
         "/sys/fs/cgroup/kvcfair20261020/server",
         "--run-dir",
-        "{run_dir}"
+        "{run_dir}",
+        "--task-root",
+        "/home/worktrees/kvc-fair-20261020"
       ],
       "stop": [
         "python3",
@@ -21,7 +23,9 @@
         "--run-dir",
         "{run_dir}",
         "--stop-timeout",
-        "2"
+        "2",
+        "--task-root",
+        "/home/worktrees/kvc-fair-20261020"
       ],
       "env": {
         "DATASYSTEM_CLIENT_LOG_DIR": "{server_logs}/client"
@@ -74,7 +78,9 @@
       ],
       "env": {
         "PYTHONPATH": "/home/worktrees/kvc-fair-20261020/lmcache/source",
-        "LOG_DIR": "{server_logs}"
+        "LOG_DIR": "{server_logs}",
+        "TASK_ROOT": "/home/worktrees/kvc-fair-20261020",
+        "LMCACHE_ROOT": "/home/worktrees/kvc-fair-20261020/lmcache"
       }
     }
   ]

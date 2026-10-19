@@ -69,7 +69,7 @@ bash build.sh
 - `summarize_build.py`：收集来源明确的构建/依赖墙钟、产物SHA256、版本、退出码、smoke和启动契约。
 - `smoke.py`：exists缺失、get缺失、1MiB put、exists命中、完整字节校验、重复同值put、删除、重插校验；不作为性能数据。
 
-正式基线：每个 PUT case 重启服务后写2GiB全新 key；GET/exists 固定预填256MiB，2/8/16客户端，统一 size/持续时间/轮数与根流程遥测。CPU、内存、磁盘指标由根流程统一采集，不在各产品独立采样循环里加入不同额外负载。
+正式基线：每个用例重启服务，依次执行 PUT→GET→EXIST。PUT 写入 `min(2 GiB, 65536 * value_size)` 的全新 key，1 KiB / 64 KiB / 1 MiB 分别为 64 MiB / 2 GiB / 2 GiB；GET 新增总 64 MiB 预置工作集，前序 PUT 与暖机数据保留为背景，EXIST 复用 GET key。2/8/16 客户端，统一 size/持续时间/轮数与根流程遥测。CPU、内存、磁盘指标由根流程统一采集，不在各产品独立采样循环里加入不同额外负载。
 
 ## 6. 当前验证证据
 

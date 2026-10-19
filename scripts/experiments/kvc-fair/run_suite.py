@@ -9,14 +9,131 @@ import json
 import os
 from pathlib import Path
 import random
+import shutil
 import signal
 import subprocess
+import tempfile
 import time
 import traceback
 
 
 def utc():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def plan_cells(args, products):
+    plan = []
+    for repeat in range(args.repeats):
+        order = list(products)
+        random.Random(20261020 + repeat).shuffle(order)
+        cells = list(itertools.product(args.sizes, args.concurrencies))
+        random.Random(20261020 + 100 + repeat).shuffle(cells)
+        for product in order:
+            for size, concurrency in cells:
+                plan.append((repeat, product, size, concurrency))
+    return plan
+
+
+def operations(args, size):
+    return ["put", "get"] + (["exist_hit", "exist_miss"] if size == min(args.sizes) else [])
+
+
+def measurement_parameters(args, product, repeat, size, concurrency, op, result_path):
+    total_bytes = min(2 << 30, size * 65536)
+    if args.smoke:
+        total_bytes = max(size * concurrency * 4, 1 << 20)
+    return {"adapter": product["adapter"], "config": product["config"], "op": op,
+            "size": size, "concurrency": concurrency, "duration": args.duration,
+            "warmup": args.warmup, "total_bytes": total_bytes,
+            "preload_bytes": 1 << 20 if args.smoke else 64 << 20,
+            "skip_preload": op.startswith("exist"),
+            "run_id": f"r{repeat}-s{size}-c{concurrency}", "out": str(result_path)}
+
+
+def provenance(args, products):
+    parameters = {k: str(v.resolve()) if isinstance(v, Path) else v for k, v in vars(args).items()}
+    files = {Path(__file__).resolve(), *(args.root / name for name in ["benchmark.py", "cgroup.py", "monitor.py"])}
+    helpers = {"mooncake": ["env.sh", "launch_master.sh", "peer.py", "process_identity.py"],
+               "lmcache": ["start_server.sh"]}
+    for product in products:
+        files.update(Path(product[key]).absolute() for key in ["adapter", "config", "python"])
+        for action in ["start", "stop"]:
+            command = product[action]
+            executable = shutil.which(command[0])
+            if executable:
+                files.add(Path(executable).absolute())
+            for token in command:
+                if "{" not in token and (Path(token).is_absolute() or token.endswith((".py", ".sh"))):
+                    candidate = Path(token).absolute()
+                    if candidate.is_file() or token.endswith((".py", ".sh")):
+                        files.add(candidate)
+        for name in helpers.get(product["name"], []):
+            files.add(args.root / product["name"] / name)
+    inventory = {}
+    for path in sorted(files):
+        if not path.is_file():
+            raise RuntimeError("Missing execution input for resume provenance: " + str(path))
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(8 << 20), b""):
+                digest.update(chunk)
+        inventory[str(path)] = {"resolved_path": str(path.resolve()), "sha256": digest.hexdigest(),
+                                "size": path.stat().st_size}
+    return {"schema_version": 1, "parameters": parameters, "products": products, "files": inventory}
+
+
+def write_json(path, value):
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".tmp-", delete=False) as stream:
+        pending = Path(stream.name)
+        try:
+            json.dump(value, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            pending.unlink(missing_ok=True)
+            raise
+    try:
+        pending.replace(path)
+    finally:
+        pending.unlink(missing_ok=True)
+
+
+def validate_resume(args, products, plan):
+    expected = provenance(args, products)
+    saved_path = args.output / "resume-provenance.json"
+    legacy_paths = [args.output / name for name in ["products.json", "parameters.json", "script-hashes.json",
+                    "plan.json", "summary.json", "events.jsonl", "resources"]]
+    if saved_path.exists():
+        saved = json.loads(saved_path.read_text())
+        if {k: v for k, v in saved.items() if k != "created_utc"} != expected:
+            raise RuntimeError("Resume provenance mismatch; preserve the original output and use a new suite directory")
+    elif any(p.exists() for p in legacy_paths) or any((args.output / "cells").glob("*/*.json")):
+        raise RuntimeError("Legacy suite has evidence but no resume-provenance.json; automatic resume is refused. "
+                           "Preserve the evidence and independently verify parameters and hashes with the original driver")
+    metadata = {"products.json": products,
+                "parameters.json": expected["parameters"],
+                "script-hashes.json": {str(p.relative_to(args.root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                                       for p in args.root.glob("*.py")},
+                "plan.json": [{"repeat": r, "product": p["name"], "size": s, "concurrency": c} for r, p, s, c in plan]}
+    for name, value in metadata.items():
+        path = args.output / name
+        if path.exists() and json.loads(path.read_text()) != value:
+            raise RuntimeError("Resume metadata mismatch: " + str(path) + "; original metadata was not replaced")
+    for repeat, product, size, concurrency in plan:
+        cell = args.output / "cells" / f"r{repeat}-{product['name']}-s{size}-c{concurrency}"
+        for op in operations(args, size):
+            path = cell / (op + ".json")
+            if path.exists():
+                raw = json.loads(path.read_text())
+                if raw.get("valid") and raw.get("parameters") != measurement_parameters(args, product, repeat, size, concurrency, op, path):
+                    raise RuntimeError("Valid result parameters do not match the requested workload: " + str(path))
+    if not saved_path.exists():
+        write_json(saved_path, dict(expected, created_utc=utc()))
+    for name, value in metadata.items():
+        path = args.output / name
+        if not path.exists():
+            write_json(path, value)
 
 
 def main():
@@ -33,15 +150,18 @@ def main():
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    lock = (args.root / "suite.lock").open("w")
+    args.root = args.root.resolve()
+    args.output = args.output.resolve()
+    args.manifest = args.manifest.resolve()
+    lock = (args.root / "suite.lock").open("a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     products = json.loads(args.manifest.read_text())["products"]
     if args.products:
         products = [p for p in products if p["name"] in args.products]
     if not products:
         raise RuntimeError("no product selected")
-    (args.output / "products.json").write_text(json.dumps(products, indent=2))
-    (args.output / "parameters.json").write_text(json.dumps({k: str(v) if isinstance(v, Path) else v for k,v in vars(args).items()}, indent=2))
+    plan = plan_cells(args, products)
+    validate_resume(args, products, plan)
     log = (args.output / "events.jsonl").open("a", buffering=1)
     def event(kind, **values):
         row = {"utc": utc(), "wall_ns": time.time_ns(), "mono_ns": time.monotonic_ns(), "event": kind, **values}
@@ -70,8 +190,6 @@ def main():
                 raise
         if proc.returncode:
             raise RuntimeError("command failed rc=" + str(proc.returncode) + ", log=" + str(path))
-    hashes = {str(p.relative_to(args.root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in args.root.glob("*.py")}
-    (args.output / "script-hashes.json").write_text(json.dumps(hashes, indent=2))
     monitor_cmd = ["python3", str(args.root / "cgroup.py"), "--group", "monitor", "exec", "--", "python3", str(args.root / "monitor.py"), "--out", str(args.output / "resources")]
     monitor_log = (args.output / "monitor.log").open("a")
     monitor = subprocess.Popen(monitor_cmd, stdout=monitor_log, stderr=subprocess.STDOUT)
@@ -84,21 +202,11 @@ def main():
     signal.signal(signal.SIGINT, interrupt)
     summary = {"started": utc(), "completed": [], "failed": []}
     try:
-        plan = []
-        for repeat in range(args.repeats):
-            order = list(products)
-            random.Random(20261020 + repeat).shuffle(order)
-            cells = list(itertools.product(args.sizes, args.concurrencies))
-            random.Random(20261020 + 100 + repeat).shuffle(cells)
-            for product in order:
-                for size, concurrency in cells:
-                    plan.append((repeat, product, size, concurrency))
-        (args.output / "plan.json").write_text(json.dumps([{"repeat": r,"product":p["name"],"size":s,"concurrency":c} for r,p,s,c in plan], indent=2))
         for number, (repeat, product, size, concurrency) in enumerate(plan):
             cell_id = f"r{repeat}-{product['name']}-s{size}-c{concurrency}"
             cell = args.output / "cells" / cell_id
             cell.mkdir(parents=True, exist_ok=True)
-            ops = ["put", "get"] + (["exist_hit", "exist_miss"] if size == min(args.sizes) else [])
+            ops = operations(args, size)
             if all((cell / (op + ".json")).exists() and json.loads((cell / (op + ".json")).read_text()).get("valid") for op in ops):
                 summary["completed"].append(cell_id)
                 event("resume_skip", cell=cell_id)
@@ -119,10 +227,9 @@ def main():
                     if result_path.exists():
                         old = result_path.with_name(op + ".previous." + str(time.time_ns()) + ".json")
                         result_path.rename(old)
-                    total_bytes = min(2 << 30, size * 65536)
-                    if args.smoke:
-                        total_bytes = max(size * concurrency * 4, 1 << 20)
-                    run_id = f"r{repeat}-s{size}-c{concurrency}"
+                    parameters = measurement_parameters(args, product, repeat, size, concurrency, op, result_path)
+                    total_bytes = parameters["total_bytes"]
+                    run_id = parameters["run_id"]
                     command = ["python3", str(args.root / "cgroup.py"), "--group", "client", "exec", "--", product["python"], str(args.root / "benchmark.py"), "--adapter", product["adapter"], "--config", product["config"], "--op", op, "--size", str(size), "--concurrency", str(concurrency), "--duration", str(args.duration), "--warmup", str(args.warmup), "--total-bytes", str(total_bytes), "--preload-bytes", str(1 << 20 if args.smoke else 64 << 20), "--run-id", run_id, "--out", str(result_path)]
                     if op.startswith("exist"):
                         command.append("--skip-preload")

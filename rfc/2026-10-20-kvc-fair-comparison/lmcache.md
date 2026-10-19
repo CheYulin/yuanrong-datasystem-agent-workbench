@@ -86,3 +86,11 @@ python3 lmcache/runtime.py stop
 正式容量配置也已执行启动和小数据正确性检查：两个 MP 服务各配置 4 GiB，六个逐字节 smoke 全部通过，`4gib-smoke.exit=0`。停止后 server 与 client cgroup 均为空。证据为 `.evidence/4gib-status-0.json`、`4gib-status-1.json`、`4gib-smoke.log`，以及 `.evidence/harness-correctness-real-1792427023282086654/`。状态检查包括 read/write locks 与 active sessions，不将构建期短程 QPS 当成正式性能数据。
 
 统一正式性能矩阵、容量淘汰、故障恢复和模型推理收益尚未由本段正确性证据验证。
+
+## 8. 正式执行器启动目录缺陷与修复
+
+正式执行器从三个产品目录的父目录启动时，首轮 LMCache 的 9 个单元在测量前启动失败。上游 CLI 捕获任意 `ImportError` 后统一打印“requires the full lmcache installation with CUDA extensions”，该文字不能证明缺少 CUDA。限定 CPU 33、NUMA 1 的纯 import 诊断复现了真实异常：`ModuleNotFoundError: No module named 'mooncake.engine'`。父目录下的实验 `mooncake/` 被 Python 当成可选 Mooncake namespace 包，而其中没有已安装的 `engine` 模块；上游只忽略缺少顶层 `mooncake` 的异常，因此该子模块异常继续向上传播。
+
+先前独立 smoke 的工作目录没有这个父目录，同一 CPU 构建和相同配置可以正常运行；客户端适配器已隔离导入路径，但服务启动脚本缺少相同工作目录约束。修复只在 `start_server.sh` 的 Python `exec` 前加入 `cd "$LMCACHE_ROOT"`，固定服务端导入环境，不修改上游源码、构建制品或其他产品。修复后的纯 import 诊断通过；另从原先的父目录调用启动包装器 `--help` 检查命令解析，未启动服务或运行压测。
+
+诊断证据独立保存在 `.evidence/server-cwd-import-before.log`、`server-cwd-import-after.log` 及 `server-cwd-wrapper-help.log`。9 个原始启动失败单元和日志保留，由主执行器后续重新安排，不使用缺失测量代替零吞吐，也不将工作目录修复标记为已经完成正式性能重测。

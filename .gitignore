@@ -36,3 +36,6 @@ datasystem/
 !/scripts/experiments/kvc-fair/datasystem/
 !/scripts/experiments/kvc-fair/datasystem/**
 dashboard/__pycache__/
+
+/scripts/experiments/kvc-fair/datasystem/**/__pycache__/
+/scripts/experiments/kvc-fair/datasystem/**/*.pyc

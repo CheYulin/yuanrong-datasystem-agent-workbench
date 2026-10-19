@@ -5,12 +5,16 @@ import bisect
 from collections import defaultdict
 import csv
 import datetime
+import gzip
 import hashlib
 import html
 import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
+import sys
+import tarfile
 import zipfile
 
 
@@ -26,6 +30,8 @@ def io_device(text, device):
 
 def reduce_samples(path, device):
     samples = []
+    manifest = path.with_name("monitor-manifest.json")
+    ticks = json.loads(manifest.read_text()).get("clk_tck", 100) if manifest.exists() else 100
     if not path.exists():
         return samples
     with path.open() as stream:
@@ -34,6 +40,10 @@ def reduce_samples(path, device):
             groups = raw["groups"]
             row = {"mono_ns": raw["mono_ns"], "wall_ms": raw["wall_ns"] // 1000000,
                    "sampling_ms": raw["sampling_ms"]}
+            host_cpu = (raw.get("host", {}).get("stat") or "").splitlines()
+            if host_cpu:
+                cpu = [int(v) for v in host_cpu[0].split()[1:9]]
+                row["host_busy_ticks"] = sum(cpu) - cpu[3] - cpu[4]
             for role in ["server", "client", "monitor"]:
                 group = groups.get(role, {})
                 cpu = group.get("cpu.stat") or {}
@@ -52,6 +62,10 @@ def reduce_samples(path, device):
                     for metric in ["cpu_usec", "read_bytes", "write_bytes"]:
                         current, previous = row[role].get(metric), samples[-1][role].get(metric)
                         row[role][metric + "_per_s"] = (current - previous) / dt if current is not None and previous is not None else None
+                if "host_busy_ticks" in row and "host_busy_ticks" in samples[-1]:
+                    row["host_cpu_cores"] = (row["host_busy_ticks"] - samples[-1]["host_busy_ticks"]) / ticks / dt
+                    used = sum((row[role].get("cpu_usec_per_s") or 0) / 1e6 for role in ["server", "client", "monitor"])
+                    row["other_cpu_cores_estimate"] = max(0, row["host_cpu_cores"] - used)
             samples.append(row)
     return samples
 
@@ -105,19 +119,40 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--rfc", type=Path, required=True)
     parser.add_argument("--device", default="253:2")
+    parser.add_argument("--timings", type=Path)
+    parser.add_argument("--raw-evidence", action="store_true", help="Package the finished suite's raw logs and metadata")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    verification_source = args.suite / "verification-final.json"
+    if verification_source.exists():
+        shutil.copy2(verification_source, args.out / verification_source.name)
     samples = reduce_samples(args.suite / "resources" / "samples.jsonl", args.device)
     rows = rows_from_results(args.suite, samples)
     summary = json.loads((args.suite / "summary.json").read_text()) if (args.suite / "summary.json").exists() else {"running": True}
+    history = []
+    if (args.suite / "events.jsonl").exists():
+        for line in (args.suite / "events.jsonl").read_text().splitlines():
+            event = json.loads(line)
+            if event.get("event") in {"cell_failed", "suite_fatal", "suite_interrupted", "stop_failed"}:
+                history.append(event)
     plan = json.loads((args.suite / "plan.json").read_text()) if (args.suite / "plan.json").exists() else []
     status = "异常中断" if summary.get("fatal") else "矩阵结束（含失败）" if summary.get("ended") and summary.get("failed") else "矩阵完成" if summary.get("ended") and len(summary.get("completed", [])) == len(plan) and plan else "测量进行中"
+    if status == "矩阵完成":
+        expected = sum(4 if p["size"] == min(x["size"] for x in plan) else 2 for p in plan)
+        if len(rows) != expected or not all(row["valid"] for row in rows):
+            raise RuntimeError("Completed suite is missing valid interface evidence")
     builds = []
     for path in (args.suite / "builds").glob("*.json"):
         builds.append(json.loads(path.read_text()))
     valid = [r for r in rows if r["valid"]]
+    timing_source = args.timings or args.suite.parent / "timings" / "timings.json"
+    timings = json.loads(timing_source.read_text()) if timing_source.exists() else {"steps": [], "issues": ["Timing evidence not supplied"]}
     payload = {"generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "rows": rows,
-               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "io_device": args.device}
+               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history}
+    (args.out / "timings.json").write_text(json.dumps(timings, ensure_ascii=False, indent=2))
+    timing_csv = timing_source.with_suffix(".csv")
+    if timing_csv.exists():
+        shutil.copy2(timing_csv, args.out / "timings.csv")
     (args.out / "data.json").write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     (args.out / "data.js").write_text("window.KVC_DATA=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/") + ";\n")
     fields = sorted(set().union(*(row.keys() for row in rows))) if rows else ["product", "operation", "valid"]
@@ -136,7 +171,9 @@ def main():
     template = Path(__file__).with_name("report-template.html").read_text()
     rendered = template.replace("{{VALID}}", str(len(valid))).replace("{{RECORDED}}", str(len(rows))).replace("{{FAILED}}", str(len(rows) - len(valid)))
     rendered = rendered.replace("{{STATUS}}", status)
-    rendered = rendered.replace("{{CELLS}}", f"{len(summary.get('completed', []))}/{len(plan)} 用例完成 · {len(summary.get('failed', []))} 用例失败")
+    rendered = rendered.replace("{{VERIFICATION_LINK}}", '<a href="verification-final.json">最终完整性校验记录 ↗</a>' if verification_source.exists() else '<span>完整性校验待矩阵结束后执行</span>')
+    rendered = rendered.replace("{{CELLS}}", f"{len(summary.get('completed', []))}/{len(plan)} 用例完成 · {len(summary.get('failed', []))} 用例待补跑 · 历史失败 {len(history)} 次")
+    rendered = rendered.replace("{{RAW_EVIDENCE}}", '<a href="raw-evidence.tar.gz" download>原始监控、运行日志与会话证据</a>' if args.raw_evidence else '')
     build_rows = ""
     for b in builds:
         build_rows += "<tr>" + "".join("<td>" + html.escape(str(b.get(k, "待采集"))) + "</td>" for k in ["product", "tag", "sha", "python", "compiler", "build_exit", "smoke_exit"]) + "</tr>"
@@ -153,10 +190,26 @@ def main():
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
         for path in sorted(scripts.rglob("*")):
             relative = path.relative_to(scripts)
+            if len(relative.parts) > 1 and relative.parts[0] not in {"datasystem", "mooncake", "lmcache"}:
+                continue
             if path.is_file() and not any(part.startswith(".") or part in {"source","evidence","__pycache__","venv","venv311"} for part in relative.parts) and path.suffix in {".py",".sh",".mjs",".js",".css",".html",".lock",".md",".json"}:
                 zipped.write(path, "kvc-fair/" + str(relative))
         for path in sorted(args.rfc.glob("*.md")):
             zipped.write(path, "kvc-fair/docs/" + path.name)
+    if args.raw_evidence:
+        if not summary.get("ended"):
+            raise RuntimeError("Raw evidence packaging requires a stopped suite")
+        with tarfile.open(args.out / "raw-evidence.tar.gz", "w:gz", compresslevel=6) as archive:
+            for path in sorted(args.suite.rglob("*")):
+                if path.is_symlink():
+                    raise RuntimeError("Unexpected symlink in raw evidence: " + str(path))
+                if path.is_file():
+                    archive.add(path, arcname=str(Path(args.suite.name) / path.relative_to(args.suite)), recursive=False)
+    subprocess.run([sys.executable, str(Path(__file__).with_name("analyze_results.py")),
+                    "--data", str(args.out / "data.json"), "--out", str(args.out)], check=True)
+    for path in sorted(args.out.iterdir()):
+        if path.is_file() and path.suffix in {".html", ".js", ".css", ".json", ".csv", ".md"}:
+            Path(str(path) + ".gz").write_bytes(gzip.compress(path.read_bytes(), mtime=0))
     hashes = {}
     for path in sorted(args.out.rglob("*")):
         if path.is_file() and path.name != "SHA256SUMS":

@@ -9,6 +9,7 @@ L1_GIB=${L1_GIB:-4}
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export PYTHONHASHSEED=0 LMCACHE_LOG_LEVEL=ERROR
 export LMCACHE_TRACK_USAGE=false
+cd "$LMCACHE_ROOT"
 exec "$LMCACHE_ROOT/venv311/bin/python" -m lmcache.cli.main server \
   --host 127.0.0.1 --port "$PORT" \
   --http-host 127.0.0.1 --http-port "$HTTP_PORT" \

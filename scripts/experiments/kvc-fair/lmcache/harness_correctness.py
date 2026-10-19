@@ -14,12 +14,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kind", choices=["fake", "real"], required=True)
     parser.add_argument("--concurrencies", nargs="+", type=int, default=[2, 8])
+    parser.add_argument("--output", type=Path, help="new local evidence directory; fake results are never product scores")
     args = parser.parse_args()
-    output = ROOT / ".evidence" / (f"harness-correctness-{args.kind}-{time.time_ns()}")
+    adapter = ROOT / ("fake_mechanics_backend.py" if args.kind == "fake" else "adapter_lmcache.py")
+    for required in (ROOT.parent / "benchmark.py", adapter):
+        if not required.is_file():
+            parser.error(f"Required helper file is missing: {required}")
+    output = args.output or ROOT / ".evidence" / (f"harness-correctness-{args.kind}-{time.time_ns()}")
     output.mkdir(parents=True)
     config = output / "config.json"
     config.write_text("{}")
-    adapter = ROOT / ("fake_mechanics_backend.py" if args.kind == "fake" else "adapter_lmcache.py")
     rows = []
     cases = [(1024, 2)] if args.kind == "fake" else [(s, c) for c in args.concurrencies for s in (1024, 65536, 1048576)]
     for size, concurrency in cases:
@@ -48,7 +52,7 @@ def main():
             completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=30)
         result = json.loads(result_path.read_text())
         assert completed.returncode != 0 and not result["valid"] and "mismatch" in result["fatal"]
-    summary = {"purpose": "harness correctness only, not performance comparison", "passed": True, "cases": rows}
+    summary = {"purpose": "harness correctness only, not performance comparison", "kind": args.kind, "rankable": False, "passed": True, "cases": rows}
     (output / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps({"passed": True, "cases": len(rows), "output": str(output)}))
 

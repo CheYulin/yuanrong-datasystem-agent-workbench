@@ -11,8 +11,12 @@ Status: In-Progress
 
 ## 2. 构建与真实产品 smoke
 
-LMCache v0.5.6 CPU 原生模块已完成源码构建并成功导入。两个小容量 MP Server 的六项数据 smoke（两服务 × 1 KiB / 64 KiB / 1 MiB）通过精确 bytes、GET miss、EXIST hit/miss、重复 GET 与同步 PUT 验证；原始日志见分产品文档。公共驱动集成、跨客户端可见性、其他产品构建和正式压力矩阵仍在进行。
+LMCache v0.5.6 CPU 原生模块已完成源码构建并成功导入。两个小容量 MP Server 的六项数据 smoke（两服务 × 1 KiB / 64 KiB / 1 MiB）通过精确 bytes、GET miss、EXIST hit/miss、重复 GET 与同步 PUT 验证；原始日志见分产品文档。三产品源码构建与原生数据 smoke 均已通过；公共驱动真实产品检查通过 DataSystem 8/8、Mooncake 8/8、LMCache 24/24，LMCache 另有 6 项双 4 GiB 原生检查。正式压力矩阵正在进行。
 
 ## 3. 正式结果
 
-尚未开始正式性能测量，不能由构建或 smoke 推断任何吞吐、P99、CPU 效率排名。正式结果由 `run_suite.py` 输出逐用例 JSON 和资源序列，完成后生成本节与网页报告。
+正式矩阵 2026-10-20 00:58:56（北京时间）开始。首轮 LMCache 在 task root 工作目录启动时受到同名 Mooncake 目录的 Python namespace 干扰，9 个用例在测量前退出；已固定启动 wrapper 工作目录，不改变产品制品与测试热路径，将保留原始启动日志并补跑。当前不预填最终排名。正式结果由 `run_suite.py` 输出逐用例 JSON 和资源序列，完成后生成本节与网页报告。
+
+## 4. 干扰操作与补跑策略
+
+两次中途取证同步记录在本地 operation-timings.jsonl：17:13:35.880862 UTC 开始、39.244156 秒；17:42:22.708883 UTC 开始、26.281186 秒，后者已主动终止。大批量日志读取可能引入后台 I/O，因此不假定其无影响。`identify_interference.py` 以 UTC 起止及前后 2 秒缓冲识别相交的整个用例生命周期；首轮结束后先归档原始记录，再重跑这些用例。被替换的成功结果保持原字节与 valid 字段，单列排除原因；不把它们伪记为接口错误。最终报告仅使用补跑后标准命名结果。此后完整取证只在所有测量停止后进行。

@@ -65,7 +65,7 @@ def register_metadata(text, key, value):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--site", type=Path, default=Path("/var/www/html"))
-    parser.add_argument("--report", default="benchmarks/kvc-fair-20261020")
+    parser.add_argument("--report", default="perf/kvc-fair-20261020")
     args = parser.parse_args()
     site = args.site.resolve()
     report = (site / args.report).resolve()
