@@ -168,10 +168,14 @@ LMCache 的 TCP wrapper 使用 `--shm-name '' --no-l1-use-lazy` 与原生 CPU MP
 
 | 脚本 | 验收职责与边界 |
 | --- | --- |
-| `qa_report.mjs` | 1440/900/390 三视口、ECharts 筛选/resize、216 主结果和 9 专项的原 JSON 绑定、TCP 专属标签与证明；原生报告 HTML 的 HEAD 无长度时 GET 小页面并核对固定原生标题，原始大 tar 仍仅 HEAD 检查下载性 |
-| `refresh_delivery.py` | 默认预览，`--apply` 时先验现有完整 SHA 清单，只刷新 docs、操作 ledger 和复现 ZIP；本轮 254 个核心文件的内容、gzip 头及权限逐项保持不变，不重新生成图或测量数据 |
+| `qa_report.mjs` | 1440/900/390 三视口、ECharts 筛选/resize、216 主结果和 9 专项的原 JSON 绑定、TCP 专属标签与证明；原生报告 HTML 的 HEAD 无长度时 GET 小页面并核对固定原生标题，原始大 tar 仍仅 HEAD 检查下载性；ZIP 则读取页面实际带 SHA 的小文件链接，核对下载内容、URL 与清单三方 SHA 一致 |
+| `refresh_delivery.py` | 默认预览，`--apply` 时先验现有完整 SHA 清单，只刷新 docs、操作 ledger 和复现 ZIP，默认保持全部 254 核心文件不变；显式 `--version-download-link` 仅允许 HTML 唯一 ZIP href 及对应 mtime=0 gzip 变化，其余 252 核心内容与权限冻结，不重新生成图或测量数据 |
 | `commit_publication.py` | 先预览再 `--apply`，临时 Git index 只纳入本报告与自己的首页/metadata 条目，保全网站原有工作区改动；拒绝大于 20 MiB 的提交文件，原始 tar 留在网站而不提交 Git |
 
 `reproduce.zip` 的根目录为 `kvc-fair/`，其中 `docs/` 含本轮文档，脚本通过相对 import 使用；实际清洁解压后验证 CRC、安全唯一文件路径、Python 编译、CLI 帮助、shell 语法及 74 项离线工具测试。最终仅更新文档或验收脚本时，对照已测试脚本逐项 SHA，并单列变化脚本自己的实际验收证据；不能把旧 ZIP 测试冒充新脚本测试。
 
 页面核心通过验收后，后续公开 QA、发布和文档刷新耗时进入操作 ledger；其首行明确快照截止点，自身及之后命令没有伪造持续时间。公开 QA 的规则误判和被主动停止的尝试保存原脚本、JSON/截图及退出记录，不改写为成功，也不计入正式接口失败或五轮协议预检失败。
+
+收尾实测发现，目标机文件和摘要已更新时，公开 `reproduce.zip` 仍可能返回带四小时缓存的旧版本。因此 TCP 首次报告在 ZIP 完成后写入 `reproduce.zip?sha256=<实际内容SHA>`，交付刷新使用显式版本选项同步该链接。受控 HTML 从旧字节推导，只替换唯一严格格式的下载 anchor；stage 对两项受控文件使用独立副本和备份，其余 core 保持 hardlink。提交前逐字节验证唯一允许的 HTML/gzip 结果，失败则回滚，不以“允许改HTML”为由放开其他页面修改。
+
+`test_versioned_delivery.py` 使用本地临时交付目录验证默认冻结、严格链接、篡改拒绝、stage 与原目录隔离、意外正文变化拒绝以及提交失败回滚；它不访问网站或启动产品。实际公开下载仍须读取页面链接并核内容 SHA，不能只检查文件返回200或目标机本地摘要。
