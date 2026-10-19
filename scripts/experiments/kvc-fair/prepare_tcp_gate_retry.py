@@ -11,7 +11,7 @@ import time
 
 from profile_put import drain
 
-ALLOWED = {"tcp_stage.py", "tcp_protocol_gate.py", "tcp_probe_ds_sizes.py"}
+ALLOWED = {"tcp_stage.py", "tcp_protocol_gate.py", "tcp_probe_ds_sizes.py", "mooncake/launch_master.sh"}
 
 
 def digest(path):
@@ -83,6 +83,7 @@ def run(args):
         files = inventory(protocol)
         changes = []
         committed = []
+        permissions = []
         try:
             for name in sorted(ALLOWED):
                 source = bundle / name
@@ -98,12 +99,24 @@ def run(args):
                 changes.append({"relative_path": name, "before_sha256": expected[name], "after_sha256": after,
                                 "before_file": str((history / "before" / name).relative_to(suite)),
                                 "after_file": str((history / "after" / name).relative_to(suite))})
-            if not changes:
+            launcher_name = "mooncake/launch_master.sh"
+            launcher = root / launcher_name
+            if not launcher.is_file() or launcher.is_symlink():
+                raise RuntimeError("Staged Mooncake launcher must be a regular file")
+            launcher_before = launcher.stat().st_mode & 0o777
+            launcher_after = launcher_before | 0o111
+            launcher_change = next((item for item in changes if item["relative_path"] == launcher_name), None)
+            if launcher_before != launcher_after or launcher_change:
+                permissions.append({"relative_path": launcher_name,
+                                    "sha256": launcher_change["after_sha256"] if launcher_change else digest(launcher),
+                                    "before_mode": launcher_before, "after_mode": launcher_after,
+                                    "reason": "Preserve executable deployment mode after copying the launcher; content changes are audited separately."})
+            if not changes and launcher_before == launcher_after:
                 raise RuntimeError("No reviewed helper corrections to apply")
             revision = {"number": number, "start_wall_ns": started_wall, "formal_started": False,
                         "guard": guard, "protocol_archive": str(destination.relative_to(suite)),
-                        "protocol_files": files, "changes": changes,
-                        "reason": "The pinned Python SDK omits the assumed transportType field. Use observed TCP payload and actual GET materialization; preserve the failed assertion and harden preflight guards. No performance driver, native product, adapter or workload/config changes."}
+                        "protocol_files": files, "changes": changes, "deployment_permissions": permissions,
+                        "reason": "Preserve terminal failed preflight evidence and apply reviewed diagnostic or launcher lifecycle corrections before measurement. No performance driver, native product, adapter or workload/config changes."}
             (history / "operator").mkdir(parents=True, exist_ok=True)
             shutil.copy2(__file__, history / "operator" / Path(__file__).name)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +127,8 @@ def run(args):
                 shutil.copy2(history / "after" / name, pending)
                 committed.append(name)
                 os.replace(pending, root / name)
+            for permission in permissions:
+                (root / permission["relative_path"]).chmod(permission["after_mode"])
             revision.update(end_wall_ns=time.time_ns(), duration_s=(time.monotonic_ns()-started_mono)/1e9)
             audit["revisions"].append(revision)
             write_json(audit_path, audit)
@@ -124,6 +139,8 @@ def run(args):
                 raise
             for name in committed:
                 shutil.copy2(history / "before" / name, root / name)
+            for permission in permissions:
+                (root / permission["relative_path"]).chmod(permission["before_mode"])
             if destination.exists() and not protocol.exists():
                 destination.rename(protocol)
             failed = suite / "failed-preflight-history" / (label + "-" + str(time.time_ns()))

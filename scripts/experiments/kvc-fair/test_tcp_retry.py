@@ -43,7 +43,11 @@ class RetryTests(unittest.TestCase):
             path.write_text("# original fixture " + name + "\n")
             inputs[name] = {"sha256": checksum(path), "bytes": path.stat().st_size}
         for name in retry.ALLOWED:
-            (self.bundle / name).write_text("# corrected diagnostic fixture " + name + "\n")
+            source = self.bundle / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("# corrected diagnostic fixture " + name + "\n")
+            source.chmod(0o644)
+        (self.root / "mooncake/launch_master.sh").chmod(0o755)
         stage = {"profile": "tcp", "root": str(self.root), "inputs": inputs}
         encoded = json.dumps(stage, indent=2) + "\n"
         (self.root / "tcp-stage.json").write_text(encoded)
@@ -52,6 +56,7 @@ class RetryTests(unittest.TestCase):
         self.args = argparse.Namespace(root=self.root, bundle=self.bundle, cgroup=self.cgroup)
         self.original_core = self.snapshot([*self.core, "tcp-stage.json", "formal-tcp-001/tcp-stage.json"])
         self.original_helpers = self.snapshot(retry.ALLOWED)
+        self.original_modes = {name: (self.root / name).stat().st_mode & 0o777 for name in retry.ALLOWED}
 
     def snapshot(self, names):
         return {name: (self.root / name).read_bytes() for name in names}
@@ -69,12 +74,14 @@ class RetryTests(unittest.TestCase):
     def assert_old_state(self):
         self.assert_core_unchanged()
         self.assertEqual(self.snapshot(retry.ALLOWED), self.original_helpers)
+        self.assertEqual({name: (self.root / name).stat().st_mode & 0o777 for name in retry.ALLOWED}, self.original_modes)
         self.assertTrue((self.protocol / "summary.json").is_file())
         self.assertFalse((self.suite / "preflight-changes.json").exists())
 
     def assert_audit_consistent(self):
         audit = json.loads((self.suite / "preflight-changes.json").read_text())
         expected = {name: row["sha256"] for name, row in json.loads((self.suite / "tcp-stage.json").read_text())["inputs"].items()}
+        final_modes = {}
         for revision in audit["revisions"]:
             archived = self.suite / revision["protocol_archive"]
             self.assertTrue(archived.is_dir())
@@ -90,8 +97,16 @@ class RetryTests(unittest.TestCase):
                 for kind in ["before", "after"]:
                     self.assertEqual(checksum(self.suite / change[kind + "_file"]), change[kind + "_sha256"])
                 expected[name] = change["after_sha256"]
+            for permission in revision.get("deployment_permissions", []):
+                name = permission["relative_path"]
+                self.assertEqual(name, "mooncake/launch_master.sh")
+                self.assertEqual(permission["sha256"], expected[name])
+                self.assertEqual(permission["after_mode"], permission["before_mode"] | 0o111)
+                final_modes[name] = permission["after_mode"]
         for name, expected_hash in expected.items():
             self.assertEqual(checksum(self.root / name), expected_hash)
+        for name, mode in final_modes.items():
+            self.assertEqual((self.root / name).stat().st_mode & 0o777, mode)
         self.assert_core_unchanged()
         return audit
 
@@ -193,6 +208,85 @@ class RetryTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             retry.run(self.args)
         self.assert_old_state()
+
+    def identical_bundle(self):
+        for name in retry.ALLOWED:
+            (self.bundle / name).write_bytes((self.root / name).read_bytes())
+
+    def test_changed_launcher_source_644_deploys_755_and_records_final_sha(self):
+        self.identical_bundle()
+        name = "mooncake/launch_master.sh"
+        launcher = self.root / name
+        source = self.bundle / name
+        source.write_text("#!/bin/sh\n# corrected direct ELF launcher fixture\n")
+        source.chmod(0o644)
+        result = retry.run(self.args)
+        self.assertEqual(launcher.read_bytes(), source.read_bytes())
+        self.assertEqual(launcher.stat().st_mode & 0o777, 0o755)
+        self.assertEqual({change["relative_path"] for change in result["updated_helpers"]}, {name})
+        audit = self.assert_audit_consistent()
+        permission = audit["revisions"][0]["deployment_permissions"][0]
+        self.assertEqual(permission["before_mode"], 0o755)
+        self.assertEqual(permission["after_mode"], 0o755)
+        self.assertEqual(permission["sha256"], checksum(source))
+        snapshot = self.suite / audit["revisions"][0]["changes"][0]["after_file"]
+        self.assertEqual(snapshot.stat().st_mode & 0o777, 0o644)
+
+    def permission_only(self, original_mode):
+        self.identical_bundle()
+        name = "mooncake/launch_master.sh"
+        launcher = self.root / name
+        launcher.chmod(original_mode)
+        original_sha = checksum(launcher)
+        result = retry.run(self.args)
+        self.assertEqual(result["updated_helpers"], [])
+        self.assertEqual(checksum(launcher), original_sha)
+        self.assertEqual(launcher.stat().st_mode & 0o777, original_mode | 0o111)
+        audit = self.assert_audit_consistent()
+        revision = audit["revisions"][0]
+        self.assertEqual(revision["changes"], [])
+        self.assertEqual(revision["deployment_permissions"][0]["before_mode"], original_mode)
+        self.assertEqual(revision["deployment_permissions"][0]["after_mode"], original_mode | 0o111)
+        self.assertEqual(revision["deployment_permissions"][0]["sha256"], original_sha)
+
+    def test_permissions_only_644_same_sha_allowed_and_deploys_755(self):
+        self.permission_only(0o644)
+
+    def test_permissions_only_750_same_sha_allowed_and_deploys_755(self):
+        self.permission_only(0o750)
+
+    def test_noop_mode_777_refused_without_touching_failed_gate(self):
+        self.identical_bundle()
+        name = "mooncake/launch_master.sh"
+        (self.root / name).chmod(0o777)
+        self.original_modes[name] = 0o777
+        with self.assertRaises(RuntimeError):
+            retry.run(self.args)
+        self.assert_old_state()
+
+    def test_permissions_only_failure_restores_original_mode_and_bytes(self):
+        self.identical_bundle()
+        name = "mooncake/launch_master.sh"
+        (self.root / name).chmod(0o644)
+        self.original_modes[name] = 0o644
+        with patch.object(retry, "write_json", side_effect=OSError("fixture audit failure after chmod")):
+            with self.assertRaises(OSError):
+                retry.run(self.args)
+        self.assert_old_state()
+        retry.run(self.args)
+        self.assertEqual((self.root / name).stat().st_mode & 0o777, 0o755)
+        self.assert_audit_consistent()
+
+    def test_launcher_content_and_permissions_rollback_preserves_original_mode(self):
+        name = "mooncake/launch_master.sh"
+        launcher = self.root / name
+        launcher.chmod(0o750)
+        self.original_modes[name] = 0o750
+        with patch.object(retry, "write_json", side_effect=OSError("fixture audit failure after install and chmod")):
+            with self.assertRaises(OSError):
+                retry.run(self.args)
+        self.assert_old_state()
+        self.assertEqual(launcher.stat().st_mode & 0o777, 0o750)
 
     def test_existing_snapshot_tamper_refuses_next_revision(self):
         retry.run(self.args)

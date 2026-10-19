@@ -33,6 +33,7 @@ def main():
         if args.action == "retry-probe":
             bundle = "/home/cache/kvc-fair-20261020/tcp-script-bundle"
             run(["scp", *(HERE / name for name in ["tcp_stage.py", "tcp_protocol_gate.py", "tcp_probe_ds_sizes.py", "prepare_tcp_gate_retry.py"]), args.target+":"+bundle+"/"])
+            run(["scp", HERE / "mooncake/launch_master.sh", args.target+":"+bundle+"/mooncake/launch_master.sh"])
             ssh(["python3", bundle+"/prepare_tcp_gate_retry.py", "--root", args.root, "--bundle", bundle])
         ssh(["python3", args.root+"/tcp_protocol_gate.py", "--root", args.root, "--out", args.root+"/protocol-gate-001"])
     elif args.action == "prepare":

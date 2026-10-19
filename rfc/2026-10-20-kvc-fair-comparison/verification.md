@@ -46,3 +46,11 @@
 ## 3. 最终页面与交付验收
 
 完整216条+九格真实profile本地严格验收369/369通过（1440/900/390 px），225/225原始结果绑定、9×3资源指标×3视口共81项逐点校验通过，另有当前筛选最大重复跨度24/24通过。最后视觉调整另以三视口及1440→390实际resize检查108个散点与各自柱中心对齐，最大误差2.84e-14px，重绘随后稳定，无JS错误或页面横向溢出。公开严格369/369、重复跨度24/24及108个柱点几何/实际resize检查通过；公开JS/data/CSS/CSV字节与本地源一致，页面无JS例外或必需网络失败。共享auth/status=200、comments=200、受保护admin/pages=401单列为可选功能。站点统一HTML注入/共享资源query改写另留原始差异，不把传输HTML冒充源字节相同。公开完整验收耗时143.474242s，rc=0。产品C++ UT/ST、故障恢复和推理性能测试未运行：本任务未改产品逻辑，验证范围为锁定发布版本的实际接口矩阵，不能用本任务harness替代这些测试。
+
+## 4. 统一 TCP 实验预检阶段自检
+
+此节为追加实验，不改写上面的原生基线。DataSystem 六组逐操作 TCP 证据已通过；三产品两端点真实协议门禁均通过，47.383406466s；正式性能矩阵仍未完成。所有失败门禁原字节、修订 before/after SHA、独立操作耗时与权限修正保留。
+
+实际执行 `python3 -m unittest -v test_tcp_workflow.py test_tcp_retry.py`：61/61，通过耗时13.034s；覆盖锁、空 cgroup、原始档案、核心输入拒绝、复制权限恢复、仅权限事务、失败回滚及中断窗口。`python3 -m compileall -q scripts/experiments/kvc-fair`、`node --check scripts/experiments/kvc-fair/report.js`、`git diff --check` 通过。DataSystem v3 raw parser 的23项自检通过，独立 verifier 补充16项临时传输端点/权限审计 fixtures 通过。
+
+热路径保持共同 benchmark 和三个适配器冻结；修订仅涉及预检观测及 Mooncake 同一已构建 ELF 的启动与执行位。严格 PID/start_ticks/pidfd 停止器未放宽。新的 cgroup 与全局 flock 继续约束并发，权限事务的提交点/回滚通过负测。原始 stage 不覆盖；失败预检不充当产品接口错误或有效性能结果。产品源码及构建/测试路径未改变，`.repo_context` 无需更新。产品故障恢复、C++ UT/ST 和推理性能未测试。

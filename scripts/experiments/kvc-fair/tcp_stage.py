@@ -64,6 +64,8 @@ def stage(args):
             for path in sorted((bundle / product).glob("*")):
                 if path.is_file() and path.suffix in {".py", ".sh", ".json", ".lock", ".md"}:
                     shutil.copy2(path, target / path.name)
+                    if path.suffix == ".sh":
+                        (target / path.name).chmod(path.stat().st_mode & 0o777 | 0o111)
         links = {"datasystem": "datasystem", "mooncake/source": "mooncake/source",
                  "mooncake/deps": "mooncake/deps", "mooncake/venv": "mooncake/venv",
                  "mooncake/wheels": "mooncake/wheels",

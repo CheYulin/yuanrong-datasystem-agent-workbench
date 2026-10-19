@@ -36,8 +36,18 @@ sequenceDiagram
 
 先在两个服务上分别进行 fresh PUT、GET 精确内容和 EXIST hit/miss 检查，使用独立 strace 记录实际 TCP fd 的数据收发和源码选择证据。正式压测前停止协议观察，重新启动空服务；不把 strace 的耗时或结果加入吞吐统计。
 
+已执行的预检暴露了两类工具边界，后续门禁按实际公开接口处理：DataSystem Python pybind 的 access 记录没有 `transportType` 字段，且小量 access 日志在 SDK 进程退出前可能尚未刷出；因此由父进程在 SDK 正常退出后校验原始记录。PUT/GET 分别要求操作窗口内真实 TCP socket 成功返回字节数不小于载荷、出现该 fresh key 派生的独特载荷前缀，GET 另外要求同 key、同尺寸的实际 TCP Materialize 日志和完整 bytes。源配置、进程身份、共享映射与 FD 快照一并保留；单有配置或 transport hint 不能满足门禁。
+
+DataSystem routed mode 的客户端绑定端点只表示接入端点，`REQUIRED_SAME_NODE` 不保证对象存储在该绑定 Worker。两端点分别初始化并完成探测，socket 证据只允许流向配置内的两个 Worker，另记录真实载荷端点，不能把客户端 index 当成实际存储 Worker 的证明。三尺寸、两接入端点的六组完整探测已在修订后的 v3 工具中多次通过；这不代替三产品整体协议门禁。
+
+启动和清理同样是门禁的一部分。Mooncake launcher 的可执行位可能在部署复制后丢失；已有 venv console 入口还可能经 `execv` 变成旧目录下的 `argv[0]`，使严格停止器拒绝身份不匹配的进程。处理方式是在复制完成后核对/设置执行位，使用能保留本轮启动身份的入口，并继续保留 PID、start ticks、exe、cgroup 检查。不能为了完成测试而放宽停止器的身份校验；已发生的关联旧 master 恢复操作单独保存核对与终止凭据，见 tcp-validation.md。
+
 正式矩阵保持三尺寸（1 KiB/64 KiB/1 MiB）、三并发（2/8/16）、三次重复、相同数据量/种子/窗口/CPU/内存/NUMA 配额，共 81 cell、216 接口结果。监控继续使用 cgroup、dstat、iostat、mpstat、pidstat、perf。短 PUT 再以相同九格资源专项补充。预置、校验和 P99/QPS 口径沿用 test-design.md 的精确定义；两个协议 profile 的结果分别统计。
 
 ## 4. 交付与恢复
 
 继续逐阶段记录 UTC、monotonic duration 和退出状态，并提交阶段成果。新报告保留编号章节、左侧导航、ECharts、居中 caption、全部文档与复现 ZIP，明确链接原生基线和 TCP 基线。完成后核验全部结果、资源覆盖、实际 TCP 证据、浏览器与文件摘要，再恢复本阶段之前活动的服务。原有源码、归档和基线报告不清理。
+
+失败预检、取证、修复、复制和恢复均属于过程耗时，须展示实际开始/结束、单调时钟墙钟与退出状态，保留每次尝试，不只展示成功的一次。各轮 `summary.json`、`operations.jsonl` 与外层操作 ledger 是计时来源；父命令和子步骤可以嵌套，不能相加重复计算。预检失败耗时与性能 SDK 窗口分开，也不加入产品构建耗时或吞吐/P99统计；当前轮尚未结束时结束时间和耗时保持未完成状态。
+
+仅在正式矩阵尚未开始、suite lock 可独占且各 cgroup 已排空时允许受限预检重试。原 `tcp-stage.json` 与摘要保持不变，失败轮连同逐文件摘要归档到 `formal-tcp-001/protocol-history/attempt-NNNN`；修订前后 helper 快照和审计链另存于 `preflight-history`、`preflight-changes.json`。权限修正也须记账，允许只有权限变化的重试；不得借此修改产品、adapter、benchmark 或工作负载配置。完整三产品门禁成功、生命周期清理与共同正确性检查完成之前，不启动正式测量。

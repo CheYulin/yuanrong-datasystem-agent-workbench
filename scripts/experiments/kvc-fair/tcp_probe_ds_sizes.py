@@ -176,6 +176,7 @@ def configuration_evidence(run_dir, endpoints):
 
 
 def trace_evidence(directory, windows, payload_prefix_hex, endpoint):
+    endpoints = [endpoint] if isinstance(endpoint, str) else list(endpoint)
     operations = {name: {"successful_bytes": 0, "payload_prefix_observed": False, "anchors": []}
                   for name in ["put", "get"]}
     hashes, malformed = [], []
@@ -207,7 +208,8 @@ def trace_evidence(directory, windows, payload_prefix_hex, endpoint):
             call = re.match(r"(\w+)\(", text)
             returned = re.search(r"\)\s+=\s+(\d+)(?:\s|$)", text)
             tcp = re.findall(r"<TCP:\[([^]]+)\]>", text)
-            if not call or not returned or not tcp or not any(item.endswith("->" + endpoint) for item in tcp):
+            if not call or not returned or not tcp or not any(
+                    item.endswith("->" + allowed) for item in tcp for allowed in endpoints):
                 continue
             name = "put" if call[1] in outgoing else "get" if call[1] in incoming else None
             if name is None or name not in windows:
@@ -225,8 +227,13 @@ def trace_evidence(directory, windows, payload_prefix_hex, endpoint):
             operations[name]["successful_bytes"] += count
             operations[name]["payload_prefix_observed"] |= observed
             operations[name]["anchors"].append(record)
+    for operation in operations.values():
+        operation["actual_payload_endpoints"] = sorted({
+            value for record in operation["anchors"] if record["payload_prefix_observed"]
+            for value in record["tcp_endpoints"]})
     return {"operations": operations, "trace_sha256": hashes, "malformed": malformed,
-            "scope": "Successful direction-specific TCP syscalls inside each synchronous SDK operation's wall-clock window. Bytes include RPC overhead; payload prefix is key-specific. Not performance evidence."}
+            "allowed_worker_endpoints": endpoints,
+            "scope": "Successful direction-specific TCP syscalls inside each synchronous SDK operation's wall-clock window, to either configured worker. Bound SDK endpoint does not determine routed storage worker. Bytes include RPC overhead; payload prefix is key-specific. Not performance evidence."}
 
 
 def audit_evidence(evidence, materialize, wire, child_result, key, size, *, returncode=0, timed_out=False):
@@ -300,15 +307,6 @@ def child(args):
         if result["correctness"] is not True:
             raise AssertionError("Exact bytes or EXIST boolean check failed")
         result["process_snapshots"]["after"] = process_snapshot(log_dir, "after")
-        deadline = time.monotonic() + args.log_timeout_s
-        while True:
-            evidence = read_access_logs(log_dir)
-            if all(any(record["operation"] == operation and record["keys"] == [args.key]
-                       for record in evidence["records"]) for operation in OPERATIONS) and read_materialize(log_dir, args.key)[0]:
-                break
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Access and actual GET materialization did not become observable before log timeout")
-            time.sleep(0.1)
     except BaseException:
         result["error"] = traceback.format_exc()
         result["correctness"] = False
@@ -382,6 +380,9 @@ def self_test(out, log_dir):
     wrong = trace_evidence(log_dir, windows, prefix_hex, "127.0.0.1:31532")
     assert all(r["successful_bytes"] == 0 for r in wrong["operations"].values())
     results.append({"name": "Other worker endpoint cannot satisfy wire proof", "passed": True})
+    routed = trace_evidence(log_dir, windows, prefix_hex, ["127.0.0.1:31532", "127.0.0.1:31531"])
+    assert all(r["payload_prefix_observed"] for r in routed["operations"].values())
+    results.append({"name": "Routed payload to either configured worker is recorded", "passed": True})
     write_json(out, {"passed": True, "scope": "Offline parser/decision fixtures only; not DataSystem TCP evidence.",
                      "checks": len(results), "results": results, "source": SOURCE})
     print(json.dumps({"passed": True, "checks": len(results)}))
@@ -397,7 +398,8 @@ def main():
     parser.add_argument("--out", type=Path, required=True, help="Fresh machine-readable result JSON")
     parser.add_argument("--log-dir", type=Path, required=True, help="Fresh parent directory for six isolated SDK log directories")
     parser.add_argument("--timeout-s", type=float, default=90)
-    parser.add_argument("--log-timeout-s", type=float, default=15)
+    parser.add_argument("--log-timeout-s", type=float, default=15,
+                        help="Reserved compatibility option; logs are validated by parent after SDK process exit/flush")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--worker-index", type=int, choices=[0, 1], help=argparse.SUPPRESS)
@@ -461,7 +463,7 @@ def main():
             child_result = json.loads(child_path.read_text()) if child_path.exists() else {}
             materialize, info_logs = read_materialize(directory, key)
             wire = trace_evidence(directory, child_result.get("windows", {}),
-                                  child_result.get("payload_prefix_hex", ""), endpoints[worker_index])
+                                  child_result.get("payload_prefix_hex", ""), endpoints)
             audit = audit_evidence(read_access_logs(directory), materialize, wire, child_result, key, size,
                                    returncode=returncode, timed_out=timed_out)
             audit["log_sha256"].extend(info_logs)

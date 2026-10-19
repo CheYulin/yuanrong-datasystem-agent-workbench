@@ -84,8 +84,9 @@ def preflight_evidence(suite, root, stage):
     events = [json.loads(line) for line in (suite / "events.jsonl").read_text().splitlines() if line.strip()]
     require(events, "Preflight changes cannot be ordered before absent formal events")
     first_formal = min(row["wall_ns"] for row in events)
-    previous_end, verified = 0, []
-    allowed = {"tcp_stage.py", "tcp_protocol_gate.py", "tcp_probe_ds_sizes.py"}
+    previous_end, verified, permission_records = 0, [], []
+    launcher = "mooncake/launch_master.sh"
+    allowed = {"tcp_stage.py", "tcp_protocol_gate.py", "tcp_probe_ds_sizes.py", launcher}
     require(audit["revisions"], "Preflight audit contains no revisions")
     for index, revision in enumerate(audit["revisions"], 1):
         label = "attempt-" + str(index).zfill(4)
@@ -110,7 +111,9 @@ def preflight_evidence(suite, root, stage):
         require(failed.get("valid") is False and type(failed.get("end_wall_ns")) is int
                 and failed["end_wall_ns"] <= revision["start_wall_ns"], "Preflight archive must be an earlier terminal failed protocol gate")
         changes, seen = revision["changes"], set()
-        require(changes, "Preflight revision contains no corrections")
+        permissions = revision.get("deployment_permissions", [])
+        require(changes or permissions, "Preflight revision contains no corrections")
+        before_expected = dict(expected)
         for change in changes:
             name = change["relative_path"]
             require(name in allowed and name not in seen and change["before_sha256"] == expected[name]
@@ -121,12 +124,34 @@ def preflight_evidence(suite, root, stage):
                         "Preflight source snapshot path differs from its revision")
                 require(digest(suite_file(suite, change[side + "_file"])) == change[side + "_sha256"], "Preflight helper snapshot SHA mismatch")
             expected[name] = change["after_sha256"]
+        require(isinstance(permissions, list) and len(permissions) <= 1, "Unexpected deployment permission inventory")
+        audited_permissions = []
+        for permission in permissions:
+            require(permission["relative_path"] == launcher and type(permission["before_mode"]) is int
+                    and type(permission["after_mode"]) is int and permission["before_mode"] in (0o644, 0o755)
+                    and permission["after_mode"] == 0o755
+                    and (permission["before_mode"] != permission["after_mode"] or launcher in seen),
+                    "Only the Mooncake launcher deployment mode 0644/0755 to 0755 may be recorded")
+            checksum = permission["sha256"]
+            require(checksum in {before_expected[launcher], expected[launcher]}, "Deployment permission SHA is outside the launcher content chain")
+            legacy = checksum != expected[launcher]
+            require(not legacy or launcher in seen, "Legacy permission SHA must identify this revision's previous launcher body")
+            record = dict(permission, revision=index, legacy_sequencing_bug=legacy,
+                          recorded_sha_position="before_content_copy" if legacy else "after_content_copy",
+                          effective_mode_proven=False)
+            permission_records.append(record)
+            audited_permissions.append(record)
         previous_end = revision["end_wall_ns"]
         verified.append({"number": index, "end_wall_ns": previous_end, "protocol_archive": revision["protocol_archive"],
-                         "archived_files": len(files), "changes": changes})
+                         "archived_files": len(files), "changes": changes, "deployment_permissions": audited_permissions})
+    if permission_records:
+        final = permission_records[-1]
+        require(final["sha256"] == expected[launcher] and not final["legacy_sequencing_bug"], "Final deployment permission record must bind the final launcher body")
+        require(all(not row["legacy_sequencing_bug"] or row["revision"] < final["revision"] for row in permission_records),
+                "A legacy permission sequencing bug requires a later corrective revision")
     return expected, {"present": True, "sha256": digest(path), "immutable_stage_sha256": digest(suite / "tcp-stage.json"),
-                      "first_formal_event_wall_ns": first_formal, "revisions": verified,
-                      "scope": "Only three diagnostic/safety helpers may change before formal events. Original stage bytes, each before/after helper body and complete failed protocol archives are retained and hashed. Benchmark, adapter, config and native artifacts receive no exception."}
+                      "first_formal_event_wall_ns": first_formal, "revisions": verified, "deployment_permissions": permission_records,
+                      "scope": "Only three diagnostic/safety helpers and the specified Mooncake lifecycle launcher may change before formal events. Original stage bytes, before/after bodies and complete failed protocol archives remain hashed. Permission records do not prove historical modes took effect; legacy copy ordering errors require later correction and final snapshot verification. Benchmark, adapter, config and native artifacts receive no exception."}
 
 
 class ExecutionEvidence:
@@ -160,6 +185,9 @@ class ExecutionEvidence:
         path = self.snapshot / relative
         observed = digest(path)
         require(observed == expected == self.snapshot_files[relative]["sha256"], "Stage/snapshot SHA drift: " + relative)
+        if relative == "mooncake/launch_master.sh" and self.preflight.get("deployment_permissions"):
+            require(path.stat().st_mode & 0o777 == self.preflight["deployment_permissions"][-1]["after_mode"],
+                    "Final captured Mooncake launcher mode differs from its corrective deployment record")
         if provenance:
             record = self.provenance["files"][str(PurePosixPath(self.root) / relative)]
             require(record["sha256"] == observed and record["size"] == path.stat().st_size,
@@ -462,7 +490,10 @@ def datasystem_medium(evidence, protocol, path):
         snapshots = datasystem_snapshots(child, directory, protocol, evidence.root)
         access = ds_medium_probe.read_access_logs(directory)
         materialize, info_logs = ds_medium_probe.read_materialize(directory, case["key"])
-        wire = ds_medium_probe.trace_evidence(directory, windows, block.hex(), case["bound_endpoint"])
+        wire = ds_medium_probe.trace_evidence(directory, windows, block.hex(), endpoints)
+        require(all(operation["actual_payload_endpoints"] and all(any(address.endswith("->" + endpoint) for endpoint in endpoints)
+                    for address in operation["actual_payload_endpoints"]) for operation in wire["operations"].values()),
+                "DataSystem payload endpoints are absent or outside the formal worker whitelist")
         repeated = ds_medium_probe.audit_evidence(access, materialize, wire, child, case["key"], case["size"],
                                                  returncode=case["returncode"], timed_out=case["timed_out"])
         repeated["log_sha256"].extend(info_logs)
