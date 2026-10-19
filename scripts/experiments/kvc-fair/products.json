@@ -1,0 +1,81 @@
+{
+  "products": [
+    {
+      "name": "datasystem",
+      "python": "/home/worktrees/kvc-fair-20261020/datasystem/.venv/bin/python",
+      "adapter": "/home/worktrees/kvc-fair-20261020/scripts/datasystem/adapter_datasystem.py",
+      "config": "/home/worktrees/kvc-fair-20261020/configs/datasystem.json",
+      "start": [
+        "python3",
+        "/home/worktrees/kvc-fair-20261020/scripts/datasystem/runtime.py",
+        "start",
+        "--cgroup",
+        "/sys/fs/cgroup/kvcfair20261020/server",
+        "--run-dir",
+        "{run_dir}"
+      ],
+      "stop": [
+        "python3",
+        "/home/worktrees/kvc-fair-20261020/scripts/datasystem/runtime.py",
+        "stop",
+        "--run-dir",
+        "{run_dir}",
+        "--stop-timeout",
+        "2"
+      ],
+      "env": {
+        "DATASYSTEM_CLIENT_LOG_DIR": "{server_logs}/client"
+      }
+    },
+    {
+      "name": "mooncake",
+      "python": "/home/worktrees/kvc-fair-20261020/mooncake/venv/bin/python",
+      "adapter": "/home/worktrees/kvc-fair-20261020/mooncake/adapter.py",
+      "config": "/home/worktrees/kvc-fair-20261020/configs/mooncake.json",
+      "start": [
+        "python3",
+        "/home/worktrees/kvc-fair-20261020/cgroup.py",
+        "--group",
+        "server",
+        "exec",
+        "--",
+        "bash",
+        "/home/worktrees/kvc-fair-20261020/mooncake/start.sh"
+      ],
+      "stop": [
+        "bash",
+        "/home/worktrees/kvc-fair-20261020/mooncake/stop.sh"
+      ],
+      "env": {
+        "RUNTIME_DIR": "{run_dir}",
+        "MOONCAKE_ROOT": "/home/worktrees/kvc-fair-20261020/mooncake",
+        "LD_LIBRARY_PATH": "/home/worktrees/kvc-fair-20261020/mooncake/deps/lib:/home/worktrees/kvc-fair-20261020/mooncake/source/build/python/cp311-cp311-linux_x86_64/mooncake-common",
+        "GLOG_minloglevel": "2",
+        "MC_LOG_LEVEL": "ERROR",
+        "MC_STORE_LOCAL_HOT_CACHE_SIZE": "0"
+      }
+    },
+    {
+      "name": "lmcache",
+      "python": "/home/worktrees/kvc-fair-20261020/lmcache/venv311/bin/python",
+      "adapter": "/home/worktrees/kvc-fair-20261020/lmcache/adapter_lmcache.py",
+      "config": "/home/worktrees/kvc-fair-20261020/configs/lmcache.json",
+      "start": [
+        "python3",
+        "/home/worktrees/kvc-fair-20261020/lmcache/runtime.py",
+        "start",
+        "--gib",
+        "4"
+      ],
+      "stop": [
+        "python3",
+        "/home/worktrees/kvc-fair-20261020/lmcache/runtime.py",
+        "stop"
+      ],
+      "env": {
+        "PYTHONPATH": "/home/worktrees/kvc-fair-20261020/lmcache/source",
+        "LOG_DIR": "{server_logs}"
+      }
+    }
+  ]
+}

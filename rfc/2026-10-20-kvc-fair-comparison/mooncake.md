@@ -26,6 +26,8 @@ bash build.sh
 
 `build.sh` 固定 Mooncake tag/SHA，固定 xxHash tarball SHA256，使用 `requirements.lock` 固定 Python 构建依赖；生成源码 wheel，而非安装官方预编译 Mooncake wheel。保留 `build.log`、`build.exit`、`CMakeCache.txt`、`compile_commands.json`、wheel 哈希、Python 与 OS 包清单。
 
+复现脚本后续加固：私有引导固定 uv0.11.19，校验官方发布归档 SHA256 `7035608168e106375b36d0c818d537a889c51a8625fe7f8f7cad5e62b947c368`，无需既有 `/home/hermes` 环境。恢复依赖前及刷新预构建锁时排除 Mooncake 本体和 editable 项；每次构建使用新的 wheel 目录，要求恰好一个产物，再对该明确产物执行 `pip install --force-reinstall --no-deps`，避免同版本已安装包让安装被跳过。此加固只通过语法和模拟校验，未重新编译；原始构建日志、工具版本、时间与产物哈希保持不变，脚本修订哈希独立记录。
+
 首轮 `USE_HTTP=OFF` 在源码 `master_service.cpp:13020/13027` 出现 `MetadataStoragePlugin` incomplete type 编译错误：头文件受宏控制，但 cleanup 方法未被同一宏保护。保留 `build-use-http-off.log/.exit`。修复方式是恢复上游默认 `USE_HTTP=ON` 编译能力，不修改产品源码；运行时仍采用 P2PHANDSHAKE，并关闭 HTTP metadata server。
 
 主要 CMake 设置：`CMAKE_BUILD_TYPE=Release, ENABLE_DEBUG_SYMBOLS=OFF, USE_CUDA=OFF, USE_TENT=OFF, USE_ETCD=OFF, USE_HTTP=ON, STORE_USE_ETCD=OFF, WITH_STORE_RUST=OFF, BUILD_UNIT_TESTS=OFF, BUILD_EXAMPLES=OFF, BUILD_BENCHMARK=OFF`。保留原生 C++ Store + 经典 Transfer Engine TCP。

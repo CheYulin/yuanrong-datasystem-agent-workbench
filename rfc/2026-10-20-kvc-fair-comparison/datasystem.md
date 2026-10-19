@@ -40,6 +40,8 @@ python3 "$TASK_ROOT/scripts/datasystem/runtime.py" stop
 
 脚本为每个进程在 `exec` 之前写入指定 cgroup，保证后续线程继承所属 cgroup；没有用启动后只搬主线程的做法。两个 Worker 的 brpc 线程数均固定 8；`oc_thread_num=8`。服务共享统一 8 个物理核配额，最终以运行 manifest 与 cgroup 文件为准。
 
+正式产品与 SDK 日志统一采用 ERROR 及以上：DataSystem worker 显式 `--minloglevel=2`，SDK `DATASYSTEM_MIN_LOG_LEVEL=2`；对应 Mooncake `GLOG_minloglevel=2` / `MC_LOG_LEVEL=ERROR`、LMCache `LMCACHE_LOG_LEVEL=ERROR`。本 tag 的 `logging.cpp:94-107` 定义并校验 ERROR=2，`:417-419` 从 SDK 环境变量读取级别，变量名由 `logging.h:57` 定义。独立路径确认 smoke 使用过 VLOG1，正式窗口不使用该详细日志配置；ERROR 配置另经服务启动与读写 smoke 验证。
+
 Worker 启动同时检查监听端口与本次新建的 `ready_check_path` 文件，未把端口可连接当作初始化完成。UDS 目录依据运行目录的短 hash 置于 `TASK_ROOT/u/`，避免每轮证据目录过长触发上游 80 字符限制。
 
 进程清单保存完整命令、PID 与 `/proc/PID/stat` 启动 tick。停止时先取得 pidfd，再检查启动 tick，并经 pidfd 发信号，防止检查后 PID 重用时误伤；先 Worker 后 ETCD，宽限期后仅强制结束仍匹配的进程。不会执行 `pkill` 或清理其它工作目录。独立负向验证已通过：本任务 disposable `sleep` 被停止，故意提供错误启动 tick 的另一个 `sleep` 保持存活；证据 `TASK_ROOT/.evidence/datasystem-stop-safety/safety-result.json`。
@@ -59,7 +61,7 @@ Worker 启动同时检查监听端口与本次新建的 `ready_check_path` 文�
 
 Get 缺失仅对格式 `code: [Key not found],` 的错误转为 `KeyError`；这是本 tag 的 `StatusCodeName(K_NOT_FOUND)` 友好字符串，已通过真实缺失调用验证，其它 RuntimeError 原样传播。Exist 对同一特定 not-found 转为 false，RPC/连接/超时异常不能被吞掉。没有把一次失败 Get 自动重试到成功后只统计成功耗时。
 
-DataSystem 本地数据可能通过 mmap/共享内存获取，Mooncake/LMCache 可能使用 TCP 或自身协议。这是本地部署下各产品提供的数据路径差异，需要在报告中显式标注。结果代表“同一调用契约下的产品端到端表现”，不能据此宣称同协议传输引擎孰优。
+DataSystem 本次 routed mode 通过 RPC 控制和同节点 SHM 数据候选路径访问，Mooncake/LMCache 使用自身协议。这是本地部署下各产品提供的数据路径差异，需要在报告中显式标注。不能将 legacy bound-client 的 `oc_shm_transfer_threshold_kb=500` 阈值直接套用本基线：`object_client_impl.cpp:2776-2795` 将该大小捷径限制于 `enableLocalCache_=true`，而本实验 false 配置所有大小进入 `routed_mode.cpp:422-441` 的 transport Create。`transport_layer.cpp:844-859` 根据 endpoint 选择 hint；`object_metadata_client.cpp:112-126` 的 Get 也是按 endpoint 选择 SHM 候选。独立 VLOG1 correctness smoke 已观察到 1 KiB、64 KiB、1 MiB 的 `transport: SHM` 和完整返回字节数，证据在 `.evidence/build/transport-smoke-evidence.log`；不能写成“小对象一律 RPC、大对象 SHM”。所有 Get 最终仍包含 Python bytes 拷贝。结果代表“同一调用契约下的产品端到端表现”，不能据此宣称同协议传输引擎孰优。
 
 源码核对位置：本 tag 的 `python/yr/datasystem/kv_client.py`、`src/datasystem/pybind_api/pybind_register_kv.cpp`、`src/datasystem/client/object_cache/object_client_impl.cpp`、`routed_mode.cpp`、`exist_handler.cpp` 与 `src/datasystem/common/util/status.cpp`。
 
@@ -81,3 +83,13 @@ DataSystem 本地数据可能通过 mmap/共享内存获取，Mooncake/LMCache �
 正式测量由统一 harness 完成：固定总字节的纯 PUT 与稳定 key 集的 Get/Exist hit/miss，分别运行并发 2/8/16、相同 payload 与独立重复。并发最小值 2 确保多实例产品均有两个客户端参与。CPU/内存/磁盘指标由服务和客户端两个 cgroup 及主机 dstat/iostat/pidstat 采集，额外保留 allocation、throttling、OOM、swap 与采样覆盖率。
 
 本文件不把准备阶段脚本当作性能、并发安全或故障恢复证据。产品源码未改动；本任务验证风险在资源隔离、启动停止边界、错误分类和计时口径。未增加持久化/恢复逻辑，也不据此声明重启恢复能力。最终结果与失败记录应由统一测试结果文档补充。
+
+## 7. 已完成验证
+
+源码构建于北京时间 2026-10-20 00:08:00 开始，00:31:41 结束，上游构建脚本报告总耗时 1,421 秒，最终退出码 0。CPython 3.11.15 wheel 成功导入，版本与 worker 均来自固定 rc44 SHA。机器可读记录为 `.evidence/build/build-summary.json`，记录了 wheel、部署 tar、worker 与 ETCD 校验和。
+
+实际双 Worker smoke 完成 20 项断言：1 KiB / 64 KiB / 1 MiB 含 NUL bytes，两个客户端分别写入、从两个初始连接端点读取，验证完整 bytes、存在/缺失语义、删除后的不存在。统一 `benchmark.py` 另完成 8 项短窗口功能验证：并发 2，1 KiB / 1 MiB，PUT / Get / Exist hit / Exist miss 全部 valid，累计失败 0；Exist 使用 Get 预置后 `--skip-preload`，验证跨客户端 SDK 生命周期仍可读。短窗口结果仅用于 harness 正确性，不参与正式性能图表。
+
+启动 smoke 发现并修正两项 wrapper 兼容性假设：worker 不接受通用 `--flagfile`，改为逐项原生 `--name=value`；SDK 的 K_NOT_FOUND 对外文本为 `Key not found`，按真实 code 文本精确归一化。重复启动预检使用 `SO_REUSEADDR`，避免本任务连接 TIME_WAIT 被误判为另一个 listener。完整停止后 server/client cgroup 已排空并交还正式测试。
+
+自验证：Python 脚本 `py_compile`、3 个 shell 入口 `bash -n`、负向 PID 身份检查、真实双 Worker smoke 和统一 harness 检查均通过。DataSystem tracked source diff 为空；`.venv/` 是构建运行产物。没有产品逻辑变更，不需要修改 `.repo_context`；未运行 UT/ST、故障恢复或原生 C++ kvtest 性能。
