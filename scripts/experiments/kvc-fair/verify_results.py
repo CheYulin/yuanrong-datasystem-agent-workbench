@@ -297,6 +297,85 @@ def resources(suite, windows, warnings):
     return summary
 
 
+def verify_put_profile(profile, suite, root_params, products):
+    profile = profile.resolve()
+    purpose = "supplemental_resource_only"
+    require(profile != suite and profile not in suite.parents and suite not in profile.parents,
+            "PUT profile must be separate from the primary suite")
+    summary = read_json(profile / "summary.json")
+    params = read_json(profile / "parameters.json")
+    plan = read_json(profile / "plan.json")
+    recorded_products = read_json(profile / "products.json")
+    require(summary.get("valid") is True and summary.get("ended") and not any(
+        summary.get(key) for key in ("failed", "fatal", "monitor_error", "drain_error", "resource_coverage_error")),
+        "PUT profile is unfinished, invalid or has failed evidence")
+    for record in (summary, params):
+        require(record.get("purpose") == purpose and record.get("included_in_main_performance_repeats") is False,
+                "PUT profile purpose must remain independent of primary performance repeats")
+    require(root_params.get("smoke") is False and set(products) == PRODUCTS,
+            "PUT profile requires the three-product non-smoke baseline")
+    require(recorded_products == list(products.values()), "PUT profile product configuration differs from primary suite")
+    require(params.get("sizes") and len(params["sizes"]) == 3 and set(params["sizes"]) == {1024, 65536, 1048576}
+            and params.get("concurrencies") == [8] and params.get("repeats") == 1 and params.get("operations") == ["put"],
+            "PUT profile parameters must describe nine PUT-only r0/c8 observations")
+    for key in ("duration", "warmup"):
+        require(params.get(key) == root_params[key], "PUT profile " + key + " differs from primary baseline")
+    require(params.get("preload_bytes") == 64 << 20, "PUT profile preload bytes mismatch")
+    expected = {(0, product, size, 8) for product, size in itertools.product(PRODUCTS, (1024, 65536, 1048576))}
+    actual = [(p["repeat"], p["product"], p["size"], p["concurrency"]) for p in plan]
+    require(len(actual) == 9 and set(actual) == expected, "PUT profile identity set must be exactly three products by three sizes at r0/c8")
+    ids = {f"r{repeat}-{product}-s{size}-c{concurrency}" for repeat, product, size, concurrency in expected}
+    completed = summary.get("completed", [])
+    require(len(completed) == 9 and set(completed) == ids, "PUT profile completed identities missing or duplicated")
+    paths = [p for p in (profile / "cells").glob("*/*.json") if p.stem in OPS]
+    require(len(paths) == 9 and {(p.parent.name, p.stem) for p in paths} == {(cell, "put") for cell in ids},
+            "PUT profile must contain exactly the nine current PUT results and no other operations")
+    baseline = dict(root_params, smoke=False)
+    windows = []
+    for p in plan:
+        cell = "r{repeat}-{product}-s{size}-c{concurrency}".format(**p)
+        cell_params = read_json(profile / "cells" / cell / "parameters.json")
+        require(cell_params.get("purpose") == purpose and all(cell_params.get(key) == value for key, value in p.items()),
+                "PUT profile cell metadata identity/purpose mismatch: " + cell)
+        windows.append(verify_operation(profile / "cells" / cell / "put.json", cell, "put", p, baseline, False, products[p["product"]]))
+    samples_path = profile / "resources/samples.jsonl"
+    stamps = []
+    with samples_path.open() as stream:
+        for line in stream:
+            sample = json.loads(line)
+            mono = integer(sample.get("mono_ns"), "PUT profile sample mono_ns", 1)
+            require(not stamps or mono > stamps[-1], "PUT profile resource sample timestamps must be strictly increasing")
+            require(not sample.get("read_errors"), "PUT profile resource sample has counter read errors")
+            for role in ("server", "client"):
+                group = sample["groups"][role]
+                integer((group.get("cpu.stat") or {}).get("usage_usec"), "PUT profile " + role + " CPU usage")
+                integer(group.get("memory.current"), "PUT profile " + role + " memory.current")
+                for key in ("anon", "shmem"):
+                    integer((group.get("memory.stat") or {}).get(key), "PUT profile " + role + " " + key)
+                require(isinstance(group.get("io.stat"), str), "PUT profile I/O counter observation is missing")
+            stamps.append(mono)
+    for window in windows:
+        left = bisect.bisect_left(stamps, window["start_mono_ns"])
+        right = bisect.bisect_right(stamps, window["end_mono_ns"])
+        require(right - left >= 2, "PUT profile requires at least two actual resource samples inside " + window["cell"])
+        span = (stamps[right - 1] - stamps[left]) / 1e9
+        require(span > 0, "PUT profile resource observation span must be positive")
+        window.update(resource_samples=right - left, first_sample_mono_ns=stamps[left], last_sample_mono_ns=stamps[right - 1],
+                      resource_span_s=span, resource_coverage=span / window["duration_s"],
+                      purpose=purpose, included_in_main_performance_repeats=False)
+    manifest_path = profile / "resources/monitor-manifest.json"
+    manifest = read_json(manifest_path)
+    require(summary.get("monitor_exit") == 0 and manifest.get("end_utc") and manifest.get("read_error_count") == 0,
+            "PUT profile monitor completion without read errors is not established")
+    require(manifest.get("sample_count") == len(stamps), "PUT profile monitor sample count mismatch")
+    return {"suite": str(profile), "purpose": purpose, "included_in_main_performance_repeats": False,
+            "expected_results": 9, "verified_results": len(windows), "operations": windows,
+            "resource_samples": len(stamps), "minimum_resource_coverage": min(w["resource_coverage"] for w in windows),
+            "monitor": {key: manifest.get(key) for key in ("end_utc", "read_error_count", "actual_interval_ms", "sampling_ms", "loop_work_ms")},
+            "manifest_hashes": {name: sha256(profile / name) for name in ("summary.json", "parameters.json", "plan.json", "products.json", "resources/samples.jsonl", "resources/monitor-manifest.json")},
+            "scope": "Nine independent PUT resource observations; operation integrity reuses the primary verifier. These results do not enter primary cell/result counts or repeated performance statistics."}
+
+
 def verify(args):
     suite = args.suite.resolve()
     errors, warnings, checks, windows = [], [], [], []
@@ -393,6 +472,15 @@ def verify(args):
     result["resources"] = resource
     monitor_finished = resource["monitor"]["finished"] if resource else None
     checks.append({"name": "monitor_shutdown_observed", "passed": monitor_finished})
+    if getattr(args, "put_profile", None) is not None:
+        profile = {"suite": str(args.put_profile.resolve()), "expected_results": 9, "verified_results": 0,
+                   "purpose": "supplemental_resource_only", "included_in_main_performance_repeats": False}
+        result["put_profile"] = profile
+        def profile_check():
+            require(configured is not None and not errors, "Primary result verification must pass before PUT profile verification")
+            return verify_put_profile(args.put_profile, suite, params, products)
+        verified = check("supplemental_put_profile", profile_check)
+        profile.update(verified or {}, passed=verified is not None)
     result["passed"] = not errors
     result["unknown_checks"] = [c["name"] for c in checks if c["passed"] is None]
     result["evidence_complete"] = result["passed"] and not result["unknown_checks"] and bool(resource and resource["resource_coverage_complete"])
@@ -403,6 +491,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", type=Path, required=True)
     parser.add_argument("--interference-json", type=Path)
+    parser.add_argument("--put-profile", type=Path)
     parser.add_argument("--formal", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()

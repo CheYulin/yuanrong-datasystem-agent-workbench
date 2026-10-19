@@ -101,7 +101,7 @@ def main():
         for name in ["summary.json","events.jsonl","plan.json"]:
             run(["scp",args.target+":"+root+"/"+args.smoke_suite+"/"+name,evidence/args.smoke_suite/name])
     elif args.action == "report":
-        verification=["python3",HERE/"verify_results.py","--suite",args.local_output/args.suite,"--formal","--out",args.local_output/args.suite/"verification-final.json"]
+        verification=["python3",HERE/"verify_results.py","--suite",args.local_output/args.suite,"--formal","--put-profile",args.local_output/args.profile_suite,"--out",args.local_output/args.suite/"verification-final.json"]
         interference=args.local_output/args.suite/"interference-audit.json"
         if interference.exists():
             verification += ["--interference-json",interference]

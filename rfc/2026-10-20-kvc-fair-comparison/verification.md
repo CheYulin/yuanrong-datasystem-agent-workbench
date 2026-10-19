@@ -21,6 +21,7 @@
 | 隔离浏览器 `qa_report.mjs` | 真实部分矩阵与耗时证据，1440/900/390 px；保留159项后扩充至212/212。新增完整身份、CSV/raw字段与全组中位检查的临时 fixture 51/51；真实100条raw绑定通过。无 profile 时明确等待，真实完整矩阵/profile/公开页面正向验收待执行 |
 | 临时报告生成与 SHA256/ZIP CRC/成员检查 | 实际部分矩阵生成成功；脚本 ZIP 含 DataSystem driver，不含源码树、venv 或 bytecode |
 | verify_results 临时 fixture | 15 项完整矩阵/篡改拒绝与 CLI 检查，加 11 项真实协议参数/清单检查通过；正式全量 gate 待执行 |
+| verify_results 可选 PUT profile gate | 11项临时JSON检查通过，复用逐接口校验9次，主216/81与资源输出保持独立；身份、计数、purpose、少采样与时间回退拒绝；真实专项验收待执行 |
 | capture_evidence 停止状态 fixture | 停止后快照、重复读取不覆盖、占用 cgroup 拒绝通过 |
 | 发布注册的离线 fixture | 恰一入口、保留其他条目、重复执行不加重复入口通过 |
 | profile_put / light_monitor 本地 fixture | 11 项与模拟九个 PUT-only 用例通过；未在主压测期间部署或运行 |
