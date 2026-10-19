@@ -1,383 +1,507 @@
-# URMA outstanding WR 控制与无完成恢复：详细设计
+# 子模块：URMA outstanding WR 控制与安全归还
 
-## 2026-10-09 当前版本
-
-本节优先于下方历史记录。当前 PR head 为 `1a5b10ae11eb368e0582bb3615865129ad09600f`，基于主线 `09d56b266b7cb1e218adcbadfe3be8881ad172b7`，已压为一个提交并推至用户 fork。
-
-[关键设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [开发视图](https://yche.me/design/urma-wr-token-control-developer-view-20260920.html) · [部署视图](https://yche.me/ops/urma-wr-token-deployment-view-20261009.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
-
-额度为进程级预约加未安全结清的 WR；不是 Event 数或设备全局队列深度。cap=100，准入预算 5000us，WR 退役阈值 5000ms。普通 READ/WRITE 创建 Event 前整量预约，gather 在首次提交前整链预约。CQE 或确认 flush 后 provider delete 成功才能安全归还；缺失停止证据时隔离并保留 token/buffer，不宣称任意硬件故障下保证最终恢复。
-
-当前图示包括概念边界、准入/归还、无完成恢复和 Event/token gap；Use Cases 与本轮测试映射见关键设计第 5 章。
-
-## 历史记录
-
-状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
-
-[实现 PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [HTML 设计页](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。保留旧提交历史，以新增提交交付修复。报告未提供部署 SHA，源码缺陷与现场 trace 根因分别陈述。
-
-## 2026-09-21 源码复核补充
-
-当前 PR head 为 `67f9307e8`。本轮只增加 URMA 初始化时的有效配置日志：`capacity`、`wait_us` 和
-`recovery_timeout_ms`，不读取 post/CQE 热路径上的额外快照，也不新增 benchmark。tiantiyun-80c128g
-使用 CMake Release、URMA Mock 和 ccache 完成 80 项定向回归，全部通过。
-
-事件与额度的对应关系需要按入口区分：普通 Read/Write 在整量预约成功后才创建业务 Event；Gather
-先创建 Event，再对整条 WR 链预约。两条路径中，Event 都是业务通知对象，`WrTokenLedger` 才是已提交或
-可能已接受 WR 的安全所有权。CQE 可以先调用 `CompleteWr` 归还额度，随后才完成 Event 通知和 map 删除；
-超时保留、orphan WR 以及 flush/delete 恢复又会把两种生命周期进一步拉开。因此 event-map 大于 token
-并不表示 token 失效或 provider 超发，必须用同一进程、同一 Jetty 和同一时间窗口的 token snapshot、CQE、
-orphan、flush/delete 记录联合判定。
-
-[RFC #1244](https://gitcode.com/openeuler/yuanrong-datasystem/issues/1244) · [PR #2422](https://gitcode.com/openeuler/yuanrong-datasystem/merge_requests/2422) · [详细设计](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html) · [关键概念与开发视图](https://yche.me/design/urma-wr-token-developer-view-20260917.html) · [验证报告](https://yche.me/reliability/urma-wr-token-validation-20260917.html)
-
-## 1. 要解决的问题
-
-请求超时不意味着设备 WR 已完成。现有 lane force-release 可以归还逻辑 lane，同时把其 pending WR
-转成 orphan；同一个 jetty 随后还可承载新请求。因此 lane 数无法约束进程中尚未结清的 WR 数。
-`tbbEventMap_.size()` 又包含业务保留记录，不能当作硬件 outstanding 数。
-
-当前源码证据：`UrmaResource::TryForceReleaseTimedOutSendLane` 转移 orphan 并归还 lane；
-`UrmaManager::RegisterRetainedTimeoutEvent` / `PruneRetainedTimeoutEvents` 驱逐、过期删除 Event；
-`UrmaManager::CheckCompletionRecordStatus` 按 local_id 和 request ID 处理完成。
-相关源码位于 `src/datasystem/common/rdma/urma_resource.cpp` 和 `urma_manager.cpp`。
-
-目标是限制已预留或可能已提交的 WR 数，容量满时只阻塞配置的时间，并且在没有正常完成的故障下主动启动
-jetty 恢复，防止额度永远被遗忘。read、write、多 chunk、gather 共用一套额度。
-
-旧文档的 64×4MB/120GB/s 只是理想串行化量纲估算，不能证明真实延迟上界。
-4KB 包粒度和链路带宽需以实际部署及设备证据验证；默认容量 100 是按检视意见调整的初值，仍需真实硬件压测。
-最新主线 lane pool 默认已为 200，不能沿用历史样本中的 64 当作当前配置。
-
-## 2. 需求与不变量
-
-| 编号 | 合同 |
+| 属性 | 值 |
 |---|---|
-| N1 | 启用时，0 ≤ reserved + potentially accepted ≤ capacity；每个 WR 一个额度 |
-| N2 | 一次逻辑传输的全部WR共用一次准入预算及父API绝对截止时间；最多3次尝试，退避也扣除配置总预算，零等待只尝试一次；协作式检查不是硬实时返回保证 |
-| N3 | 同一额度只归还一次；迟到、重复完成不得释放新请求的额度 |
-| N4 | Event 删除、TTL、驱逐、force-release、创建替代 jetty 都不是硬件结清证据 |
-| N5 | 正常/错误 CQE 可结清对应 WR；确认 flush 且 provider delete 成功可结清旧 jetty 剩余 WR |
-| N6 | 恢复触发不依赖成功 CQE，也不依赖后续请求；关闭 post 准入后才能操作旧 jetty |
-| N7 | 等待队列按 FIFO 准入，每个 waiter 单独 notify_one；取消队首后继续唤醒下一位 |
-| N8 | 每次准入记录 wr_token_wait_us；立即成功为 0；禁止用 Event 数替代额度水位 |
+| 创建 | 2026-09-13，原方案日期；站点登记发布时间保留原值 |
+| 修改 | 2026-10-20，按 ds-design 重组详细设计，补类图、时序图及新增/已有标识 |
+| 阶段 | P1 软件实现与定向 mock 验证；P2 真实设备验收待完成 |
+| 源码 | PR2422 固定提交 `93c2e70c3e2e1f73096ddcaccede92ab4ab35213`；对照主线 `09d56b266b7cb1e218adcbadfe3be8881ad172b7` |
+| 前置 | 独立详细设计，无概要设计前置；不代表已合入 2026-10-20 主线 |
 
-**无法无条件同时保证的边界：** 若 provider 一直不返回任何可用 flush/停止证据，且没有经验证的设备 reset
-接口，则无法同时证明“旧 WR 已停止”及“安全归还其物理额度”。这时保留账本和相关 provider 资源、隔离旧
-jetty，使用受限补池及 TCP fallback；不能靠超时清零制造空闲额度。真实设备强制 reset 的契约需另行验证。
-“没有成功 poll”在本方案中的可恢复路径包括没有成功数据 CQE，但仍能收到错误/flush 控制记录。
+**控制合同：**启用时，每进程所有发送 Jetty 共用 cap=100；不足时在最多 5ms 准入预算与 API 剩余期限内等待。每条 WR 只有一个额度 owner；CQE 或确认 flush 后成功 delete 才能结清可能已提交部分。5000ms 是退役触发年龄，不是保证归还期限。
 
-## 2.1 0917 运行报告后的修订验收（2026-09-18，实施中）
+[开发视图](/design/urma-wr-token-control-developer-view-20260920.html) · [部署视图](/ops/urma-wr-token-deployment-view-20261009.html) · [验证报告（历史证据）](/reliability/urma-wr-token-validation-20260917.html) · [原源码审计](/design/urma-wr-token-20261009/source-audit-20260921.html)
 
-本节是新增提交的验收要求，不能用上一轮门禁通过证明已完成。变更限于 WR 准入、账本回收及必要观测，保留原提交历史。
+## 1. 需求背景与目标
 
-- 完成及确认静默后的额度归还必须先于 buffer owner 析构；退出 ledger 锁后归还，批量静默回收先归还全部 token 再清理 owner。未确认设备停止时禁止回收。普通完成和静默回收测试须在 owner deleter 内验证可立即重新申请全部已归还额度。
-- 已定位准入后至 provider 调用前的超期窗口：提交前必须重新检查 API deadline；超期时回滚尚未调用 provider 的整条链，提交数为零。故障注入测试先复现超期仍提交，再验证拒绝和额度归零。这只能阻止已知超期的新提交，不构成抢占或硬实时返回保证。
-- chip 计数随 UrmaEvent 构造递增、析构递减，仅覆盖携带有效源 chip counter 的事件；Event 表随插入/删除变化，外部引用可延迟析构。因此 chip 合计不要求等于 Event 表大小，更不等于 token outstanding。不能拿两者验证 QD 硬上限。
-- 一个请求全部 WR 同时满足：本轮实现以一次逻辑 URMA 读、写或 gather 为预约边界，在第一个 provider 调用前一次拿齐该次传输全部 WR 的额度；超容量直接拒绝，不再逐 chunk／窗口准入。跨节点 GET/SET 或 BatchGet 多对象调用之间的原子预约不在这个进程级边界内，仍需单独确认，不能宣称已覆盖整个分布式 API。当前已完成软件回归并推送，最新6项远程门禁已全部通过。
-- QD 验收针对 bucket reserved + potentially accepted；Event 表及 chip 业务计数单独说明。需要可关联请求的 requested、capacity、outstanding、准入总耗时、结果和归还原因，避免逐 WR 高成本日志。
-- 准入日志新增真实 token 快照：`capacity`、`outstanding_snapshot`、`peak`、`waiting_snapshot`。`peak` 是同一 bucket 初始化以来的最大预约额度，在既有桶锁内更新，不能用采样瞬时值代替峰值。快照在日志实际输出时取得，不与此前准入事件原子绑定。
-- `wait_us` 保持现有等待分支口径（实际条件等待才为正，从Acquire加锁前计时，含锁竞争）；`acquire_us` 覆盖整个 Acquire 调用（含桶锁等待），不包含后续账本登记/provider/CQE。`request_id`、`requested`、`wait_budget_us`、`api_remaining_at_entry_us` 与结果共同解释准入边界。失败日志继续每秒限频；成功按既有慢阶段阈值或 VLOG 输出。关闭 token 时旁路；格式化及快照锁只在日志输出时执行。新增一次结束时钟读取，正常准入在已有锁内增加峰值比较，无额外堆分配。
-- 同一次逻辑传输预约的最多三次尝试共用配置等待预算，重试与退避扣减剩余量；零预算只尝试一次立即准入，等满预算后不重开一个新窗口。瞬时拒绝仍可在剩余预算内重试；已提交前缀不可重放。chunk 循环只拆分已预约额度，不再次等待；未提交的剩余预约由 RAII 归还，已接受或不确定 WR 继续由原账本保有。
-- 整次预约的成本与行为变化：一个含N个WR的普通读写从N次准入变为1次，但仍有N次账本登记和完成结清。新增预约来源/数量校验仅比较所有权状态与数量，不增加锁。全额预约会在chunk构造和提交期间暂占未提交额度；FIFO队首的大请求也可能延后后面的小请求。这是“全部WR同时满足”的代价，不能仅因准入调用减少就宣称吞吐改善。超容量请求由可分窗完成改为拒绝，部署容量必须覆盖允许的一次传输最大WR数。
-- 并行BatchGet验收：派发前固定父API绝对截止时间，TBB任务建立独立请求上下文并扣除排队耗时；过期父请求不能在外部线程恢复为默认60秒。主调用线程参与任务时也不能污染父上下文。先用真实TBB调度与真实WrTokenBucket验证外部线程过期拒绝，再修复入口；不重构RequestContext；ApiDeadline补充GetDeadline/InitAt绝对截止时间快照与初始化；不能以两次时间读取重建父deadline，既避免相对初始化延长预算，也避免捕获期间的调度停顿被重复扣除。子任务独立收集downstream阶段，join后汇回父Trace，父阶段不复制计入子任务。并行任务等待之和是累计工作时间，可能超过请求墙钟时间，不可拿它当关键路径或与总耗时相加。新增一次派发快照、每个TBB range一个局部上下文及trace状态复制；仅开启trace时分配 `parallelSize * sizeof(DownstreamPhaseResult)` 的结果数组并在join后汇总，实际CPU成本仍需测量。此deadline上下文修复在capacity=0时也保留，关闭token只旁路token专属同步与账本工作。
-- 并行执行安全验收：TBB不得直接在可迁移的RPC bthread中执行；令牌条件等待、账本锁竞争和重试退避均可能让出bthread。改用现有TBB arena enqueue到其pthread，调用者通过bthread CountdownEvent等待，全部任务退出后才释放请求引用；packaged_task保留异常并在join后向调用方传播。arena不保留调用线程槽位，parallel_nums=1也必须可完成。新增一次任务入队、future状态分配和完成通知，没有新增线程池；这不是零成本修复。修订前64路BatchGet已复现TBB调度器崩溃；定向测试还观察到128次回调中96次执行在bthread，作为红灯证据。最终绝对deadline版本在指定验证机CMake+ccache下通过6个定向单测及6个URMA mock集成用例，包含64路×64对象并发、parallel_nums=1和任务异常传播；这不是物理设备或生产pmax验证。
-- pmax 需逐条核对超过 20ms 的特性相关样本：重复准入预算、登记/桶锁、CQE处理及owner清理、通知后恢复、后台回收。必须区分到期停止新提交、调用返回时间、设备真正停止时间；仅修改状态码或统计口径不能视为时延达标。
-- 异常回收审视新增待修复项：modify短暂失败后，现有quarantine只会重试已确认flush的delete，无法自行恢复modify；关闭流程只排空post就停止poll，也可能错过正常provider随后送达的flush。必须分别补充“无新流量、modify首次失败后恢复”和“shutdown期间延迟modify/flush”的红绿测试。修复要复用现有后台执行器并保证post gate持续关闭，不扩大线程池；关闭等待须有界且保持poll运行。永久无flush、无CQE且无可验证reset时，额度只能安全保留，明确服务失效/进程终止边界，不能宣称已经解决所有异常归还。
-- TDD 覆盖部分提交、缺失 bad_wr、迟到/重复 CQE、无成功 CQE、flush/delete 失败、业务记录清理、关闭和异常分配。证明总额度守恒与不超配，不能通过超时强制清零使测试通过。
-- 每项新语义先有失败测试，再做最小修复；用 CMake 和编译缓存运行相关回归，最终新增 commits 推送 fork 后重新通过 PR 门禁。性能收益和现场 pmax 仍需对应硬件/部署样本证明。
+```mermaid
+flowchart LR
+  subgraph B[已有计数]
+    E[Event：业务通知记录]
+    L[Lane：逻辑请求占用]
+  end
+  subgraph A[本次补齐]
+    T[WR token：已预约或可能已提交]
+    Q[每进程共享容量]
+    T --> Q
+  end
+  E -. 不等价 .-> T
+  L -. 不等价 .-> T
+```
 
-## 3. 外部 Use Cases
+图 1-1　已有 Event、Lane 与本次新增 WR 所有权的边界
 
-| ID | 用户/故障场景 | 预期结果 |
+请求超时后，业务 Event、lane 和设备 WR 的生命周期可能分离。既有 lane force-release 与 Event TTL 都不能证明设备停止访问 buffer，因此需要在 post 之前建立独立 WR 额度，并在正常完成以外接入安全退役流程。
+
+| # | 目标 | 验收 | 阶段 |
+|---|---|---|---|
+| U1 | 过载时发送量有界，等待可配置 | 启用时 outstanding 不超过 100；未准入不调用 provider；默认等待预算 5000us | P1 |
+| U2 | 超时与部分提交后不丢失额度归属 | 明确未提交的 WR 立即回滚；可能已提交的保留到安全结清；重复完成不重复归还 | P1 |
+| U3 | 无普通完成、无新流量时仍发起恢复 | 后台扫描发现超过 5000ms 的 WR 后退役；flush/delete 成功后额度收敛 | P1 mock；P2 设备 |
+| U4 | 测试人员能配置并解释限流效果 | Client 环境变量与 Worker 启动配置可核对；等待、额度和恢复记录可关联 | P1 |
+
+| 现状证据（固定源码） | 结论 |
+|---|---|
+| `src/datasystem/common/rdma/urma_wr_token.h:23` | 新增 token、bucket、ledger，与 Event 分开记账 |
+| `src/datasystem/common/rdma/urma_resource.cpp:2056` | post 前检查 reservation、post permit、deadline，并登记 owner |
+| `src/datasystem/common/rdma/urma_manager.cpp:2132` | CQE 按 Jetty 与 request ID 结清，Event 缺失不阻止结清 |
+| `src/datasystem/common/rdma/urma_resource.cpp:1888` | 恢复扫描复用 refill 线程，不要求成功 CQE 或新请求 |
+
+## 2. 需求边界
+
+### 2.1 部署范围与概念
+
+```mermaid
+flowchart LR
+  C[Client 进程：独立 cap]
+  W1[Worker A 进程：独立 cap]
+  W2[Worker B 进程：独立 cap]
+  C -->|写入| W1
+  W1 -->|远程读写| W2
+```
+
+图 2-1　每个进程独立控制自己的发送 WR，额度不跨进程共享
+
+| 概念 | 定义 | 与原实现关系 |
 |---|---|---|
-| UC01 | 正常小对象读写 | 无排队获得额度，原数据语义不变 |
-| UC02 | 多客户端短时拥塞，期间有请求完成 | FIFO 有界等待后继续，不超配 |
-| UC03 | 满容量且预约总预算耗尽 | 最多3次尝试共用一次配置预算及API deadline；100/200us退避也扣除预算，零等待只立即尝试一次；耗尽后 K_URMA_TRY_AGAIN |
-| UC04 | API 已过期或先于短等期限结束 | K_RPC_DEADLINE_EXCEEDED，不继续新提交 |
-| UC05 | 单对象拆多个 chunk | 循环前一次预约全部真实 WR；额度不足时第一个 WR 也不提交，需求超过容量直接拒绝 |
-| UC06 | gather 链长超过容量 | 整链拒绝，零 provider 提交；容量足够时整链预约后按原部分提交规则结清 |
-| UC07 | 中途注册失败、post 拒绝或部分接受 | 已知未接受部分归还；已接受和不确定部分保持记账 |
-| UC08 | 请求超时返回后才收到完成 | 正确释放旧 WR；不能影响已复用 lane 的新请求 |
-| UC09 | 保留 Event 被驱逐或 TTL 到期 | 硬件额度仍在，等待者不能因业务记录删除而越过硬顶 |
-| UC10 | 某 jetty 不再完成，系统无新流量 | 后台检查启动 retire/refill；有效 flush + delete 后恢复额度 |
-| UC11 | 错误完成、重复完成、旧 request ID | 对应 WR 至多结清一次；旧身份不影响替代 jetty |
-| UC12 | provider modify/delete 失败或 flush 永不到达 | 隔离保留额度；modify暂时失败按恢复间隔重试，隔离时收到的flush跨重试保留；仍需成功modify和flush后成功delete才归还。永无停止证据保持隔离，不用超时强制清零 |
-| UC13 | 服务关闭时仍有排队和在途 WR | 排队者退出，等待已获 post permit 的调用，保持 provider 生命周期安全 |
-| UC14 | 配置关闭或非法参数 | capacity=0 旁路 token 预约、指标、CQE 账本查询和扫描，保留 post gate/provider；非法参数启动失败 |
-| UC15 | 大对象无法 TCP fallback，首次准入拥塞后缓解 | 只在总预约预算内重试未提交的整次预约，已提交前缀不重放，数据完整返回 |
-| UC16 | 持续耗尽或 API 已过期 | 最多 3 次尝试；期限耗尽不继续 post，旧额度仍可恰好结清一次 |
-| UC17 | 多段请求提交前发生内存分配失败 | 不触发 provider；撤销所有未提交预留，释放缓冲区，保留健康连接可用性 |
-| UC18 | 一个请求恰好拆成两 WR，完成乱序或重复 | 先同时预约2个额度，每项各结清一次，共享内存保持到最后一项；容量1拒绝，容量2且已占1时不得提前提交 |
-| UC19 | 持续额度耗尽与真正 provider 故障分别发生 | 拥塞返回原等待错误和限频诊断；真实 provider 故障仍保留诊断；Event/lane 清理不遗漏 |
-| UC20 | 开启 client/worker 慢请求 summary，单请求多 WR 与重试 | 汇总等待 us 并传递到调用方，不因每 WR 打 tick 溢出，不重复扣除重叠总耗时；关闭 tracing 时旁路 |
+| WR token | 预约额度；含未 post 预约与 ledger 中未安全结清的 WR | 新增 |
+| Bucket | 单进程总额度与 FIFO 准入队列；不是每 Jetty 一个 cap | 新增 |
+| Ledger | 每 Jetty 按 request ID 持有 token、登记时间、buffer owner | 新增 |
+| Event / inflight event | 业务等待与通知记录；可能晚于 token 归还才删除 | 已有，修改提交/完成衔接 |
+| Send lane | 请求占用与 pending/orphan 统计 | 已有复用；不代替 WR 额度 |
+| Jetty / post gate | 物理发送资源与 provider 调用准入 | 已有；扩展退役重试和结清 |
+| Quiescence | 本文限定为收到 flush 并成功删除旧 Jetty 的安全结清路径 | 既有生命周期上衔接 ledger |
 
-## 4. 组件与调用顺序
+| 端 / 组件 | 做什么 |
+|---|---|
+| Client | 首次 URMA 初始化前读取三项环境覆盖；向 ledger 传递本地 buffer owner |
+| Worker | 启动 flags/JSON/Helm 配置；所有发送 Jetty 共用进程 bucket |
+| Common RDMA | READ、WRITE、多 chunk、Gather 在 provider post 前都经过 WR 准入 |
+
+| 不做什么 | 归属 / 原因 |
+|---|---|
+| 集群全局额度或每请求固定 100 WR | 配额域是本进程，不做跨进程协调 |
+| 用 Event 数量估计硬件 WR 数 | 业务记录与发送所有权不同，chip 计数也必须按软件口径解释 |
+| 强制回收没有停止证据的 DMA buffer | provider 停止契约；缺证据时 fail-closed |
+| Pipeline H2D 与非零 cap 混用 | 存在独立 provider 提交，当前明确拒绝；旧模式需 cap=0 |
+| 本轮重新证明硬件吞吐、P99/pmax | 另需同机同负载 A/B；历史采样不能证明总体分布 |
+
+## 3. UseCase
+
+### 3.1 正常发送与过载
+
+```mermaid
+flowchart LR
+  A[应用调用者] -->|读写请求| S[URMA 传输模块]
+  S -->|完成或有界失败| A
+```
+
+图 3-1　正常与过载场景的外部交互
+
+| 操作 | 模块行为 | 使用者观察 |
+|---|---|---|
+| 额度充足的读写 | 准入后发送 | 返回既有结果，观测等待为 0 或实际等待值 |
+| 额度不足 | FIFO 等待，受准入预算及 API deadline 约束 | 额度可用则继续，否则返回对应状态 |
+| 请求 WR 数超过 cap | 整量预约拒绝，不拆成无界并发 | provider 零提交；上层按既有策略处理错误 |
+
+### 3.2 故障与运维
+
+```mermaid
+flowchart LR
+  A[应用调用者] -->|超时或停止请求| S[URMA 传输模块]
+  O[运维人员] -->|启动配置| S
+  S -->|状态与恢复日志| O
+  S -->|结果或错误| A
+```
+
+图 3-2　故障与配置场景的外部交互，不展开内部恢复组件
+
+| 操作 | 模块行为 | 使用者观察 |
+|---|---|---|
+| 已发送后请求超时 | 结束业务等待，继续保有未结清 WR | 业务失败不等于设备已停止 |
+| 完成长期不返回 | 主动退役并等待停止证据 | 成功回收可恢复额度；缺证据时资源隔离 |
+| 配置关闭限流 | cap=0 旁路 token，保留既有 post gate | 失去本特性额度上限，启动日志明确 disabled |
+
+| UseCase | 使用者 | 场景 | 需要什么 | 设计响应 | 验收 |
+|---|---|---|---|---|---|
+| UC01 | 应用 | 普通 READ/WRITE、多 chunk | 并发发送有上限 U1 | D1 整量预约 | cap 与实际预约守恒 |
+| UC02 | 应用 | 额度耗尽、队首取消 | 有界等待 U1 | D1 FIFO / deadline | 5ms 预算；超时零新增 post |
+| UC03 | 应用 | 部分 post 或接受范围未知 | 不误归还 U2 | D2 前缀保留 / 后缀回滚 | bad_wr 异常时保守持有 |
+| UC04 | 应用 | Event 已删、晚到或重复完成 | 安全结清 U2 | D2 身份匹配 | 每 WR 只归还一次 |
+| UC05 | 应用 / 运维 | 无普通 CQE 且停止流量 | 自动推进恢复 U3 | D3 后台退役 | mock 无新流量回收；设备待验 |
+| UC06 | 运维 | modify/delete 失败、缺 flush | 保留资源且可重试 U2/U3 | D3 隔离重试 | 不提前释放 buffer 与额度 |
+| UC07 | 运维 | Client/Worker 配置与旁路 | 参数可核对 U4 | D4 独立进程配置 | 环境非法值拒绝；Worker 忽略 Client 环境 |
+| UC08 | 应用 / 运维 | 关闭、有并发 post | 关闭安全 U2 | D3 gate 关闭与排空 | poll 排空或保留未证实资源 |
+| UC09 | 应用 | Gather 批量发送 | 同样受 WR 上限 U1/U2 | D1/D2 整链预约 | 不存在直接绕过额度的 post |
+
+## 4. 方案设计
+
+### 4.1 关键类图与变更归属
+
+```mermaid
+classDiagram
+  class UrmaManager {
+    <<已有修改>>
+    +UrmaRead() Status
+    +UrmaWritePayload() Status
+    +UrmaGatherWrite() Status
+  }
+  class UrmaResource {
+    <<已有修改>>
+    +ReserveWrTokens(requestId count reservation) Status
+    +PostReservedWr(jetty first count reservation owner) UrmaPostResult
+    +RecoverStalledWr(now) void
+  }
+  class WrTokenBucket {
+    <<新增>>
+    +Acquire(count waitUs deadline token waitedUs) Status
+    +GetSnapshot() Snapshot
+    +Close() void
+  }
+  class WrToken {
+    <<新增>>
+    +TakeOne() WrToken
+    +Reset() void
+  }
+  class UrmaJetty {
+    <<已有修改>>
+    +TrackWr(requestId token now owner) Status
+    +CompleteWr(requestId) bool
+    +DeleteAfterFlush() Status
+  }
+  class WrTokenLedger {
+    <<新增>>
+    +Track(requestId token now owner) Status
+    +Complete(requestId) bool
+    +HasExpired(now timeout) bool
+    +ReleaseAfterQuiescence() void
+  }
+  UrmaManager --> UrmaResource : 准入与提交
+  UrmaResource *-- WrTokenBucket : 单进程
+  UrmaResource --> UrmaJetty : 管理生命周期
+  WrTokenBucket ..> WrToken : 产出预约
+  UrmaJetty *-- WrTokenLedger : 每 Jetty
+  WrTokenLedger *-- WrToken : 每 WR 一个
+```
+
+图 4-1　关键类与所有权；图中入口为摘要，完整内部接口见 4.6
+
+D1. 新增 bucket 与 RAII token，满足 UC01、UC02、UC09。D2. 新增 ledger 并改造提交/完成衔接，满足 UC03、UC04。D3. 扩展已有 Jetty 退役机制，满足 UC05、UC06、UC08。D4. 新增配置及必要观测，满足 UC07。
+
+| 机制 | 相对对照主线 | 必要性 / 删除后果 |
+|---|---|---|
+| WrToken / Bucket / Ledger | 新增 | 分开业务与 WR 所有权，避免超发和漏记 |
+| CQE、Event、lane、refill 线程、post gate | 已有复用为基础 | 不是本 PR 从零新建的恢复系统 |
+| buffer owner 传递、CQE 结清、部分提交回滚 | 已有调用链修改 | 未证实完成时避免释放或复用 DMA 内存 |
+| Jetty 隔离重试、删除后清账、关闭排空 | 已有生命周期扩展 | 兼顾失败重试与“不提前归还” |
+| BatchGet 调度与 context/deadline 传播 | 已有修改，范围待收窄审视 | token 等待可迁移 bthread；TBB 状态属于 pthread。当前影响所有并行 BatchGet，不能声称零开销 |
+| Coordinator 两处重复 ReportCandidate 测试修复 | 已有修改，与 WR 无直接关系 | 审视建议独立交付；本文不为其扩展设计范围 |
+
+### 4.2 开发视图
 
 ```text
-统计一次逻辑传输的全部 WR 数（gather 已构造整链）
-    -> 一次预约全部额度（此时不持有 PostPermit）
-    -> 读写逐 chunk 创建 Event 并拆分预约，gather 保持整链
-    -> 获得 jetty PostPermit
-    -> 将每个额度移入该 jetty 的 request-ID 账本
-    -> provider post
-        -> 成功：账本继续持有
-        -> 已知拒绝：撤回未接受后缀
-        -> bad_wr 缺失或不属于链：全部按可能接受保留
-普通 CQE -> 查实际 jetty + request ID -> 账本结清 -> 定向唤醒
-后台过期扫描 -> retire -> drain posts -> ERROR -> FLUSH_ERR_DONE
-    -> provider delete 成功 -> 剩余账本结清
+src/datasystem/common/rdma/
+  urma_wr_token.h/.cpp         [新增] 额度、FIFO、RAII、逐 WR 账本
+  urma_resource.h/.cpp         [已有修改] 准入、post、后台恢复、删除结清
+  urma_manager.h/.cpp          [已有修改] 拆分 WR、Event 与 CQE 衔接
+  fast_transport_manager_wrapper.* [已有修改] 透传 buffer owner
+src/datasystem/client/object_cache/  [已有修改] 提交时保活本地 buffer
+src/datasystem/worker/object_cache/  [已有修改] Get/迁移/批量 owner 与上下文
+src/datasystem/common/{flags,log,metrics}/ [已有修改] 参数与等待观测
+cli/deploy/conf/ + k8s/helm_chart/   [已有修改] 三项部署参数
 ```
 
-`WrTokenBucket` 是进程资源层的容量状态；`WrToken` 可移动、不可复制，支持把一次批量预约拆成单 WR。
-`WrTokenLedger` 属于物理 jetty 实例，业务 Event 不拥有已提交额度。与旧草案“Event 析构即归还”相比，
-这避免了 TTL/驱逐的提前释放，也能在业务等待者调度迟缓时及时处理硬件完成。
+### 4.3 关键交互
 
-gather 先构造完整描述符及Event，再一次预约整链额度。整链超过capacity直接拒绝，不再分窗口流式提交；普通read/write在切片循环前预约全部额度。已知未接受后缀与未提交的预约分别回收；未知接受范围仍保留账本。gather的准入前Event也说明Event数不能作为token实际占用数。
+#### 正常准入、CQE 与 Event 分离
 
-### 4.1 等待与错误
+```mermaid
+sequenceDiagram
+  participant M as UrmaManager
+  participant R as UrmaResource
+  participant B as WrTokenBucket
+  participant L as Jetty Ledger
+  participant P as Provider
+  M->>R: 预约本次普通读写全部 WR
+  R->>B: Acquire 受共享预算与 API deadline 约束
+  B-->>R: reservation 或失败
+  alt 准入失败
+    R-->>M: K_URMA_TRY_AGAIN 或 deadline
+  else 准入成功
+    M->>M: 普通读写创建 Event
+    M->>R: 提交已预约 WR
+    R->>R: 获取 post permit
+    R->>L: 按 request ID 登记 token 与 owner
+    R->>R: 再检查 API deadline
+    R->>P: post WR
+    P-->>M: 后续 poll 获得 CQE
+    M->>L: Complete 匹配 Jetty 与 request ID
+    L->>B: 归还一次额度
+    M->>M: 通知与清理业务 Event
+  end
+```
 
-使用 steady_clock 计算绝对截止，假唤醒不能重置预算。直接采用 min(wait_us, API remaining)，不引入原稿
-未经验证的固定 3000us reserve / 1500us 分叉，避免小 API 预算时参数看似有效却不等待。
+图 4-2　普通 READ/WRITE 提交与完成；额度结清早于业务 Event 清理
 
-容量满且 wait_us=0 也返回统一的 wr_token_wait_timeout，消除旧稿 exhausted 与 timeout 文案冲突。
-错误中包含 waited_us、outstanding、capacity；关闭与 API 到期具有可辨认原因。
-正常路径通过指标/trace 记录等待时间，避免无条件热路径日志。
+Gather 是“先创建 Event，再整链预约”，与普通 READ/WRITE 的前置顺序不同，但 provider 首次 post 之前都必须取得对应 WR 的额度。普通读写先按拆分后的 WR 总数预约，Gather 按整链预约；单次预约超过 cap 时拒绝，不自动分成多个 cap 窗口。
 
-`ReserveWrTokens` 为整次逻辑传输固定一个配置预算终点，最多3次零提交准入尝试共用默认5000us；100/200us退避也扣除剩余预算，wait_us=0只立即尝试一次。provider错误、部分提交和未知接受范围不触发重试。每次申请受父API绝对截止时间约束，紧邻provider调用前再次检查；这不能抢占正在阻塞的provider或OS调度。
+#### 部分提交与回滚
 
-### 4.2 恢复与生命周期
+```mermaid
+sequenceDiagram
+  participant R as UrmaResource
+  participant L as Jetty Ledger
+  participant P as Provider
+  R->>L: 提交前登记整条 WR 链
+  R->>P: post WR 链
+  P-->>R: 错误状态与 bad_wr
+  alt bad_wr 在本链内
+    R->>L: 只结清明确未接受后缀
+    L-->>R: 已接受前缀继续持有 token 与 owner
+  else bad_wr 缺失或不在本链
+    R->>L: 保留所有可能已接受记录
+  end
+```
 
-复用 `UrmaJetty` 的 ACTIVE -> QUIESCING -> MODIFYING -> WAIT_FLUSH -> DELETE_READY -> DELETING -> DESTROYED。
-失败进入 QUARANTINED。复用 `RetireJetty`、post gate 和 `ScheduleDeleteJetty`，不另建与它们竞争的删除器。
+图 4-3　不能把 provider 错误等同于整条 WR 链均未提交
 
-在既有 refill 控制线程的 50ms 周期检查最老未结清 WR。默认 recovery_timeout_ms=5000，作为独立启动参数；
-因为这是在途恢复时间，不应复用几百微秒的准入等待参数。检查时间达到阈值时关闭旧 jetty，不等待新的成功 CQE。
-新 jetty 可先按原有 live/refill 上限创建，但创建本身不释放旧 WR token。
+登记中途分配失败与 post 前 deadline 失效均属于未提交路径，按已登记前缀回滚。未知接受范围不能盲目重发；只对准入失败且尚未提交的窗口进行有界重试。
 
-确认 flush 后的 provider delete 失败会设置独立的可重试标记。后台按恢复阈值的间隔，将该类 QUARANTINED 状态重新送入原删除执行器；post gate 始终关闭，成功后移除隔离引用并结清账本。modify失败采用独立标记，按同一恢复间隔转回QUIESCING并复用原modify执行器；后续成功modify清除此标记。隔离期间收到的flush也锁存，避免重试成功后依赖第二次通知。缺少flush时仍不得删除；永久modify失败或永无flush仍需设备停止/reset证据或明确进程终止边界。删除持续失败时额度保持可追踪，不能将其视为已释放。该修订经CMake+ccache通过45个故障用例和11个状态机用例（URMA mock，含正常进程退出）；关闭lifecycle drain补充验证如下，不能据此宣称真实设备所有异常归还已完成。
-#### 关闭排空补充契约（09/18，软件验证通过，已推送）
+#### 无普通 CQE 的退役与恢复
 
-Stop先关闭准入并等待现有post许可退出，随后保留CQE poll、modify/delete执行器和恢复重试，在recovery_timeout_ms预算内等待全部注册Jetty完成删除。不能只等pending集合为空：并发退休可能刚关闭gate、尚未插入pending。成功条件同时涵盖注册表与pending/quarantine，包含收发Jetty。正常删除完成才唤醒等待；正常调用热路径不增加锁。
+```mermaid
+sequenceDiagram
+  participant F as RefillLoop
+  participant R as UrmaResource
+  participant J as UrmaJetty
+  participant P as Provider
+  participant L as WrTokenLedger
+  F->>R: 周期扫描过龄 WR
+  R->>J: 退役并关闭 post gate
+  J-->>R: 在途 provider 调用排空后推进
+  R->>P: modify ERROR
+  alt 收到 flush 且 delete 成功
+    P-->>R: FLUSH_ERR_DONE
+    R->>P: delete 旧 Jetty
+    P-->>J: 成功
+    J->>L: ReleaseAfterQuiescence
+  else modify 或 delete 失败
+    R->>J: 隔离并后台重试
+  else 永久缺停止证据
+    R->>J: 保留资源与剩余额度
+  end
+```
 
-关闭期间禁止新Jetty注册/发布，但原有50ms后台循环继续重试失败modify/delete，不受正常恢复间隔阻挡；Clear最终停止后台线程。缺flush或永久provider失败时Stop返回明确超时，Clear保留未证明静默的Jetty、owner和provider依赖，禁止强行清零额度。该预算不包含可能卡住的provider post/调用或最终线程join，不是整个进程关闭的硬实时上限。重复Stop在poll已停止时不得重新等待不可完成的排空。
+图 4-4　无成功 CQE、无新流量也能发起恢复；缺停止证明不提前归还
 
-验收以独立进程覆盖延迟flush、缺失flush、首次delete失败；旧实现三例均失败。另复现超时后Clear持执行器锁join的死锁（已锁存flush、modify延迟）：8秒watchdog终止；改为锁内移出执行器、锁外join后通过。最终CMake+ccache通过49个故障用例及11个状态机用例，整进程退出码0，正常清理JFC/JFCE/context，无此前残留警告；4个变更C++文件远端与本地SHA相同。mock只证明生命周期和所有权顺序，不证明实际硬件停止DMA。
+复用 refill 线程，正常等待间隔为 50ms；这不是恢复硬实时保证。5000ms 从 ledger 登记时间计龄；provider 调用阻塞、调度或 flush 缺失会延长恢复。替换 Jetty 不构成旧 Jetty 的停止证据。
 
+#### 关闭与未证实资源保留
 
-### 4.3 并发与内存安全
+```mermaid
+sequenceDiagram
+  participant M as UrmaManager
+  participant R as UrmaResource
+  participant B as WrTokenBucket
+  participant P as Poll 线程
+  M->>R: BeginShutdown
+  R->>B: Close 并唤醒 waiter
+  R->>R: 关闭 gate 并退役 Jetty
+  M->>R: WaitForPostPermitsDrained
+  M->>R: WaitForRetiredJetties
+  P->>R: 持续提供 CQE 与 flush 处理
+  alt 确认排空
+    R-->>M: OK
+  else 排空预算耗尽
+    R-->>M: deadline 并保留未证实 owner
+  end
+  M->>P: 后续关闭 poll
+```
 
-- bucket 和 FIFO 队列使用 bthread mutex，waiter 使用各自条件变量；普通释放只通知可满足的队首。
-- token 持有共享的 bucket 状态，句柄可以晚于 bucket facade 析构；Close 唤醒排队者。
-- jetty 账本单独互斥；在锁内摘除条目，在锁外销毁 token，避免嵌套持锁唤醒。
-- 申请额度时不得持有 provider PostPermit；否则拥塞等待可能挡住 retire 的 drain。
-- 发布账本早于 provider post；CQE 可先于 post 返回，不能用返回后的 Commit 重新加入已结清记录。
-- 每个 WR 账本还持有独立的 localBufferOwner：worker ShmUnit、client BufferHandle 或 gather 实际源
-  ShmUnit 集合。已知未提交、对应 CQE 或安全删除时在锁外释放 owner；Event 删除不释放它。
-- 本地 owner 只防止内存析构/归还，不保证调用者不会改写同一内存，也不能单方面保护对端内存；
-  对端超时/复用仍需沿传输协议验证，不能由 token 守恒推导。
-- 仅 provider 删除成功后批量结清；ERROR 设置成功本身仍不等于 flush 完成。
+图 4-5　关闭时先排空再结束 poll；排空超时不能授权强制释放
 
-### 4.4 性能开销、耗时口径与发布边界
+`WaitForRetiredJetties` 有配置预算，`WaitForPostPermitsDrained` 等待在途 provider 调用并非有界。不能把局部排空预算描述为整体 shutdown 时间上限。
 
-以下按本地修订稿说明；独立微基准仍是历史 `644dca738` 测量，不代表本轮性能。容量控制会增加 CPU、锁竞争和内存驻留开销；当前证据不足以宣称“无性能影响”。这里区分源码可确定的成本、已测软件微基准和尚未测量的真实链路影响。
+| 条件 | 状态 / 行为 |
+|---|---|
+| 准入预算耗尽、关闭或请求超过容量 | `K_URMA_TRY_AGAIN`；不新增 provider post |
+| API deadline 已到 | `K_RPC_DEADLINE_EXCEEDED`；已登记未提交部分回滚 |
+| reservation/WR 链不匹配 | `K_INVALID`；拒绝提交 |
+| ledger 重复身份 / 分配失败 | `K_DUPLICATED` / `K_OUT_OF_MEMORY`；未提交回滚 |
+| provider post 失败 | `K_URMA_ERROR`；按接受范围保留；不伪装成准入失败 |
+| Pipeline H2D 与非零 cap 混用 | `K_NOT_SUPPORTED`；不声称自动 TCP fallback |
 
-#### 提交、完成与后台成本
+### 4.4 模块依赖图
 
-| 路径 | 增加的工作 | 成本与边界 |
+```mermaid
+flowchart TD
+  C[Client buffer owner] --> W[既有传输 wrapper]
+  S[Worker ShmUnit owner] --> W
+  W --> M[UrmaManager]
+  M --> R[UrmaResource]
+  R --> B[WrTokenBucket]
+  R --> J[UrmaJetty]
+  J --> L[WrTokenLedger]
+  R --> P[URMA provider]
+  M --> E[既有 Event 与通知]
+  R --> O[既有 Metrics 与 Trace]
+```
+
+图 4-6　依赖限定在传输、资源和既有观测链；不引入全局协调服务
+
+### 4.5 关键数据结构与并发
+
+| 数据结构 | 字段 / 所有权 | 并发与释放规则 |
 |---|---|---|
-| 无排队准入 | 时间读取、进程共享 bucket 的 bthread mutex、计数及 shared_ptr 引用操作；每次尝试记录直方图 | 一次逻辑传输一次整量预约，可减少多chunk的准入次数；未提交部分会暂占额度。没有等待队列节点分配，但不是无锁路径 |
-| 逐 WR 登记 | 每 Jetty ledger mutex、requestId 查找/插入、unordered_map 节点分配、posted 时间戳和 owner 引用 | 按实际 WR 数发生；坏链校验及登记为提交链长度的线性遍历。栈上回滚守卫本身不分配 |
-| 额度拥塞 | FIFO list 节点分配、条件变量挂起/唤醒、重新获取锁、到期检查 | bthread 等待而非忙轮询；调度和锁竞争可能使实际返回晚于配置预算。大的整量预约位于队首时，后续小预约也需等待 |
-| 匹配 CQE | Jetty registry mutex/查找/weak_ptr 提升，ledger mutex/查找/摘除；退出ledger锁后先获取bucket锁归还token并通知队首，再释放owner | 这是轮询完成处理的新增成本，会影响通知前处理时间；不是只有提交端多一次计数。最后一个 owner 的析构/内存回收也可能在此发生 |
-| 后台恢复 | 复用现有 RefillLoop，通常每50ms醒来，通知可更早唤醒；收集有效 Jetty 引用并逐账本检查过期 | 不新建线程，但增加扫描、临时vector分配和锁竞争；一次扫描上界按 O(J+W) 理解，J为注册Jetty数、W为检查到的账本条目数，不是每轮固定O(1) |
-| 恢复重试 | 暂时modify失败，或已确认flush后删除失败的隔离项，按 recovery_timeout_ms 间隔重新调度原执行器 | 默认5000ms为检查/重试阈值，实际恢复还取决于调度、post drain、flush与delete，不能解释为5秒内必定归还 |
+| WrToken::State（新增） | capacity、outstanding、peak、waiter 指针队列、closed | bthread mutex；FIFO 队首逐个唤醒；token 共享 state 以支持延迟归还 |
+| WrToken（新增） | 共享 state 与 count；仅可 move | 析构 Reset；TakeOne 转移一份所有权，禁止复制重复归还 |
+| WrTokenLedger::Entry（新增） | request ID → token、posted、localBufferOwner | ledger mutex；移出记录后锁外 Reset / 销毁 owner；重复 Complete 返回 false |
+| UrmaPostResult（新增） | status、submittedCount、providerStatus、admissionRejected | 区分准入失败与 provider 失败；submittedCount 在未知边界时为保守可能接受数 |
+| postGate / lifecycle（已有扩展） | active provider 调用与退役状态；flush、modify/delete 重试标记 | 既有原子 gate 允许并行 post；退役关闭准入，在途调用排空后操作 provider |
+| Event / lane（已有复用） | 通知状态、retained-timeout、pending/orphan | 不持有 token 结清权限；不能用 Event TTL 替代 ledger |
 
-不增加有效载荷复制，但会延长 buffer owner 的持有时间。账本条目/额度受capacity约束；buffer字节数并不因此有同样的上限，Gather共享集合还可能持有整个批次的源内存。需要观察驻留内存与释放延迟。
+**守恒口径：**`outstanding = 未转入 ledger 的预约份额 + ledger 内 token 份额`。cap>0 时不超过 capacity；它覆盖“已预约或可能已提交”，不是精确硬件在飞数。每个终结路径只转移或销毁一次 owner。
 
-capacity=0 会跳过新增的 token Acquire、等待直方图/summary、逐WR登记、CQE账本查找和恢复扫描。它不等于与基线机器指令完全一致：统一post封装/链校验、owner参数转递、Gather源owner集合构造，以及Jetty账本对象初始化仍可能存在。关闭tracing只跳过summary归集，不关闭已启用额度路径的指标和账本。
+### 4.6 组件接口设计
 
-#### 耗时与日志的变化点
-
-| 观测项 | 当前精确口径 | 不包含或不能推断的内容 |
-|---|---|---|
-| `wr_token_wait_us`，histogram ID146，us | 每次启用额度的准入尝试记录一次，包括失败与0；只有实际走过条件变量等待才记正耗时，采样从Acquire加锁前start到等待分支退出 | 立即准入记0，即使获取mutex/计数有成本；不等于整个Acquire耗时。排队样本可包含初始锁竞争和唤醒重新获锁时间 |
-| `urma.wr_token_wait`，phase31，us | 复用上述waitedUs，同一Trace内多个逻辑传输和失败尝试求和，再通过既有phase协议合并下游，进入client/worker summary | 不含100/200us重试退避、账本登记、provider调用、CQE处理和后台恢复。并行分支的累计量不保证等于请求关键路径时长 |
-| `wr_token_wait_failed_total`，counter ID147 | 每次Acquire返回错误递增，包括预算耗尽、deadline或关闭等错误 | 不是最终失败请求数；一次请求多次尝试可多次计数。不要与普通完成失败混用 |
-| `[URMA_WR_TOKEN_WAIT_FAILED]` | 同一调用点每秒限频输出waited_us、outstanding、requested和原status | 日志条数不能代替失败计数；限频减少输出，但失败状态构造和计数仍有成本 |
-| 普通write的 `[UrmaWrite] elapsed` / `postUs` | 原子预约改到chunk循环之前，逐chunk的Timer及postUs在预约成功后设置；现在不包含整量准入等待，仍含登记、NUMA设置、provider及调度 | 旧644逐chunk准入包含在此窗口中；修订后该值下降不证明DMA变快。`postUs`仍不是实际进入provider的时刻 |
-| 普通write的 `urma_write_latency` | 每chunk的ScopedTimer位于整量预约之后，不包含循环前准入；包含该chunk的post及其作用域内工作 | 必须与旧版计时边界区别，不能用它替代整请求流控成本 |
-| `Urma total write.` / `Urma gather write.` / 上层transport窗口 | 普通write总Timer在预约前；gather提交Timer也在整链预约前。上层覆盖整个调用的区间仍包含准入等待 | 失败路径可能不输出成功总耗时；必须结合失败诊断和token累计字段，不把等待再次加到父窗口 |
-| 完成与恢复 | CQE回调在通知业务前结清账本；恢复日志标识retire/flush/delete阶段 | 当前没有独立的ledger CPU、bucket锁等待、provider-only post或总恢复耗时分解，不能从wr_token_wait反推出这些值 |
-
-summary仅在已有Trace包含tick时记录，仍受原有采样/慢日志策略约束。实现扫描已有固定容量数组（最多12个downstream phase），找到WR项后累加，不为每个WR新增tick或动态容器；首次加入时若槽位已满仍可能drop，应结合phase_dropped判断，字段缺失不能直接当作0。`URMA_WR_TOKEN_WAIT`加入process慢日志判定，可能使原来未打印的请求触发summary输出；格式化/I/O量也可能变化。
-
-WR等待是transport总耗时的重叠细项，未加入derived减法列表。不要把它再次加到总耗时，也不要在不同作用域/并行累计口径下简单相减以估计DMA时间。一个逻辑传输拆两WR时只预约一次，其失败尝试的waitedUs累加到同一槽；额度释放仍按各WR分别进行。QueryAndGet改为同Trace的Worker采样access摘要及原慢日志字段，未扩展Client协议；缺失不能解释为0。
-
-默认最多3次准入共同使用5000us总预算，100/200us退避从其中扣除，并受API绝对截止时间限制。旧644的15300us描述不再适用于本地修订。实际返回仍可能因锁、调度及provider阻塞超过预算；summary只合计上述口径的waitedUs，不包含退避，acquire_us也不包含重试之间的退避。
-
-#### 已有微基准与不足
-
-2026-09-18 封版收缩：独立 `urma_wr_token_bench` 已从产品 PR 移出，连同 CMake/Bazel 入口减少 186 行、3 个变更文件；历史软件测量记录保留。复核旧基准应使用历史提交 `644dca738`，不能在修订分支运行已移除的 target。该工具不参与功能回归，也不代表硬件链路性能。
-
-下表复用已保存测量，不是本次文档更新重新跑出的结果。验证环境为x86_64、CMake Release+ccache、WITH_TESTS=ON；每线程100万次操作，共享capacity64桶，每线程独立ledger。基准直接调用桶/账本，没有真实provider和非空buffer owner。
-
-| 场景 | 1线程 wall ns/op | 8线程 wall ns/op | 8线程 cpu ns/op |
-|---|---:|---:|---:|
-| baseline：计时/校验循环 | 30.46 | 3.94 | 29.93 |
-| disabled_acquire | 57.58 | 7.43 | 49.85 |
-| acquire_reset | 208.07 | 947.57 | 5977.85 |
-| acquire_track_complete | 388.63 | 1280.94 | 8106.34 |
-
-全部场景errors=0、最终outstanding=0。wall ns/op为总墙钟除以总操作数，即聚合吞吐倒数；8线程1280.94ns/op不能表述为“每个请求只增加1.28us”，也不是P99。cpu ns/op为进程CPU增量除以总操作数，包含并发线程的CPU消耗。baseline包含计时和循环开销，不是旧版真实传输基线。
-
-8线程结果提示共享bucket竞争成本值得关注，但它没有把锁、分配、引用计数分别归因；也未覆盖同一Jetty的多线程ledger竞争、真实CQE registry/轮询、等待饱和、非空owner析构、指标/summary/日志和后台扫描。capacity64下最多8个并发单额度操作，不是在测容量耗尽的排队性能。disabled基准直接调用Acquire，实际生产提交路径关闭额度时会跳过Acquire，两者不能等同。含测试注入检查的结果不能替代生产构建与真实UB设备A/B。
-
-封版前如需性能结论，应在同一机器/同一负载对比基线、当前capacity0与capacity100，分别控制tracing/metrics配置；至少覆盖小对象高QPS、1.5MiB两WR、Gather、容量饱和和恢复，记录吞吐、P50/P95/P99、CPU、分配/驻留内存、等待分布、失败/fallback及恢复时间。上述真实链路性能对比尚未完成，门禁通过不能充当“无性能退化”结论。
-
-源码依据：`urma_wr_token.cpp`的Acquire/WaitForCapacity/Track/Complete，`urma_resource.cpp`的RecordWrTokenWait/PostSendWr/RefillLoop/GetJettyById，`urma_manager.cpp`的UrmaWriteImpl/CheckCompletionRecordStatus，`trace.cpp`的AddDownstreamPhase和`latency_phase.cpp`的process gate。容量0只能在初始化配置时回退，不支持热缩容；Pipeline H2D兼容性和真实设备安全停止边界仍按本RFC其他章节执行。
-
-## 5. 组件接口与配置
-
-业务 SDK 没有新增公开方法。下列是额度组件面向传输调用方的接口，签名与当前头文件一致；本节只列本特性新增/变更的配置。
+下列为实际 public 内部接口，省略命名空间，不是新增 SDK API。类图只画相关入口，未罗列全部成员。
 
 ```cpp
-// WrTokenBucket：成功时 token 持有 count 份预约；失败不取得额度，waitedUs 返回实际排队耗时。
-Status Acquire(uint32_t count, uint64_t waitUs, std::chrono::steady_clock::time_point deadline,
+Status Acquire(uint32_t count, uint64_t waitUs,
+               std::chrono::steady_clock::time_point deadline,
                WrToken &token, uint64_t &waitedUs);
-// WrTokenLedger：转入一个 WR 的 token 与 owner，Complete 仅在首次匹配时返回 true。
-Status Track(uint64_t requestId, WrToken token, std::chrono::steady_clock::time_point now,
+Status ReserveWrTokens(uint64_t requestId, uint64_t count, WrToken &reservation);
+UrmaPostResult PostReservedWr(const std::shared_ptr<UrmaJetty> &jetty,
+                             urma_jfs_wr_t *first, uint32_t count,
+                             WrToken reservation, std::shared_ptr<void> localBufferOwner = nullptr);
+Status Track(uint64_t requestId, WrToken token,
+             std::chrono::steady_clock::time_point now,
              std::shared_ptr<void> localBufferOwner = {});
 bool Complete(uint64_t requestId);
+void ReleaseAfterQuiescence();
 ```
 
-
-
-| 参数 | 默认 | 语义 |
+| 发送方 → 接收方 | 数据载体 | 契约 |
 |---|---|---|
-| urma_wr_token_capacity | 100 | 进程级 WR 额度，范围 [0, 65536]，0 关闭，启动生效 |
-| urma_wr_token_wait_us | 5000 | 一次逻辑传输的全部准入尝试与退避共享预算，范围 [0, 60000]us；0只立即尝试，启动生效 |
-| urma_wr_token_recovery_timeout_ms | 5000 | 范围 [1, 60000]ms，WR 未结清触发退役的年龄阈值，启动生效；不等于保证完成时间 |
+| Manager → Resource | requestId、WR 数、reservation | 普通读写在 Event 前预约；Gather 整链在 post 前预约 |
+| Resource → Jetty ledger | token move、WR 身份、owner | post 前登记；已接受部分不得随业务超时释放 |
+| CQE dispatcher → Jetty ledger | local Jetty ID、user_ctx | 精确结清一次；Event 不存在也必须处理 |
+| Jetty delete → ledger | 确认 flush 后成功 delete | 批量释放残留；新 Jetty 创建不具备此权限 |
 
-Worker flags、部署 JSON 和 Helm 使用同名参数及范围。客户端首次 URMA 初始化前支持
-`DATASYSTEM_URMA_WR_TOKEN_CAPACITY`、`DATASYSTEM_URMA_WR_TOKEN_WAIT_US`、
-`DATASYSTEM_URMA_WR_TOKEN_RECOVERY_TIMEOUT_MS`；未设置保留现值，非法值初始化失败，Worker 忽略这些客户端环境变量。
+## 5. 对外接口与部署参数
 
-流水线 H2D 内部还有独立 provider 提交，不具备逐 WR 记账接口。本次实现明确拒绝与启用 token 的组合，
-并拒绝带 pipeline 标记的混配请求，防止绕过硬顶；不能宣称此类错误自动 TCP fallback。
-启动配置、pipeline 初始化入口和带 pipeline 标记的请求均已实施拒绝，故障测试覆盖该边界。
-旧 pipeline 运行模式可选择 capacity=0；关闭模式同时关闭本次账本的 buffer owner 保活，恢复原有传输行为。
+### 5.1 SDK 接口
 
-## 6. 修改边界
+| 接口 | 调用方 | 频率 | 说明 |
+|---|---|---|---|
+| 既有 Set/Get、Put/Get 等 SDK 入口 | 应用 | 每请求 | 本 PR 不新增或修改公开 SDK 签名；额度作用于内部实际 WR 提交 |
+| 启动环境与 Worker 配置 | 测试 / 运维 | 首次初始化 / 重启 | 启动快照生效，不提供在线动态修改承诺 |
 
-`src/datasystem/common/rdma/urma_wr_token.*`：额度和账本；
-`urma_resource.*`：资源持有、提交封装、恢复扫描、删除后结清；
-`urma_manager.cpp`：两类提交入口与完成分派；flags/config/metrics：参数与可观测性；
-CMake/BUILD.bazel、URMA UT/ST 和 `.repo_context` 同步。
-workbench 仅更新 RFC，不增加或依赖 workbench 脚本。
+例如内部预约 `Status ReserveWrTokens(uint64_t requestId, uint64_t count, WrToken &reservation)` 不属于用户 API。
 
-## 7. 验证矩阵
+### 5.2 本特性新增参数
 
-| 维度 | 必须验证 |
-|---|---|
-| 容量 | 并发硬顶、0 关闭、批量拆分、超大预约不消耗 |
-| 排队 | FIFO、队首取消、假唤醒、API 到期、关闭唤醒、bthread 协作调度 |
-| 所有权 | move/reset、失败早退、重复 request ID、重复 CQE、旧 jetty 身份 |
-| 提交 | READ/WRITE、多 chunk、gather 超容量、bad_wr 首/中/尾/空/链外 |
-| 恢复 | 无成功 CQE、无新流量、flush 在 modify 内到达、provider post 尚未返回 |
-| 失败保护 | modify/delete 失败、永久无 flush、不提前释放、资源数不无限增长 |
-| 业务集成 | TCP fallback、超时状态不变、数据正确、buffer 不提前重用 |
-| 构建 | 目标环境 CMake + ccache，mock 与非 URMA 构建，Bazel 元数据一致 |
-| 性能 | 默认配置与基线比较吞吐、尾延迟、锁争用；不得把 mock 吞吐当真实 UB 结果 |
+| 参数名 | 类型 | 默认值 | 范围与说明 |
+|---|---|---|---|
+| urma_wr_token_capacity | uint32 | 100 | [0,65536]；每进程，0 关闭 token；不是每 Jetty 或每 RPC |
+| urma_wr_token_wait_us | uint32 | 5000 | [0,60000]us；0 不等待；受 API 剩余期限约束 |
+| urma_wr_token_recovery_timeout_ms | uint32 | 5000 | [1,60000]ms；WR 过龄退役阈值；也用于局部关闭排空预算 |
 
-## 8. 当前实现与验证
+Worker flags、dscli JSON 与 Helm 使用同名参数。cap=0 回到既有路径并关闭本次 ledger owner 保活；这不是另一种有额度保护的模式。
 
-`b04ca4c8f`（已合入主线 `3d31acd54`）完成的组合回归，后续 `5bdc13c65` 重跑受影响的故障49、Worker7、系统6共62项，全部通过：
+### 5.3 本特性新增 Client 环境变量
 
-| 验证范围 | 通过 / 总数 | 覆盖 |
-|---|---:|---|
-| WR token | 17/17 | FIFO、容量守恒、取消、owner析构顺序 |
-| 故障与配置 | 49/49 | 整量预约、部分post、无普通CQE恢复、modify/delete失败重试、关闭排空和超时保留 |
-| Jetty gate | 11/11 | post/retire/delete顺序、隔离期间flush锁存 |
-| Worker定向 | 7/7 | 精确父deadline、TBB调度、QueryAndGet七种采样/等待状态 |
-| 跨Worker系统 | 6/6 | 多WR预约、超容量拒绝、两端等待摘要、64×64并发BatchGet |
-| 主线采样兼容 | 27/27 | request/access独立采样、0/1边界、access guard与记录格式 |
-
-CMake Release + ccache，URMA mock，0失败/跳过，测试进程正常退出。34个变更C++文件严格SHA相等。系统套件85.212s是测试总墙钟时间，不是性能指标。本表属于合入最新主线后的验证；最新6项远程门禁已全部通过。
-
-历史 `644dca738` 曾通过277项mock/公共组件与17项独立非URMA测试及6项启用门禁；这些只作为历史记录，不计入本轮117项，也不证明新提交门禁已过。独立微基准及其构建入口已从特性PR移除，历史测量保留为参考。
-
-新增红绿证据包含：整量预约之前提前提交、过期后post、完成token受owner析构拖延、TBB丢失父deadline、modify失败无新流量不重试、隔离flush丢失、关闭先停poll、Clear持锁join死锁、QueryAndGet采集/摘要缺失。具体边界见[验证报告](validation-report.md)。
-
-### Use Case 到最终测试的对应
-
-| Use Case | 已通过的代表测试 |
-|---|---|
-| UC01 | `MultiChunkRemoteGetUsesWrAdmission`、`GatherLargerThanCapacityRejectsBeforeSubmission`（0918组合回归通过） |
-| UC02 | `FifoPreventsSmallRequestBypassingHead`、`ReleaseWakesWaitingCaller` |
-| UC03 | `WaitBudgetExpiresWithoutLeaking`、`AdmissionRetryIsBoundedByAttemptsAndDeadline` |
-| UC04 | `DeadlineWinsEvenWhenCapacityIsFree`、`ApiDeadlineBoundsLongerConfiguredWait` |
-| UC05 | `MultiChunkRemoteGetUsesWrAdmission` |
-| UC06 | `GatherLargerThanCapacityRejectsBeforeSubmission`（0918组合回归通过） |
-| UC07 | `PartialPostReturnsOnlyUnacceptedSuffixCredits`、`MissingBadWrPreservesAllPotentiallyAcceptedCredits` |
-| UC08 | `CompletionReturnsCreditOnceAfterEventDeletion` |
-| UC09 | `PostAdmissionCountsWrRatherThanEvents`、`CompletionReturnsCreditOnceAfterEventDeletion` |
-| UC10 | `StalledWrRetiresWithoutSuccessfulCompletion`、`BackgroundRecoveryReturnsCreditsWithoutNewTraffic` |
-| UC11 | `SplitReservationAndSettleExactRequestIdentity`、`CompletionReturnsCreditOnceAfterEventDeletion` |
-| UC12 | `FailedDeleteRetriesWithoutLosingCredits`、`MissingFlushAndQuarantineRetainCreditsAndBuffer` |
-| UC13 | `ShutdownWakesBlockedCallerWithoutReturningHeldCredit`、`ClearWithPendingJettyDefersCompleteProviderDependencyClosure` |
-| UC14 | `DisabledTokensBypassClosedBucket`、`UrmaWrTokenConfigurationBoundaries`、`UrmaWrTokenProductionDefaults` |
-| UC15 | `AdmissionRetryResumesOnlyUnsubmittedWindow`、`RemoteGetRetriesAdmissionWithoutTcpFallback` |
-| UC16 | `AdmissionRetryIsBoundedByAttemptsAndDeadline` |
-| UC17 | `LedgerAllocationFailureReturnsUnsubmittedPrefix` |
-| UC18 | `TwoWrSharedBufferLivesUntilBothCompletions`、`TwoWrWaitAppearsInClientAndWorkerSummary` |
-| UC19 | `ReadAndWriteAdmissionFailuresPreserveStatusAndCleanup` |
-| UC20 | `RepeatedAdmissionFailuresRemainInRequestSummary`、`WrWaitAggregatesAcrossWrAndDownstreamWithoutDoubleSubtracting`、`TwoWrWaitAppearsInClientAndWorkerSummary` |
-
-## 9. 修订与限制
-
-旧版已完成默认值扩大、按窗口重试及删除失败恢复。本轮改为逻辑传输全量预约、共享等待预算、精确deadline传播、及时归还、modify重试和关闭排空；QueryAndGet补同Trace的Worker等待信号。讨论只能在对应修复推送并核对后标记解决。
-
-验证中修正了测试枚举清单、后台探测计数混入及进程日志路径，不据此扩大生产修复结论。源码指纹核对、CMake 编译缓存和非 URMA 独立构建均有证据。真实 UB 的安全停止/reset 与生产性能仍未验证。
-
-### QueryAndGet等待观测补充（09/18，软件验证通过）
-
-该入口在AccessRecorder确定采样后启用现有Trace tick，沿用同一请求上下文的URMA_WR_TOKEN_WAIT累计；成功和错误共用收尾，在既有采样access日志中写入累计phase（us）及丢弃计数，不改变该日志条数。快请求也通过该access日志诊断；完成INFO保留原慢阈值/VLOG条件，避免把所有采样快请求标成慢日志。只有真实phase存在时打印数字（包括实测0），未采集/未进入准入/关闭令牌路径在完成日志打印NA，并附traceEnabled和phaseDroppedCount；有丢弃时不能宣称累计完整。没有phase且没有丢弃的access summary保持缺失，不输出伪造0。关闭access日志时，快请求没有该累计信号。
-
-不扩protobuf或客户端解码；客户端QueryAndGet耗时没有新增worker等待phase，排查通过同TraceID的Worker完成日志关联。wait_us嵌套于localRead/URMA write/total，acquire_us包含wait_us，均不能再相加。新成本为采样入口一个tick、采样收尾合并至多12个downstream phase并格式化summary（包含字符串构造/分配），以及access日志字节增量；完成日志只在原慢阈值/VLOG决定输出时扫描phase并格式化等待字段。未采样不构造access summary，未输出完成日志不构造等待字符串，无新增计时器、线程或锁。未进行真实硬件A/B，不能把有界软件操作数称为零开销。
-
-### 代码规模与封版取舍
-
-相对最新主线 `3d31acd54` 的最终代码统计：生产C++ 24文件，新增1204、删除241，净增963；旧版为23文件、新增956、删除217，净增739。不能因删除微基准就声称生产代码缩小。本轮必要修复增加了逻辑传输预约、deadline继承、异常恢复和关闭排空；新触及的生产文件为QueryAndGet实现。独立174行微基准及12行构建入口已移出特性PR，另删除无生产调用者的20行提交封装。进一步删去ledger、post gate或安全删除证明会削弱QD/内存所有权不变量，不作为封版减行方案。测试10文件新增1809/删除30；构建6文件新增56/删除7；文档配置6文件新增104/删除1。总计46文件新增3173/删除279；主线自带变更不计入本PR。
-
-生产改动集中在8个文件，另外16个文件合计净增73行。以下均相对主线 `3d31acd54`，加减行包含移动和替换，不能把新增行全部当作新运行逻辑：
-
-| 生产范围 | 文件数 | 新增/删除 | 净增 | 必要性及可收缩边界 |
-|---|---:|---:|---:|---|
-| `urma_wr_token.{h,cpp}` | 2 | 377/0 | 377 | 容量、FIFO、预约RAII及逐WR账本；删除会失去守恒和所有权基础 |
-| `urma_resource.{h,cpp}` | 2 | 419/12 | 407 | 提交许可、部分接受、后台退役、隔离重试和安全删除；已去掉20行无生产调用封装 |
-| `urma_manager.{h,cpp}` | 2 | 212/168 | 44 | 读写/gather接入整量预约并传递owner；多数为替换旧提交循环 |
-| 并行BatchGet实现 | 1 | 60/16 | 44 | 继承绝对deadline并避开TBB在可迁移bthread执行的问题；只提取同文件helper |
-| QueryAndGet实现 | 1 | 23/5 | 18 | 补齐入口采样、Worker等待摘要与NA/丢弃诊断；未扩protobuf |
-| 其余配置、计时及调用适配 | 16 | 113/40 | 73 | 配置贯通、phase定义、deadline访问和owner参数传播 |
-
-核心bucket/ledger、resource与manager合计净增828行，占生产净增963行的约86%。可以将独立测量工具移出PR，也已执行；若再移除账本或异常关闭机制，会改变本特性的安全合同。真实硬件性能A/B尚缺，不能据此宣称当前实现已经达到最小成本。
-
-### 主线采样兼容边界
-
-最新主线将request与access独立采样：request日志被保留，不代表该请求一定有access等待摘要；request采样率较低但access采样率为1时，access仍可全量采集。分析缺失字段必须同时检查access采样配置、latency开关和丢弃计数，不能将缺失解释为0us。
-
-## 当前提交门禁
-
-当前 `97430360503d025b9f4954bb576848cd498f3701` 的6项启用门禁全部SUCCESS，PR结果评论 `190311134`。三个构建任务的合入日志均核对到同一提交；禁用的Bazel ARM任务不计为通过。
-
-| 门禁 | 结果 | 同轮证据 |
+| 变量 | 默认值 | 说明 |
 |---|---|---|
-| CodeCheck | SUCCESS | [trigger #11435](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/trigger/job/yuanrong-datasystem/11435/console) |
-| license | SUCCESS | 同上 |
-| SCA | SUCCESS | 同上 |
-| x86_64 | SUCCESS | [#11611](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/x86-64/job/yuanrong-datasystem/11611/console) |
-| aarch64 | SUCCESS | [#11545](https://ci.openeuler.openatom.cn/job/multiarch/job/openeuler/job/aarch64/job/yuanrong-datasystem/11545/console) |
-| Bazel x86 | SUCCESS | [#7459](https://ci.openeuler.openatom.cn/job/multiarch/job/manual-jobs/job/openeuler/job/openyuanrong/job/Test_Datasystem_Bazel_x86/7459/console) |
+| DATASYSTEM_URMA_WR_TOKEN_CAPACITY | 未设则保留对应 flag 值 | 首次 Client URMA 初始化前设置 |
+| DATASYSTEM_URMA_WR_TOKEN_WAIT_US | 未设则保留对应 flag 值 | 5000 表示 5ms |
+| DATASYSTEM_URMA_WR_TOKEN_RECOVERY_TIMEOUT_MS | 未设则保留对应 flag 值 | 5000 表示 5s，不能误填为 5ms |
 
-ARM两组C++测试首轮分别为5396项中2项异常、200项中3项异常，官方自动重跑分别2/2、3/3通过，随后Python检查报告140项、状态OK（7项跳过），example通过。保留首轮失败记录，不称为全程零失败。这5项为既有Exist、PubSub、Eviction与Stream/Producer用例；未证实其失败与WR特性的因果关系。Exist用例在指定验证环境重复1000次未复现，未为此扩展特性生产代码。以上远程门禁与本地WR专项117项/62项是不同证据，不相加冒充特性覆盖数。
+非法值导致初始化失败；Worker 忽略这三项 Client 环境变量。`[URMA_WR_TOKEN_CONFIG]` 为实际配置快照，不等于后续设备初始化或业务已成功。
+
+## 6. 约束、性能与风险
+
+| # | 约束 | 违规后果 |
+|---|---|---|
+| C1 | post 前必须拥有本 bucket、相同 WR 数的 reservation | 旁路额度或错归还 |
+| C2 | Event 删除、TTL、lane force-release、创建替代 Jetty 都不能清 ledger | 设备仍访问时复用 buffer；超发或内存破坏 |
+| C3 | 未知接受边界保守持有；只有明确未接受后缀可立即回滚 | 错释放已提交额度或重复发送 |
+| C4 | 退役后拒绝新 post，等待已有 provider 调用退出 | modify/delete 与 post 并发访问失效 Jetty |
+| C5 | owner 锁外销毁，token 与身份只结清一次 | 锁重入死锁或额度下溢 |
+| C6 | 准入总预算与原始 API deadline 均不可延长 | 5ms 配置失效、请求排队累积 |
+
+| 成本 / 风险 | 当前设计与观测 | 验证边界 |
+|---|---|---|
+| foreground 锁与分配 | bucket 锁；每 WR ledger 插入/删除；owner 引用计数；等待队列分配 | 未测真实设备 A/B，不能宣称零开销 |
+| background 扫描 | 复用 50ms refill 等待；扫描 Jetty/ledger，约 O(J+W) | 调度和 provider 可阻塞，不是 50ms 硬实时恢复 |
+| BatchGet 调度扩大 | enqueue/future/join、deadline 与 Trace context 传播 | 必须与 cap=0、TCP/UCP 路径比较；封版精简候选 |
+| 永久缺 CQE / flush / delete 成功 | fail-closed 保留额度与 buffer；可用性降低 | 安全持有不是已证明“任意故障最终归还” |
+| 观测重复计时 | wr_token_wait_us 为准入等待；acquire_us 含锁与执行；传输总耗时已含等待 | 不能把嵌套阶段相加；并行任务累计值也不等于请求墙钟耗时 |
+| inflight Event 高于 token | CQE 先结清；Event 等通知/删除；部分超时 Event 有 5000ms TTL | Event/token 的差值不是泄漏证据；需同进程、同身份关联 |
+
+判断是否符合预期：核对启动配置 → 对齐进程与时间 → 比较 reservation/ledger peak 与 cap → 对齐 post/CQE/flush/delete → 停流后检查未结清身份。采样 Trace 只证明样本现象，不推算全量 P99 或硬件 WR 数。
+
+## 7. 落地步骤与修改必要性
+
+| PR 编号 | 内容 | 阶段 |
+|---|---|---|
+| PR2422 | Client/Worker 配置、Bucket/Ledger、提交/完成和恢复衔接 | P1 已在固定分支实现，非已合入声明 |
+| PR2422 | CMake Release + ccache + URMA mock；配置、额度与故障回归 | P1 历史验证 118 项通过，见第 8 章 |
+| 后续验收 | 真 provider 无 CQE、flush/delete 故障及停流恢复 | P2 待验证 |
+| 后续评估 | 同负载 cap=0/100 对照、BatchGet 范围收窄、移出无关测试 | P2 待决策，不在本文直接改生产代码 |
+
+固定 head 相对对照主线为 47 文件，+3271/-283；其中包含生产、测试、构建及配置。不能把本轮 CodeCheck 两文件 +9/-2 当作整个 PR。封版精简应先移出无关项、收窄行为影响范围，不通过合并 Event/token/lane 的生命周期来“减代码”。独立微基准已不在该 PR，本轮也未新增。
+
+## 8. 测试方案与证据
+
+### 8.1 UT 与 mock 证据
+
+| 文件 / 目标 | 覆盖点 | 覆盖率 / 结果 |
+|---|---|---|
+| urma_wr_token_test.cpp | FIFO、deadline、move/reset、并发守恒、owner 锁外销毁 | 17 项通过；非代码行覆盖率 |
+| urma_send_jetty_fault_test.cpp | 配置、部分 post、重复 CQE、无 CQE、隔离与关闭 | 52 项通过；含参数化测试身份 |
+| urma_jetty_gate_test.cpp | 并发 post / retire gate | 11 项通过 |
+| urma_send_jetty_lifecycle_test.cpp | 生命周期 | 1 项通过 |
+| ds_ut 定向筛选 | Metrics ID、WrToken flags、LatencyPhase | 37 项通过 |
+
+证据为 **2026-10-09 对 93c2e70c3 的 CMake Release + ccache + URMA mock 回归：118 通过，0 失败，0 跳过**。本轮仅修订文档，没有重新执行产品测试或声称 2026-10-20 最新门禁已通过。旧验证页的 head 与门禁是历史快照，应按其日期阅读。
+
+### 8.2 UseCase → 测试与设备验收
+
+| IT / 验证层 | 对应 UseCase | 场景 | 断言 |
+|---|---|---|---|
+| UT / mock 已有 | UC01 | ConcurrentAdmissionsConserveCredits | 峰值与额度守恒 |
+| UT / mock 已有 | UC02 | WaitBudgetExpiresWithoutLeaking、FifoPreventsSmallRequestBypassingHead | 有界等待且不漏未提交额度 |
+| UT / mock 已有 | UC03 | PartialPostReturnsOnlyUnacceptedSuffixCredits、MissingBadWrPreservesAllPotentiallyAcceptedCredits | 不误回滚可能接受部分 |
+| UT / mock 已有 | UC04 | CompletionReturnsCreditOnceAfterEventDeletion | Event 缺失、重复完成仍精确结清 |
+| UT / mock 已有 | UC05 | StalledWrRetiresWithoutSuccessfulCompletion、BackgroundRecoveryReturnsCreditsWithoutNewTraffic | 无成功 CQE / 无新流量可推进 |
+| UT / mock 已有 | UC06 | FailedDeleteRetriesWithoutLosingCredits、MissingFlushAndQuarantineRetainCreditsAndBuffer | 失败不提前归还 |
+| UT / mock 已有 | UC07 | ClientEnvironmentOverridesAllThreeFlags、WorkerIgnoresClientEnvironment | 参数隔离与非法值拒绝 |
+| UT / mock 已有 | UC08 | DrainsBeforeStoppingPollOrRetainsUnprovenOwners | 关闭排空或保留 |
+| UT / mock 已有 | UC09 | PostAdmissionCountsWrRatherThanEvents | 按实际 WR 计数，不按 Event 数 |
+| ST 源码已有，本轮未重跑 | UC09 | GatherLargerThanCapacityRejectsBeforeSubmission | 超 cap 在 provider 提交前拒绝；不计入 118 项 |
+| 真设备 IT 待执行 | UC01/UC02/UC09 | 同负载 cap=0 与 100；读写分开 | actual post、outstanding、吞吐、P99/pmax 同步采集 |
+| 真设备 IT 待执行 | UC05/UC06/UC08 | 停流、CQE 停滞、Jetty 故障与重建 | 明确停止证据、buffer 安全与恢复耗时 |
+
+### 8.3 源码定位与修订自检
+
+CodeGraph 未收录新 token 符号（CG-STALE），类与时序按固定提交的实际源码复核；未因索引缺失推断接口不存在。
+
+| 证据 | 路径:行号 |
+|---|---|
+| Bucket 与 Ledger 接口 | `src/datasystem/common/rdma/urma_wr_token.h:46` |
+| FIFO 与等待实现 | `src/datasystem/common/rdma/urma_wr_token.cpp:57` |
+| ledger 精确结清 | `src/datasystem/common/rdma/urma_wr_token.cpp:251` |
+| 配置快照 | `src/datasystem/common/rdma/urma_resource.cpp:993` |
+| flush 后删除与清账 | `src/datasystem/common/rdma/urma_resource.cpp:575` |
+| 后台恢复 | `src/datasystem/common/rdma/urma_resource.cpp:1855` |
+| 部分提交与 rollback | `src/datasystem/common/rdma/urma_resource.cpp:1950` |
+| 准入与 provider post | `src/datasystem/common/rdma/urma_resource.cpp:2056` |
+| 关闭排空 | `src/datasystem/common/rdma/urma_resource.cpp:2418` |
+| Client 环境参数 | `src/datasystem/common/rdma/urma_manager.cpp:595` |
+| CQE 清账 | `src/datasystem/common/rdma/urma_manager.cpp:2129` |
+| 普通读写预约 | `src/datasystem/common/rdma/urma_manager.cpp:2677` |
+| Gather 构建与 post | `src/datasystem/common/rdma/urma_manager.cpp:3449` |
+| 并行任务上下文 | `src/datasystem/worker/object_cache/worker_worker_oc_service_impl.cpp:79` |
+
+本次修订对应 ds-design 详细设计八章；完整 Markdown 与 Mermaid 源码随页面提供。结构检查只覆盖可机械检查项，图形实际渲染与手机导航另做浏览器检查；它们不替代源代码审查或硬件验证。

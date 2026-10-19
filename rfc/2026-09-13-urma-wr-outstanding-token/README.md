@@ -1,4 +1,8 @@
 # URMA outstanding WR 控制与安全归还
+## 2026-10-20 详细设计修订
+
+按 ds-design 详细设计八章重组，新增/已有/复用分列，补10张 Mermaid 类图与时序图、接口契约与 UseCase 测试映射。固定源码为 `93c2e70c3`；历史118项回归不外推到当前门禁。正文：[detailed-design.md](detailed-design.md)，[线上页面](https://yche.me/design/urma-wr-outstanding-token-design-20260913.html)。
+
 
 状态：2026-09-18。当前实现 `974303605`，已合入主线 `3d31acd54` 并推送 PR #2422；最新6项启用门禁全部通过。合并后软件/mock及采样回归117/117通过，CodeCheck整理后的受影响62/62复测通过；末次仅调整前导空格并重新完成CMake+ccache构建。
 
