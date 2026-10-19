@@ -13,6 +13,7 @@ function topology(){
   const height=chart.getHeight(), boxWidth=narrow?Math.min(220,width-100):Math.min(190,(width-70)/3*.84);
   const nodes=narrow?[{x:width/2,y:40},{x:width/2,y:160},{x:width/2,y:280},{x:width/2,y:400},{x:width/2,y:520}]:[{x:width*.17,y:height/2},{x:width*.5,y:65},{x:width*.5,y:165},{x:width*.5,y:265},{x:width*.83,y:height/2}];
   const texts=['统一 bytes 驱动\\n8 核 / 12 GiB','DataSystem · 2 Workers + ETCD\\nRPC 控制 + SHM 数据','Mooncake · Master + 2 peers\\nTCP · 两份 4 GiB 存储','LMCache · 2 CPU MP Servers\\nSHM + RPC · 两份 4 GiB 存储','每次运行一个产品\\n服务端共 8 核 / 12 GiB'];
+  if(D.transport_profile==='tcp'){texts[1]='DataSystem · 2 Workers + ETCD\\nRPC / TCP 数据';texts[3]='LMCache · 2 CPU MP Servers\\nPickle / ZMQ TCP · 4 GiB × 2';}
   const fills=['#e5eee9',...colors,'#e5eee9'], graphics=[], half=boxWidth/2, nodeHeight=58;
   function edge(points,color){graphics.push({type:'polyline',shape:{points},style:{stroke:color,lineWidth:1.5,fill:null}});}
   for(let i=1;i<4;i++){

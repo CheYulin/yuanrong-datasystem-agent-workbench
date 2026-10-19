@@ -39,6 +39,8 @@ def main():
     parser.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-reproduction")
     parser.add_argument("--smoke-suite", default="orchestration-reproduction-smoke")
     parser.add_argument("--profile-suite", default="put-resource-profile-001")
+    parser.add_argument("--transport-profile", choices=["native", "tcp"], default="native")
+    parser.add_argument("--report-path", default="perf/kvc-fair-20261020")
     parser.add_argument("--rfc", type=Path, default=HERE/"docs" if (HERE/"docs").is_dir() else HERE.parents[2]/"rfc/2026-10-20-kvc-fair-comparison")
     args = parser.parse_args()
     TIMING_LOG = args.local_output / "workflow-timings.jsonl"
@@ -112,16 +114,22 @@ def main():
              "--environment",args.local_output/"timing-inputs/environment",
              "--orchestration",args.local_output/"timing-inputs"/args.smoke_suite,"--put-profile",args.local_output/args.profile_suite,
              "--operations",*operations,"--out",timings])
-        report_command=["python3",HERE/"report.py","--suite",args.local_output/args.suite,"--out",args.local_output/"report","--rfc",args.rfc,"--timings",timings/"timings.json","--raw-evidence","--put-profile",args.local_output/args.profile_suite]
+        report_command=["python3",HERE/"report.py","--suite",args.local_output/args.suite,"--out",args.local_output/"report","--rfc",args.rfc,"--timings",timings/"timings.json","--raw-evidence","--put-profile",args.local_output/args.profile_suite,"--transport-profile",args.transport_profile]
         for operation_log in operations:
             report_command += ["--operation-log",operation_log]
         run(report_command)
     elif args.action == "publish":
-        target="/var/www/html/perf/kvc-fair-20261020"
+        relative=Path(args.report_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("Report must remain within the publication site")
+        target="/var/www/html/"+relative.as_posix()
         run(["ssh",args.publication_host,shlex.join(["mkdir","-p",target])])
         run(["rsync","-a",str(args.local_output/"report")+"/",args.publication_host+":"+target+"/"])
         run(["scp",HERE/"publish.py",args.publication_host+":/tmp/kvc-fair-publish.py"])
-        run(["ssh",args.publication_host,"python3 /tmp/kvc-fair-publish.py"])
+        publish_command=["python3","/tmp/kvc-fair-publish.py","--report",relative.as_posix()]
+        if args.transport_profile=="tcp":
+            publish_command += ["--title","DataSystem × Mooncake × LMCache：同节点统一 TCP 实验"]
+        run(["ssh",args.publication_host,shlex.join(publish_command)])
     elif args.action == "restore":
         ssh(["python3",root+"/finish_environment.py","--root",root,"--environment-root",args.environment_root,
              "--suite",root+"/"+args.suite,"--profile-suite",root+"/"+args.profile_suite,

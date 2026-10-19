@@ -66,6 +66,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--site", type=Path, default=Path("/var/www/html"))
     parser.add_argument("--report", default="perf/kvc-fair-20261020")
+    parser.add_argument("--title", default="DataSystem × Mooncake × LMCache：同节点 CPU 实验")
     args = parser.parse_args()
     site = args.site.resolve()
     report = (site / args.report).resolve()
@@ -78,7 +79,7 @@ def main():
         path = (report / name).resolve()
         if report not in path.parents or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise RuntimeError("Report dependency hash mismatch: " + name)
-    entry = {"t":"DataSystem × Mooncake × LMCache：同节点 CPU 实验", "p":args.report+"/index.html", "d":"2026-10-20", "u":"2026-10-20", "c":"perf", "g":"bench", "e":"发布源码构建、双服务 exist/put/get、cgroup CPU/内存/I/O 与可复现脚本", "tg":["DataSystem","Mooncake","LMCache","公平压测"]}
+    entry = {"t":args.title, "p":args.report+"/index.html", "d":"2026-10-20", "u":"2026-10-20", "c":"perf", "g":"bench", "e":"发布源码构建、双服务 exist/put/get、cgroup CPU/内存/I/O 与可复现脚本", "tg":["DataSystem","Mooncake","LMCache","公平压测"]}
     metadata = {"c":"perf","g":"bench","group":"压测与性能基线","d":"2026-10-20","u":"2026-10-20","title":entry["t"],"parent":None}
     lock = Path("/tmp/kvc-yche-publish.lock").open("w")
     fcntl.flock(lock, fcntl.LOCK_EX)

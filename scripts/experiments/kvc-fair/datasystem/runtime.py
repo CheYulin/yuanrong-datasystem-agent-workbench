@@ -123,8 +123,10 @@ def launch(args):
             "brpc_server_num_threads": "8",
             "brpc_max_concurrency": "128",
             "log_monitor": "false",
-            "minloglevel": "2",
+            "minloglevel": str(args.min_log_level),
         }
+        if args.transport == "tcp":
+            config["ipc_through_shared_memory"] = "false"
         flagfile = instance / "worker.flags"
         flagfile.write_text("".join(f"--{key}={value}\n" for key, value in config.items()))
         command = [str(source / "output" / "datasystem" / "service" / "datasystem_worker")]
@@ -184,7 +186,7 @@ def stop(args):
     print(json.dumps(results))
 
 
-if __name__ == "__main__":
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["start", "stop"])
     parser.add_argument("--task-root", default="/home/worktrees/kvc-fair-20261020")
@@ -193,6 +195,12 @@ if __name__ == "__main__":
     parser.add_argument("--worker-port", type=int, default=31531)
     parser.add_argument("--etcd-port", type=int, default=32379)
     parser.add_argument("--memory-mb-per-worker", type=int, default=4096)
+    parser.add_argument("--transport", choices=["native", "tcp"], default="native")
+    parser.add_argument("--min-log-level", type=int, choices=[0, 1, 2, 3], default=2)
     parser.add_argument("--stop-timeout", type=float, default=15)
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    args = parse_args()
     (launch if args.action == "start" else stop)(args)

@@ -223,9 +223,19 @@ def main():
     parser.add_argument("--raw-evidence", action="store_true", help="Package the finished suite's raw logs and metadata")
     parser.add_argument("--put-profile", type=Path)
     parser.add_argument("--operation-log", type=Path, action="append", default=[])
+    parser.add_argument("--transport-profile", choices=["native", "tcp"], default="native")
     args = parser.parse_args()
     operation_cutoff = time.time_ns()
+    tcp_verification = None
+    if args.transport_profile == "tcp":
+        from verify_tcp import verify_tcp
+        tcp_verification = verify_tcp(argparse.Namespace(suite=args.suite,
+            protocol_evidence=args.suite / "protocol-evidence", ds_medium=None))
+        if not tcp_verification.get("passed"):
+            raise RuntimeError("TCP report requires independently verified protocol evidence: " + json.dumps(tcp_verification.get("errors"), ensure_ascii=False))
     args.out.mkdir(parents=True, exist_ok=True)
+    if tcp_verification:
+        (args.out / "tcp-verification.json").write_text(json.dumps(tcp_verification, ensure_ascii=False, indent=2) + "\n")
     verification_source = args.suite / "verification-final.json"
     if verification_source.exists():
         shutil.copy2(verification_source, args.out / verification_source.name)
@@ -280,8 +290,8 @@ def main():
     valid = [r for r in rows if r["valid"]]
     timing_source = args.timings or args.suite.parent / "timings" / "timings.json"
     timings = json.loads(timing_source.read_text()) if timing_source.exists() else {"steps": [], "issues": ["Timing evidence not supplied"]}
-    payload = {"generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "rows": rows,
-               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history,"put_profile":profile}
+    payload = {"generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "transport_profile": args.transport_profile, "rows": rows,
+               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history,"put_profile":profile,"tcp_verification":tcp_verification}
     (args.out / "timings.json").write_text(json.dumps(timings, ensure_ascii=False, indent=2))
     timing_csv = timing_source.with_suffix(".csv")
     if timing_csv.exists():
@@ -313,6 +323,18 @@ def main():
     for b in builds:
         build_rows += "<tr>" + "".join("<td>" + html.escape(str(b.get(k, "待采集"))) + "</td>" for k in ["product", "tag", "sha", "python", "compiler", "build_exit", "smoke_exit"]) + "</tr>"
     rendered = rendered.replace("{{BUILD_ROWS}}", build_rows)
+    if args.transport_profile == "tcp":
+        rendered = rendered.replace("· 同节点 CPU 实验", "· 同节点统一 TCP 实验")
+        rendered = rendered.replace("观察 CPU 原生路径的吞吐、延迟与资源。", "对象数据与控制均经 TCP，观察吞吐、延迟与资源。")
+        original_scope = "本报告比较发布源码的本机 CPU 部署：DataSystem 使用本机 RPC 控制与 SHM 候选路由，Mooncake 使用 TCP，LMCache 使用 MP SHM + RPC。三条路径的端到端结果包含各自协议和适配成本；不由此推断跨机 RDMA、GPU KV 或推理 TTFT。"
+        tcp_scope = '本报告比较统一 TCP 数据通路：DataSystem 关闭进程间共享内存通信，Mooncake 使用 classic TE TCP 并关闭 memcpy 捷径，LMCache 使用 MP pickle payload 经 ZMQ/TCP。控制和对象数据均走回环 TCP，不使用 RDMA/UB；各自事务与序列化成本仍不同。<a href="tcp-verification.json">TCP 协议与输入核验</a>和原始跟踪可供复核；<a href="../kvc-fair-20261020/index.html">原生 SHM/TCP 基线</a>独立保留。'
+        if original_scope not in rendered:
+            raise RuntimeError("TCP scope substitution requires a reviewed report template")
+        rendered = rendered.replace(original_scope, tcp_scope)
+        rendered = rendered.replace("prepare / commit 确认。双实例", "pickle 经 TCP，prepare / commit 确认；启动时全量触页。双实例")
+        rendered = rendered.replace("三个产品自身均由锁定源码构建。", "三个产品自身均由锁定源码构建；本 TCP 矩阵复用这些制品并重新核对哈希，构建表中的原 smoke 与本次 TCP 协议门禁分别留证。")
+        rendered = rendered.replace("<a href=\"docs/test-design.md\">用例与 Mermaid 时序 ↗</a>", '<a href="docs/tcp-plan.md">TCP 配置、协议门禁与 Mermaid 时序 ↗</a><a href="docs/test-design.md">共同用例设计 ↗</a>')
+        rendered = rendered.replace('href="docs/validation.md"', 'href="docs/tcp-validation.md"')
     (args.out / "index.html").write_text(rendered)
     for name in ["report.js", "report.css"]:
         shutil.copy2(Path(__file__).with_name(name), args.out / name)
