@@ -30,7 +30,7 @@ def run(argv):
 def main():
     global TIMING_LOG
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["stage", "build", "prepare", "smoke", "run", "collect", "report", "publish", "restore"])
+    parser.add_argument("action", choices=["stage", "build", "prepare", "smoke", "run", "collect", "report", "publish", "restore", "profile"])
     parser.add_argument("--target", default="tiantiyun-80c128g")
     parser.add_argument("--publication-host", default="xqyun-32c32g")
     parser.add_argument("--remote-root", default="/home/worktrees/kvc-fair-20261020")
@@ -38,6 +38,7 @@ def main():
     parser.add_argument("--suite", default="formal-001")
     parser.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-reproduction")
     parser.add_argument("--smoke-suite", default="orchestration-reproduction-smoke")
+    parser.add_argument("--profile-suite", default="put-resource-profile-001")
     parser.add_argument("--rfc", type=Path, default=HERE/"docs" if (HERE/"docs").is_dir() else HERE.parents[2]/"rfc/2026-10-20-kvc-fair-comparison")
     args = parser.parse_args()
     TIMING_LOG = args.local_output / "workflow-timings.jsonl"
@@ -46,7 +47,7 @@ def main():
         run(["ssh",args.target,shlex.join(command)])
     if args.action == "stage":
         ssh(["mkdir","-p",root,root+"/scripts/datasystem",root+"/mooncake",root+"/lmcache",root+"/configs"])
-        files = [HERE/name for name in ["benchmark.py","cgroup.py","monitor.py","run_suite.py","prepare_env.py","build_metadata.py","timed.py","capture_evidence.py","prepare_resume.py"]]
+        files = [HERE/name for name in ["benchmark.py","cgroup.py","monitor.py","run_suite.py","prepare_env.py","build_metadata.py","timed.py","capture_evidence.py","prepare_resume.py","profile_put.py","light_monitor.py"]]
         run(["scp",*files,args.target+":"+root+"/"])
         for name in ["mooncake","lmcache"]:
             run(["rsync","-a",str(HERE/name)+"/",args.target+":"+root+"/"+name+"/"])
@@ -83,10 +84,14 @@ def main():
         ssh(command)
         if args.action == "smoke":
             ssh(["python3",root+"/build_metadata.py","smoke","--root",root,"--suite",suite])
+    elif args.action == "profile":
+        ssh(["python3",root+"/profile_put.py","--root",root,"--manifest",root+"/products.json","--baseline-suite",root+"/"+args.suite,"--out",root+"/"+args.profile_suite])
     elif args.action == "collect":
         ssh(["python3",root+"/capture_evidence.py","--root",root,"--suite",root+"/"+args.suite])
         destination=args.local_output/args.suite;destination.mkdir(parents=True,exist_ok=True)
         run(["rsync","-a",args.target+":"+root+"/"+args.suite+"/",str(destination)+"/"])
+        profile=args.local_output/args.profile_suite;profile.mkdir(parents=True,exist_ok=True)
+        run(["rsync","-a",args.target+":"+root+"/"+args.profile_suite+"/",str(profile)+"/"])
         evidence=args.local_output/"timing-inputs"
         (evidence/"environment").mkdir(parents=True,exist_ok=True)
         (evidence/args.smoke_suite).mkdir(parents=True,exist_ok=True)
@@ -104,9 +109,9 @@ def main():
         timings=args.local_output/"timings"
         run(["python3",HERE/"collect_timings.py","--suite",args.local_output/args.suite,
              "--environment",args.local_output/"timing-inputs/environment",
-             "--orchestration",args.local_output/"timing-inputs"/args.smoke_suite,
+             "--orchestration",args.local_output/"timing-inputs"/args.smoke_suite,"--put-profile",args.local_output/args.profile_suite,
              "--operations",*operations,"--out",timings])
-        run(["python3",HERE/"report.py","--suite",args.local_output/args.suite,"--out",args.local_output/"report","--rfc",args.rfc,"--timings",timings/"timings.json","--raw-evidence"])
+        run(["python3",HERE/"report.py","--suite",args.local_output/args.suite,"--out",args.local_output/"report","--rfc",args.rfc,"--timings",timings/"timings.json","--raw-evidence","--put-profile",args.local_output/args.profile_suite])
     elif args.action == "publish":
         target="/var/www/html/perf/kvc-fair-20261020"
         run(["ssh",args.publication_host,shlex.join(["mkdir","-p",target])])
@@ -114,7 +119,8 @@ def main():
         run(["scp",HERE/"publish.py",args.publication_host+":/tmp/kvc-fair-publish.py"])
         run(["ssh",args.publication_host,"python3 /tmp/kvc-fair-publish.py"])
     elif args.action == "restore":
-        ssh(["systemctl","start","setroubleshootd.service"])
+        code = "import json,subprocess; from pathlib import Path; p=Path("+repr(args.environment_root+"/environment-cleanup.json")+"); d=json.loads(p.read_text()); units=d.get('temporarily_stopped_units',[]); unit='setroubleshootd.service'; should=unit in units; print(json.dumps({'unit':unit,'restore_recorded_active_unit':should})); subprocess.run(['systemctl','start',unit],check=True) if should else None"
+        ssh(["python3","-c",code])
 
 
 if __name__ == "__main__":

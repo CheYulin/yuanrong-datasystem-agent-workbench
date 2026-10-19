@@ -98,6 +98,9 @@ def rows_from_results(suite, samples):
             inside = samples[left:right]
             row["resource_samples"] = len(inside)
             row["peak_memory_gib"] = max((s["server"]["memory"] + s["client"]["memory"]) / (1 << 30) for s in inside) if inside else None
+            app_memory = [sum(s[role][key] for role in ["server", "client"] for key in ["anon", "shmem"]) / (1 << 30)
+                          for s in inside if all(s[role].get(key) is not None for role in ["server", "client"] for key in ["anon", "shmem"])]
+            row["peak_anon_shmem_gib"] = max(app_memory) if app_memory else None
             if len(inside) >= 2:
                 first, last = inside[0], inside[-1]
                 seconds = (last["mono_ns"] - first["mono_ns"]) / 1e9
@@ -121,6 +124,7 @@ def main():
     parser.add_argument("--device", default="253:2")
     parser.add_argument("--timings", type=Path)
     parser.add_argument("--raw-evidence", action="store_true", help="Package the finished suite's raw logs and metadata")
+    parser.add_argument("--put-profile", type=Path)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     verification_source = args.suite / "verification-final.json"
@@ -128,6 +132,35 @@ def main():
         shutil.copy2(verification_source, args.out / verification_source.name)
     samples = reduce_samples(args.suite / "resources" / "samples.jsonl", args.device)
     rows = rows_from_results(args.suite, samples)
+    profile = None
+    if args.put_profile:
+        profile_samples = reduce_samples(args.put_profile / "resources/samples.jsonl", args.device)
+        profile_rows = rows_from_results(args.put_profile, profile_samples)
+        profile_summary = json.loads((args.put_profile / "summary.json").read_text())
+        if not profile_summary.get("ended") or profile_summary.get("valid") is not True or profile_summary.get("failed") or profile_summary.get("fatal"):
+            raise RuntimeError("Supplemental PUT profile has not completed successfully")
+        if len(profile_rows) != 9 or not all(r["valid"] and r["operation"] == "put" and r["concurrency"] == 8 for r in profile_rows):
+            raise RuntimeError("Expected nine valid independent PUT resource observations")
+        if {(r["product"],r["size"],r["repeat"]) for r in profile_rows} != {(p,s,0) for p in ["datasystem","mooncake","lmcache"] for s in [1024,65536,1048576]}:
+            raise RuntimeError("Supplemental PUT profile identity set mismatch")
+        times = [s["mono_ns"] for s in profile_samples]
+        indices = set()
+        for row in profile_rows:
+            indices.update(range(bisect.bisect_left(times, row["start_mono_ns"]), bisect.bisect_right(times, row["end_mono_ns"])))
+            row["evidence"] = "results/put-resource-profile/" + Path(row["evidence"]).relative_to("results").as_posix()
+        kept = []
+        for index in sorted(indices):
+            sample = profile_samples[index]
+            kept.append({k: sample[k] for k in ["mono_ns", "prev_mono_ns", "sampling_ms", "server", "client"] if k in sample})
+        profile = {"rows": profile_rows, "samples": kept, "summary": profile_summary,
+                   "scope": "Nine independent single PUT resource observations at concurrency8; excluded from the primary three-repeat performance statistics."}
+        for path in (args.put_profile / "cells").glob("*/put.json"):
+            target = args.out / "results/put-resource-profile" / path.parent.name / path.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+        fields = sorted(set().union(*(r.keys() for r in profile_rows)))
+        with (args.out / "put-profile.csv").open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fields); writer.writeheader(); writer.writerows(profile_rows)
     summary = json.loads((args.suite / "summary.json").read_text()) if (args.suite / "summary.json").exists() else {"running": True}
     history = []
     if (args.suite / "events.jsonl").exists():
@@ -148,7 +181,7 @@ def main():
     timing_source = args.timings or args.suite.parent / "timings" / "timings.json"
     timings = json.loads(timing_source.read_text()) if timing_source.exists() else {"steps": [], "issues": ["Timing evidence not supplied"]}
     payload = {"generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "rows": rows,
-               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history}
+               "samples": samples, "summary": summary, "plan": plan, "builds": builds, "timings":timings,"io_device": args.device,"failure_history":history,"put_profile":profile}
     (args.out / "timings.json").write_text(json.dumps(timings, ensure_ascii=False, indent=2))
     timing_csv = timing_source.with_suffix(".csv")
     if timing_csv.exists():
@@ -171,6 +204,7 @@ def main():
     template = Path(__file__).with_name("report-template.html").read_text()
     rendered = template.replace("{{VALID}}", str(len(valid))).replace("{{RECORDED}}", str(len(rows))).replace("{{FAILED}}", str(len(rows) - len(valid)))
     rendered = rendered.replace("{{STATUS}}", status)
+    rendered = rendered.replace("{{PROFILE_DOWNLOAD}}", '<a href="put-profile.csv" download>PUT 补充资源 CSV</a>' if profile else "")
     rendered = rendered.replace("{{VERIFICATION_LINK}}", '<a href="verification-final.json">最终完整性校验记录 ↗</a>' if verification_source.exists() else '<span>完整性校验待矩阵结束后执行</span>')
     rendered = rendered.replace("{{CELLS}}", f"{len(summary.get('completed', []))}/{len(plan)} 用例完成 · {len(summary.get('failed', []))} 用例待补跑 · 历史失败 {len(history)} 次")
     rendered = rendered.replace("{{RAW_EVIDENCE}}", '<a href="raw-evidence.tar.gz" download>原始监控、运行日志与会话证据</a>' if args.raw_evidence else '')
@@ -205,6 +239,12 @@ def main():
                     raise RuntimeError("Unexpected symlink in raw evidence: " + str(path))
                 if path.is_file():
                     archive.add(path, arcname=str(Path(args.suite.name) / path.relative_to(args.suite)), recursive=False)
+            if args.put_profile:
+                for path in sorted(args.put_profile.rglob("*")):
+                    if path.is_symlink():
+                        raise RuntimeError("Unexpected symlink in supplemental evidence: " + str(path))
+                    if path.is_file():
+                        archive.add(path, arcname=str(Path("put-resource-profile") / path.relative_to(args.put_profile)), recursive=False)
     subprocess.run([sys.executable, str(Path(__file__).with_name("analyze_results.py")),
                     "--data", str(args.out / "data.json"), "--out", str(args.out)], check=True)
     for path in sorted(args.out.iterdir()):

@@ -93,12 +93,25 @@ def client_indices(rows, concurrency, label):
     require(sorted(indices) == list(range(concurrency)), label + " client indices must be unique and complete")
 
 
-def verify_operation(path, cell, op, params, root_params, formal):
+def verify_parameters(p, op, params, root_params, product):
+    size, concurrency = params["size"], params["concurrency"]
+    smoke = root_params.get("smoke")
+    require(type(smoke) is bool, "suite parameters.smoke must be boolean")
+    total_bytes = max(size * concurrency * 4, 1 << 20) if smoke else min(2 << 30, size * 65536)
+    for key, expected in (("op", op), ("size", params["size"]), ("concurrency", params["concurrency"]),
+                          ("duration", root_params["duration"]), ("warmup", root_params["warmup"]),
+                          ("total_bytes", total_bytes), ("preload_bytes", 1 << 20 if smoke else 64 << 20),
+                          ("run_id", "r{repeat}-s{size}-c{concurrency}".format(**params)),
+                          ("adapter", product["adapter"]), ("config", product["config"])):
+        require(p.get(key) == expected, f"parameters.{key} mismatch")
+    require(type(p.get("skip_preload")) is bool and p["skip_preload"] == op.startswith("exist"),
+            "parameters.skip_preload must be true only for EXIST operations")
+
+
+def verify_operation(path, cell, op, params, root_params, formal, product):
     raw = read_json(path)
     p = raw.get("parameters", {})
-    for key, expected in (("op", op), ("size", params["size"]), ("concurrency", params["concurrency"]),
-                          ("duration", root_params["duration"]), ("warmup", root_params["warmup"])):
-        require(p.get(key) == expected, f"parameters.{key} mismatch")
+    verify_parameters(p, op, params, root_params, product)
     require(raw.get("valid") is True and not raw.get("fatal"), "result is invalid or fatal")
     success = integer(raw.get("success"), "success", 1)
     require(raw.get("failures") == 0, "global failures must be zero")
@@ -165,9 +178,6 @@ def verify_operation(path, cell, op, params, root_params, formal):
     post = raw.get("post_validation")
     client_indices(post, concurrency, "post_validation barrier")
     require(all(x.get("post_validations") == (3 if op == "put" else 0) for x in post), "PUT requires exactly three post-measure byte checks per client; other ops require zero")
-    if formal:
-        require(p.get("total_bytes") == min(2 << 30, size * 65536), "formal fixed insertion volume mismatch")
-        require(p.get("preload_bytes") == 64 << 20, "formal preload bytes mismatch")
     return {"cell": cell, "operation": op, "success": success, "clients": concurrency,
             "duration_s": duration, "max_start_offset_us": max(offsets), "short_window": short,
             "sampled_byte_checks": sampled_validations, "post_byte_checks": sum(x["post_validations"] for x in post),
@@ -307,6 +317,7 @@ def verify(args):
         summary = read_json(suite / "summary.json")
         plan = read_json(suite / "plan.json")
         params = read_json(suite / "parameters.json")
+        products = read_json(suite / "products.json")
         require(summary.get("ended") and not summary.get("fatal") and summary.get("failed") == [], "suite is unfinished, fatal or has failed cells")
         sizes, conc, repeats = params["sizes"], params["concurrencies"], integer(params["repeats"], "repeats", 1)
         require(sizes and conc and len(set(sizes)) == len(sizes) and len(set(conc)) == len(conc), "matrix dimensions empty or duplicate")
@@ -314,6 +325,14 @@ def verify(args):
             integer(value, "matrix dimension", 1)
         names = {p["product"] for p in plan}
         require(names and names <= PRODUCTS, "plan contains missing/unknown products")
+        require(type(params.get("smoke")) is bool, "suite parameters.smoke must be boolean")
+        require(isinstance(products, list) and len(products) == len(names), "suite product manifest count mismatch")
+        product_names = [p["name"] for p in products]
+        require(len(set(product_names)) == len(product_names) and set(product_names) == names,
+                "suite product manifest contains duplicate, missing or unexpected products")
+        for product in products:
+            for key in ("adapter", "config"):
+                require(isinstance(product.get(key), str) and product[key], f"product {product['name']} {key} path missing")
         if params.get("products") is not None:
             require(set(params["products"]) == names, "product selection differs from plan")
         expected = {(r, n, s, c) for r, n, s, c in itertools.product(range(repeats), names, sizes, conc)}
@@ -328,18 +347,18 @@ def verify(args):
             require(params.get("duration") == 20 and params.get("warmup") == 3 and params.get("smoke") is False, "--formal requires20s/3s and smoke=false")
         expected_ops = sum(4 if p["size"] == min(sizes) else 2 for p in plan)
         result.update(expected_cells=len(expected), expected_results=expected_ops, products=sorted(names), parameters=params,
-                      manifest_hashes={name: sha256(suite / name) for name in ("summary.json", "plan.json", "parameters.json")})
-        return plan, params
+                      manifest_hashes={name: sha256(suite / name) for name in ("summary.json", "plan.json", "parameters.json", "products.json")})
+        return plan, params, {p["name"]: p for p in products}
 
     configured = check("complete_plan_and_summary", plan_check)
     if configured is not None:
-        plan, params = configured
+        plan, params, products = configured
         for p in plan:
             cell = "r{repeat}-{product}-s{size}-c{concurrency}".format(**p)
             ops = ["put", "get"] + (["exist_hit", "exist_miss"] if p["size"] == min(params["sizes"]) else [])
             for op in ops:
                 path = suite / "cells" / cell / (op + ".json")
-                row = check(cell + "/" + op, lambda: verify_operation(path, cell, op, p, params, args.formal))
+                row = check(cell + "/" + op, lambda: verify_operation(path, cell, op, p, params, args.formal, products[p["product"]]))
                 if row is not None:
                     windows.append(row)
         check("all_expected_current_results", lambda: require(len(windows) == result["expected_results"], "not every expected current operation passed integrity checks"))

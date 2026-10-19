@@ -14,6 +14,7 @@ python3 workflow.py build
 python3 workflow.py prepare
 python3 workflow.py smoke
 python3 workflow.py run
+python3 workflow.py profile
 python3 workflow.py restore
 python3 workflow.py collect
 python3 workflow.py report
@@ -22,7 +23,7 @@ python3 workflow.py publish
 
 `stage` copies only scripts/locks, not source trees or caches. `build` pins and source-builds products sequentially, installing each product into its private venv; Mooncake bootstraps the shared CPython3.11.15. No product repository is pushed. `prepare` preserves only the exact inactive historical tmpfs directories in its allowlist before freeing them, and configures this experiment's cgroup. `smoke` performs real product data/EXIST checks in small windows; these numbers must never be used as ranked results. `run` executes the full fixed matrix. Resume uses the same `--suite`; first archive the finished session with `prepare_resume.py` so native monitor and server logs retain each attempt. Valid complete cells are skipped; failed cells restart fresh services and retain previous JSON. Do not resume a running suite.
 
-`collect` first acquires the suite lock and requires empty experiment cgroups and an ended summary; it snapshots source-build logs and scripts, then copies the matrix plus environment and correctness-smoke timing evidence; `report` runs `collect_timings.py` before rendering. Override `--environment-root` and `--smoke-suite` when collecting an earlier recorded run. Local command walls are appended to `workflow-timings.jsonl`; keep that ledger for the retrospective. `restore` starts the troubleshooting service after all measurements.
+`collect` first acquires the suite lock and requires empty experiment cgroups and an ended summary; it snapshots source-build logs and scripts, then copies the matrix plus environment and correctness-smoke timing evidence; `report` runs `collect_timings.py` before rendering. Override `--environment-root` and `--smoke-suite` when collecting an earlier recorded run. Local command walls are appended to `workflow-timings.jsonl`; keep that ledger for the retrospective. `profile` adds nine concurrency8 PUT-only resource observations with a light10ms sampler; these single observations do not enter the primary three-repeat scores. Actual sampling cost/intervals are retained. `restore` starts the troubleshooting service after all primary and supplemental measurements.
 
 The downloaded ZIP carries `docs/`; when running from another layout pass `--rfc /absolute/path/to/rfc-topic`. Override `--local-output` for a different artifact root. Ports and cgroup identity are reserved for one experiment; the driver holds an exclusive lock. It deliberately does not support concurrent experiments on the same node.
 

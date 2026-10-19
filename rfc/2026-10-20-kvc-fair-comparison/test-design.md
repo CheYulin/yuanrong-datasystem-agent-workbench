@@ -19,7 +19,7 @@ Status: In-Progress
 | 监控 | NUMA 1，CPU 1,3，独立 cgroup |
 | 测量 | 产品依次运行，正式矩阵前结束编译；每点 3 次重复 |
 
-SMT 兄弟 CPU 40–79 不用于实验客户端或服务器。记录外部负载、cpu.stat 的 throttled_usec、memory.events、I/O 和主机 CPU，不能仅凭配额宣称机器没有其他负载。SHM 首次触页可能由客户端计费，主要内存指标使用 server+client 的 cgroup memory.current 总和；不把各进程 RSS 相加当作唯一内存占用。
+SMT 兄弟 CPU 40–79 不用于实验客户端或服务器。记录外部负载、cpu.stat 的 throttled_usec、memory.events、I/O 和主机 CPU，不能仅凭配额宣称机器没有其他负载。SHM 首次触页可能由客户端计费，主要内存指标使用 server+client 的 cgroup memory.current 总和；不把各进程 RSS 相加当作唯一内存占用。由于 cgroup 跨用例复用，普通文件缓存可能在进程退出后仍保留计费；另展示 server+client 的 `anon+shmem` 作为数据池与 SDK 匿名堆口径，并保留 `memory.current` 总计费。后者包含缓存和内核开销，不能当作当前产品独占内存。字段和页所有权见 [Linux cgroup v2 文档](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)。
 
 ## 3. 接口语义与负载
 
@@ -89,3 +89,9 @@ sequenceDiagram
 历史 `/dev/shm/ds-*` 已检查无打开文件和映射，属于旧报告运行目录。仅对清单中的确切目录执行归档、gzip 完整性验证和 tar 清单验证，成功后再删除 tmpfs 原件；保留归档 SHA256。SELinux 排障服务可临时停止并在结束后恢复，代理和现存 agent 服务保留。
 
 本轮不覆盖持久化、容量溢出、故障恢复、跨机网络与 GPU；图表旁说明可推广范围。正式测量前需要真实产品 smoke，加上驱动同步、统计、超时和失败传播自检。不能用驱动模拟后端的结果充当产品成绩。
+
+## 6. 短 PUT 的补充资源观测
+
+主三重复保留 1 秒主机/进程/原生工具监控。已经观察到部分固定量 PUT 窗口短于采样间隔，因此另设 3 产品 × 3 尺寸 × 并发 8 × 单次的九个独立 PUT 资源用例，仍调用冻结 benchmark 与相同逻辑字节量、原生服务配置和 cgroup；只有主矩阵成功结束、实验组为空才启动。它们标为 `supplemental_resource_only`，QPS/P99 不参与主三重复统计。
+
+轻采样器只在独立观察者核约每 10 ms 读取 cgroup CPU/内存/I/O，不增加全主机 /proc 或 perf 采集；记录实际间隔和读取、序列化/写入成本分位数，不把标称周期当作实测保证。各 SDK 窗口至少两点才通过本阶段资源覆盖检查。网页单独选择 CPU、匿名+SHM/总计费、磁盘曲线；原始 profile、单次完整桶和采样序列都保留。

@@ -94,3 +94,9 @@ python3 lmcache/runtime.py stop
 先前独立 smoke 的工作目录没有这个父目录，同一 CPU 构建和相同配置可以正常运行；客户端适配器已隔离导入路径，但服务启动脚本缺少相同工作目录约束。修复只在 `start_server.sh` 的 Python `exec` 前加入 `cd "$LMCACHE_ROOT"`，固定服务端导入环境，不修改上游源码、构建制品或其他产品。修复后的纯 import 诊断通过；另从原先的父目录调用启动包装器 `--help` 检查命令解析，未启动服务或运行压测。
 
 诊断证据独立保存在 `.evidence/server-cwd-import-before.log`、`server-cwd-import-after.log` 及 `server-cwd-wrapper-help.log`。9 个原始启动失败单元和日志保留，由主执行器后续重新安排，不使用缺失测量代替零吞吐，也不将工作目录修复标记为已经完成正式性能重测。
+
+## 9. CPU SHM 分配与内存读数
+
+固定 tag 的 `lmcache/v1/distributed/config.py:810–826` 中 CLI lazy 默认 true、槽对齐默认 4096；CPU 无 pin-memory 支持时，`config.py:346–353` 会将 effective lazy 改为 false。当前 wrapper 显式 `--no-l1-use-lazy` 固化这一 CPU 路径，不能说省略参数必然无法启动。`distributed/memory_manager/l1_memory_manager.py:54–85` 以 false 选择 MixedMemoryAllocator；SHM transfer 在 lazy 模式无 shared pool 时会改走 pickle，本适配器明确拒绝该回退。
+
+本次 SHM 分支只创建指定大小 SharedMemory 并建立 tensor view，没有主动填充整池；2×4 GiB 是逻辑池容量和地址空间，不能直接称为启动即实驻 8 GiB。1 KiB 单 chunk 的 allocator slot 向上取整到 4 KiB，64 KiB/1 MiB 已整除；这不意味着整个产品 RSS 固定放大四倍，实际触页、SDK/索引元数据和共享页归属由资源样本说明。此结论仅限本版本的 CPU MP SHM、单 uint8 chunk 配置。

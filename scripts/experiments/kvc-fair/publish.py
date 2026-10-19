@@ -93,7 +93,14 @@ def main():
     atomic(homepage, text.encode(), previous["homepage_before_sha256"])
     atomic(index, index_text.encode(), previous["metadata_before_sha256"])
     for path in [homepage,index,report/"index.html"]:
-        atomic(Path(str(path)+".gz"),gzip.compress(path.read_bytes(),mtime=0))
+        companion = Path(str(path)+".gz")
+        current = path.read_bytes()
+        try:
+            matches = companion.exists() and gzip.decompress(companion.read_bytes()) == current
+        except (OSError, EOFError):
+            matches = False
+        if not matches:
+            atomic(companion,gzip.compress(current,mtime=0))
     previous.update(url="https://yche.me/"+entry["p"],homepage_after_sha256=hashlib.sha256(homepage.read_bytes()).hexdigest(),metadata_after_sha256=hashlib.sha256(index.read_bytes()).hexdigest())
     atomic(audit,json.dumps(previous,ensure_ascii=False,indent=2).encode())
     print(json.dumps(previous,ensure_ascii=False))

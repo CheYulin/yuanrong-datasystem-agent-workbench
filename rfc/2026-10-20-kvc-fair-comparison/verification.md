@@ -18,10 +18,12 @@
 | 新 driver provenance 临时 fixture | 26 项通过，参数/配置/脚本变更拒绝，旧 metadata 保全；未接触远端 |
 | legacy prepare_resume 临时 fixture | 14 项通过，含 generic 根目录相对 native 路径、归档不覆盖、哈希、精确 cwd 变更、重命名中断恢复与分 session 计时；未接触远端 |
 | 源码构建与真实 smoke | 三产品 build_exit=0/smoke_exit=0；具体命令、SHA 与日志见 build.md/分产品文档 |
-| 隔离浏览器 `qa_report.mjs` | 114/114，1440/900/390 px；采用真实 smoke 和耗时证据，公开发布验收待最终页面 |
+| 隔离浏览器 `qa_report.mjs` | 初版 114/114；新增第八张图和内存拆分后，159/159，1440/900/390 px；使用真实部分矩阵和耗时证据，无 profile 时验证明确等待，真实 profile 与公开页面验收待最终执行 |
 | 临时报告生成与 SHA256/ZIP CRC/成员检查 | 实际部分矩阵生成成功；脚本 ZIP 含 DataSystem driver，不含源码树、venv 或 bytecode |
-| verify_results 临时 fixture | 15 项完整矩阵与篡改拒绝、真实离线机制结果和 CLI 退出码通过；正式全量 gate 待执行 |
+| verify_results 临时 fixture | 15 项完整矩阵/篡改拒绝与 CLI 检查，加 11 项真实协议参数/清单检查通过；正式全量 gate 待执行 |
 | capture_evidence 停止状态 fixture | 停止后快照、重复读取不覆盖、占用 cgroup 拒绝通过 |
 | 发布注册的离线 fixture | 恰一入口、保留其他条目、重复执行不加重复入口通过 |
+| profile_put / light_monitor 本地 fixture | 11 项与模拟九个 PUT-only 用例通过；未在主压测期间部署或运行 |
+| 网站独立提交 fixture | 22 项通过，保留既有 dirty 字节、只收录本页注册与报告、拒绝并发/已有 staged/错误仓库；未操作真实站点 |
 
 以上检查仅证明对应脚本、记录和页面行为。最终全矩阵 gate、原始监控连续性、干扰排除后的结果身份集合、公共页面及恢复环境将在完整测量结束后补录。

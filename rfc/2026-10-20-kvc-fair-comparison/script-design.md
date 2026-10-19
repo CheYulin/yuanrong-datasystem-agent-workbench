@@ -35,6 +35,7 @@ flowchart LR
 | build_metadata.py | 校验源码/制品身份与真实 smoke，复制构建证据，拒绝覆盖不同清单 |
 | analyze_results.py | 按固定接口/尺寸/并发汇总三次重复，保留离散程度、采样缺失与内存事件增量 |
 | verify_results.py | 发布前核对完整矩阵身份、实际参数、客户端/全局桶、PUT 后验校验、资源时间序列与已记录干扰排除 |
+| profile_put.py / light_monitor.py | 主矩阵后九个独立 PUT-only 资源窗，固定原驱动与配置，轻量高频采样，单列观察者成本与实际间隔 |
 | capture_evidence.py | 测量停止且 cgroup 为空后保存构建日志与脚本快照，重复收集只验证旧快照 |
 | report.py | 只消费实际结果，分离失败/短窗口、生成 CSV/JSON 与 ECharts 页面 |
 

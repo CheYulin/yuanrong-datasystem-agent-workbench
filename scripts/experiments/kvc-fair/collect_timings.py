@@ -342,6 +342,21 @@ class Collector:
                         for command in attempt["commands"]:
                             if command["end"] is None:
                                 command.update(end=event, status=attempt["status"])
+        lifecycle = {}
+        for event in events:
+            kind, cell, stage = event.get("event"), event.get("cell"), event.get("stage")
+            key = (cell, stage)
+            if kind == "command_start" and stage in {"pre_stop", "start", "stop"}:
+                lifecycle[key] = event
+            elif kind == "command_end" and key in lifecycle:
+                begin = lifecycle.pop(key)
+                duration, domain = event_duration(begin, event)
+                self.add(f"{prefix}:lifecycle:{cell}:{stage}:{event['_evidence']}", cell + " " + stage,
+                         "lifecycle_command", event_utc(begin), event_utc(event), duration,
+                         "completed" if event.get("returncode") == 0 else "failed",
+                         [begin["_evidence"], event["_evidence"]],
+                         "Supplemental profiler command_start/end boundary; exact lifecycle command wall, separate from drain/settle and SDK windows.",
+                         domain, session_id=info["session_id"], archived=archived, **cell_fields(cell))
         for index, attempt in enumerate(attempts):
             cell, first, last = attempt["cell"], attempt["start"], attempt["end"]
             fields = {**cell_fields(cell), "attempt": attempt["number"]}
@@ -412,6 +427,7 @@ def main():
     parser.add_argument("--builds", type=Path)
     parser.add_argument("--environment", type=Path)
     parser.add_argument("--orchestration", type=Path)
+    parser.add_argument("--put-profile", type=Path)
     parser.add_argument("--operations", type=Path, nargs="*", default=[])
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -422,6 +438,8 @@ def main():
     if args.orchestration:
         collector.suite(args.orchestration, "orchestration-smoke")
     collector.suite(args.suite)
+    if args.put_profile:
+        collector.suite(args.put_profile, "put-resource-profile")
     collector.steps.sort(key=lambda row: (row["start_utc"] is None, row["start_utc"] or "", row["id"]))
     output = {"schema_version": 1, "generated_utc": dt.datetime.now(UTC).isoformat().replace("+00:00", "Z"), "time_zone": "UTC", "duration_unit": "seconds",
               "steps": collector.steps, "status_counts": dict(Counter(row["status"] for row in collector.steps)),

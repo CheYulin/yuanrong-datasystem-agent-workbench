@@ -136,3 +136,7 @@ source `resources/samples.jsonl` 与 events.jsonl 继续 append；归档保留�
 ## 9. 恢复 fixture 验证
 
 本地临时目录验证14项（含 generic root-relative native 路径兼容），结果记录于 scratch 的 `resume-fixture-results.json`：默认无源修改；活跃锁/非空 cgroup 拒绝；原 helper 哈希强制校验而新 helper 可添加；native 基线变更拒绝且仅接受精确授权 cwd-fix 哈希对；先归档后排除；在首个结果已改名而事务未更新时故障注入可恢复；恢复幂等；重复 session 拒绝；append offsets 与 index 中断窗口重建；归档篡改检测；最后 summary 不覆盖；30s session 墙钟和与190s含间隙跨度区分；collector 只生成8个独立 SDK 窗口、其中4个历史有效结果标 superseded_interference；原子 no-replace 拒绝既有空目标。故障注入期间原 valid、failure/server 日志与 samples 哈希均保持原值。所有 fixture 未连接远端、未发压、未重构建产品。
+
+## 10. 补充 PUT 资源阶段
+
+主矩阵补跑成功后执行九个独立资源窗；本阶段使用 `profile_put.py` 与 `light_monitor.py`，不加入三重复性能统计。`collect_timings.py --put-profile <目录>` 单独记录其 suite/command/SDK 边界；新驱动额外保存 pre_stop/start/stop 的 command_start/end，因此可得到精确生命周期命令墙钟，仍与 cgroup 排空、固定等待和 SDK 窗口分开。轻采样器保存实际采样间隔、读取计数和含 JSON/写入的循环工作耗时分位数；不能用名义 10 ms 推断实际观测频率。

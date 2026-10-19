@@ -23,7 +23,7 @@ def main():
             continue
         result = dict(operation=op, size=size, concurrency=concurrency, product=product,
                       repetitions=3, short_windows=sum(bool(r['short_window']) for r in rows))
-        for key in ['qps', 'throughput_mib_s', 'p99_us', 'total_cpu_cores', 'peak_memory_gib', 'resource_coverage', 'duration_s']:
+        for key in ['qps', 'throughput_mib_s', 'p99_us', 'total_cpu_cores', 'peak_memory_gib', 'peak_anon_shmem_gib', 'resource_coverage', 'duration_s']:
             values = [r[key] for r in rows if r.get(key) is not None]
             result[key + '_count'] = len(values)
             if len(values) == 3:
@@ -59,17 +59,17 @@ def main():
             f"实际接口测量 {summary['measurement_count']}，有效 {summary['valid_measurements']}；完成用例 {summary['completed_cells']}，待补跑 {summary['remaining_failed_cells']}；历史失败尝试 {summary['historical_failures']}。",
             f"已报告成功操作合计 {summary['total_successful_operations']:,}，接口错误 {summary['total_interface_failures']:,}；另有成功计数未知 {summary['unknown_success_count_rows']} 行、错误计数未知 {summary['unknown_failure_count_rows']} 行；资源样本 {summary['samples']:,}。", '',
             '下表每行固定同一接口、尺寸、并发与产品，汇总三次重复。P99 列为三次 Run P99 上界的中位值；原始 Run 各自先合并客户端直方图，不能把本表理解为跨重复请求池的 P99。CPU 与内存仅在三次都有采样时汇总。', '',
-            '| 接口 | bytes | 并发 | 产品 | QPS 中位 | MiB/s 中位 | P99 μs 中位 | QPS 范围/中位 | CPU 核中位 | 内存 GiB 中位 | 短窗口次数 |',
-            '|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|']
+            '| 接口 | bytes | 并发 | 产品 | QPS 中位 | MiB/s 中位 | P99 μs 中位 | QPS 范围/中位 | CPU 核中位 | 匿名+SHM GiB 中位 | 总计费 GiB 中位 | 短窗口次数 |',
+            '|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|']
     def fmt(value):
         return '不可用' if value is None else f'{value:,.2f}'
     for row in cells:
         text.append('| ' + ' | '.join([row['operation'], str(row['size']), str(row['concurrency']), row['product'],
              fmt(row['qps_median']), fmt(row.get('throughput_mib_s_median')), fmt(row['p99_us_median']),
              f"{row['qps_range_over_median']:.1%}", fmt(row.get('total_cpu_cores_median')),
-             fmt(row.get('peak_memory_gib_median')), str(row['short_windows'])]) + ' |')
+             fmt(row.get('peak_anon_shmem_gib_median')), fmt(row.get('peak_memory_gib_median')), str(row['short_windows'])]) + ' |')
     text += ['', 'cgroup memory.events 在完整采样边界之间的增量：', '', '```json', json.dumps(pressure, indent=2), '```', '',
-             '该增量包含启动、预置、正式测量和拆除；不将累计计数误当成某个请求窗口的事件。采样内存是计费值，含 SDK 依赖和 SHM，不是业务净载荷。', '']
+             '该增量包含启动、预置、正式测量和拆除；不将累计计数误当成某个请求窗口的事件。匿名+SHM 含数据池和 SDK 匿名堆，不含普通文件缓存；总计费内存还可能包含先前用例留下的文件缓存及内核开销。两者均按 server+client 相加，避免 SHM 在 RSS 中重复统计；它们不是业务净载荷。', '']
     (args.out / 'analysis.md').write_text('\n'.join(text))
     print(json.dumps({k:v for k,v in summary.items() if k not in {'groups','limits'}}))
 
