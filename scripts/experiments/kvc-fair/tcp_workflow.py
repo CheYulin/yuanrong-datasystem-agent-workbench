@@ -18,7 +18,13 @@ def main():
     parser.add_argument("--base", default="/home/worktrees/kvc-fair-20261020")
     parser.add_argument("--root", default="/home/worktrees/kvc-fair-tcp-20261020")
     parser.add_argument("--local-output", type=Path, default=Path.home()/"workspace/scratch/2026-10-20-kvc-tcp")
+    parser.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-tcp")
+    parser.add_argument("--rfc", type=Path, default=HERE/"docs" if (HERE/"docs").is_dir() else HERE.parents[2]/"rfc/2026-10-20-kvc-fair-comparison")
+    parser.add_argument("--report-path", default="perf/kvc-tcp-20261020")
     args = parser.parse_args()
+    report_path = Path(args.report_path)
+    if report_path.is_absolute() or ".." in report_path.parts or report_path == Path("."):
+        parser.error("--report-path must be a nonempty relative site path without '..'")
     workflow.TIMING_LOG = args.local_output / "operation-timings.jsonl"
     run = workflow.run
     def ssh(command):
@@ -37,7 +43,7 @@ def main():
             ssh(["python3", bundle+"/prepare_tcp_gate_retry.py", "--root", args.root, "--bundle", bundle])
         ssh(["python3", args.root+"/tcp_protocol_gate.py", "--root", args.root, "--out", args.root+"/protocol-gate-001"])
     elif args.action == "prepare":
-        ssh(["python3", args.root+"/tcp_stage.py", "--root", args.root, "--prepare-environment", "/home/cache/kvc-fair-20261020/environment-tcp"])
+        ssh(["python3", args.root+"/tcp_stage.py", "--root", args.root, "--prepare-environment", args.environment_root])
     elif args.action in {"smoke", "run"}:
         if args.action == "run":
             # The gate and common smoke must be terminal before performance starts.
@@ -51,8 +57,8 @@ def main():
         command = [sys.executable, str(HERE/"workflow.py"), args.action, "--target", args.target,
                    "--remote-root", args.root, "--local-output", str(args.local_output), "--suite", "formal-tcp-001",
                    "--smoke-suite", "orchestration-tcp-smoke", "--profile-suite", "put-resource-profile-tcp-001",
-                   "--environment-root", "/home/cache/kvc-fair-20261020/environment-tcp",
-                   "--transport-profile", "tcp", "--report-path", "perf/kvc-tcp-20261020"]
+                   "--environment-root", args.environment_root, "--rfc", str(args.rfc),
+                   "--transport-profile", "tcp", "--report-path", args.report_path]
         run(command)
         if args.action == "collect":
             destination = args.local_output / "formal-tcp-001/protocol-evidence"

@@ -109,7 +109,32 @@ python3 tcp_workflow.py publish
 | 共同锁与资源 | 两根目录的 `suite.lock` 是同 inode 硬链接；相同端口/cgroup 只能由一个流程独占，不能并行跑两个 profile |
 | 本地证据与发布 | `~/workspace/scratch/2026-10-20-kvc-tcp`；发布目标为 `xqyun-32c32g:/var/www/html/perf/kvc-tcp-20261020`，与原生报告分开 |
 
-`stage` 先确认原生 suite 已成功结束、重验复用制品 SHA，再复制本轮脚本和配置、链接私有安装目录。`prepare` 使用新的本阶段环境记录并建立同一资源约束，已有记录不能直接覆盖。入口提供 `--target`、`--base`、`--root`、`--local-output`；TCP 环境目录目前固定为上表路径，独立复现不能覆盖正在使用或已留证的目录。
+`stage` 先确认原生 suite 已成功结束、重验复用制品 SHA，再复制本轮脚本和配置、链接私有安装目录。`prepare` 使用新的本阶段环境记录并建立同一资源约束，已有记录不能直接覆盖。入口提供 `--target`、`--base`、`--root`、`--local-output`、`--environment-root`、`--rfc`、`--report-path`；上表仍是本轮未改变的默认值。独立复现应同时指定新的运行根、本地输出、环境记录与同级 `perf/` 发布命名空间。`--rfc` 指定打包的本地文档目录，默认识别仓库 RFC 或解压后的 `docs/`。
+
+下面示例在解压后的脚本目录运行，十个步骤始终携带同一组路径；每次独立复现使用新的后缀：
+
+```bash
+TCP_REPLAY=(python3 tcp_workflow.py
+  --target tiantiyun-80c128g
+  --base /home/worktrees/kvc-fair-20261020
+  --root /home/worktrees/kvc-fair-tcp-replay-20261020
+  --local-output "$HOME/workspace/scratch/2026-10-20-kvc-tcp-replay"
+  --environment-root /home/cache/kvc-fair-20261020/environment-tcp-replay-20261020
+  --rfc "$PWD/docs"
+  --report-path perf/kvc-tcp-replay-20261020)
+"${TCP_REPLAY[@]}" stage
+"${TCP_REPLAY[@]}" prepare
+"${TCP_REPLAY[@]}" probe
+"${TCP_REPLAY[@]}" smoke
+"${TCP_REPLAY[@]}" run
+"${TCP_REPLAY[@]}" profile
+"${TCP_REPLAY[@]}" restore
+"${TCP_REPLAY[@]}" collect
+"${TCP_REPLAY[@]}" report
+"${TCP_REPLAY[@]}" publish
+```
+
+仓库内执行时，将 `--rfc` 改为 canonical RFC 的绝对路径。该示例发布到 `/var/www/html/perf/kvc-tcp-replay-20261020`，保留原 TCP 报告；浏览器 QA 的 `QA_URL` 也应改成相同新路径。新路径不会取消共享锁或允许同时使用同一节点资源。
 
 `probe` 单独启动服务，以独立进程验证两接入端点的完整 bytes/EXIST 与实际 TCP syscall。DataSystem 的三尺寸、两接入端点各自留证，实际载荷可路由到配置内的任一 Worker；接入端点和实际载荷端点分开记录。只有整体协议门禁成功且共同 smoke 正常结束，`run` 才能开始。正式窗内不运行 strace，每个 cell 重新启动空服务，81 cell、216 个接口结果、72 组三次重复及九个独立 PUT 资源窗继续沿用原工作负载与配额。
 

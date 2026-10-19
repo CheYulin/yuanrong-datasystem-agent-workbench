@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -334,11 +335,11 @@ class TraceTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    def invoke(self, action):
+    def invoke(self, action, extra=()):
         commands = []
         with tempfile.TemporaryDirectory(prefix="kvc-tcp-workflow-fixture-") as directory:
             arguments = ["tcp_workflow.py", action, "--target", "fixture.invalid", "--base", "/fixture/native",
-                         "--root", "/fixture/tcp", "--local-output", directory]
+                         "--root", "/fixture/tcp", "--local-output", directory, *extra]
             with patch.object(sys, "argv", arguments), patch.object(tcp_workflow.workflow, "run", side_effect=lambda argv: commands.append([str(v) for v in argv])):
                 tcp_workflow.main()
         return commands
@@ -373,6 +374,73 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(commands), 1)
         self.assertIn("/fixture/tcp/tcp_stage.py", commands[0][2])
         self.assertIn("--prepare-environment", commands[0][2])
+
+    def test_prepare_forwards_custom_environment_without_shell_interpolation(self):
+        environment = "/fixture/cache/environment second"
+        commands = self.invoke("prepare", ["--environment-root", environment])
+        remote = shlex.split(commands[0][2])
+        self.assertEqual(remote[remote.index("--prepare-environment") + 1], environment)
+        self.assertEqual(remote[remote.index("--root") + 1], "/fixture/tcp")
+
+    def test_stage_routes_fresh_root_and_local_timing_output(self):
+        with tempfile.TemporaryDirectory(prefix="kvc-tcp-fresh-routing-") as directory:
+            output = str(Path(directory) / "replay")
+            commands = self.invoke("stage", ["--root", "/fixture/tcp-replay", "--local-output", output,
+                "--environment-root", "/fixture/env-replay", "--rfc", "/fixture/docs", "--report-path", "perf/kvc-tcp-replay"])
+            staged = shlex.split(commands[-1][2])
+            self.assertEqual(staged[staged.index("--root") + 1], "/fixture/tcp-replay")
+            self.assertEqual(staged[staged.index("--base") + 1], "/fixture/native")
+            self.assertEqual(tcp_workflow.workflow.TIMING_LOG, Path(output) / "operation-timings.jsonl")
+
+    def test_delegated_actions_forward_fresh_reproduction_paths(self):
+        for action in ["profile", "restore", "collect", "report", "publish"]:
+            with self.subTest(action=action):
+                commands = self.invoke(action, ["--environment-root", "/fixture/env-replay",
+                    "--rfc", "/fixture/extracted ZIP/docs", "--report-path", "perf/kvc-tcp-replay"])
+                delegated = commands[0]
+                for flag, expected in [("--environment-root", "/fixture/env-replay"),
+                                       ("--rfc", "/fixture/extracted ZIP/docs"),
+                                       ("--report-path", "perf/kvc-tcp-replay"),
+                                       ("--remote-root", "/fixture/tcp"), ("--transport-profile", "tcp")]:
+                    self.assertEqual(delegated[delegated.index(flag) + 1], expected)
+                self.assertEqual(delegated[2], action)
+                if action == "collect":
+                    self.assertEqual(len(commands), 2)
+                    self.assertIn("fixture.invalid:/fixture/tcp/protocol-gate-001/", commands[1])
+
+    def test_existing_defaults_remain_the_current_tcp_run(self):
+        prepare = shlex.split(self.invoke("prepare")[0][2])
+        self.assertEqual(prepare[prepare.index("--prepare-environment") + 1], "/home/cache/kvc-fair-20261020/environment-tcp")
+        command = self.invoke("report")[0]
+        self.assertEqual(command[command.index("--environment-root") + 1], "/home/cache/kvc-fair-20261020/environment-tcp")
+        self.assertEqual(command[command.index("--report-path") + 1], "perf/kvc-tcp-20261020")
+        expected = tcp_workflow.HERE/"docs" if (tcp_workflow.HERE/"docs").is_dir() else tcp_workflow.HERE.parents[2]/"rfc/2026-10-20-kvc-fair-comparison"
+        self.assertEqual(command[command.index("--rfc") + 1], str(expected))
+
+    def test_custom_paths_keep_protocol_and_smoke_admission_checks(self):
+        commands = self.invoke("run", ["--environment-root", "/fixture/env-replay", "--rfc", "/fixture/docs",
+                                       "--report-path", "perf/kvc-tcp-replay"])
+        self.assertEqual(len(commands), 2)
+        self.assertIn("protocol-gate-001/summary.json", commands[0][2])
+        self.assertIn("orchestration-tcp-smoke/summary.json", commands[0][2])
+        self.assertIn("/fixture/tcp/formal-tcp-001", commands[1][2])
+
+    def test_custom_paths_do_not_bypass_failed_admission(self):
+        argv = ["tcp_workflow.py", "run", "--environment-root", "/fixture/env-replay", "--rfc", "/fixture/docs",
+                "--report-path", "perf/kvc-tcp-replay"]
+        with patch.object(sys, "argv", argv), patch.object(tcp_workflow.workflow, "run", side_effect=subprocess.CalledProcessError(1, "fixture-admission")) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                tcp_workflow.main()
+        self.assertEqual(run.call_count, 1)
+
+    def test_invalid_report_namespaces_rejected_before_commands(self):
+        for path in ["", ".", "/var/www/html/perf/replay", "perf/../existing"]:
+            with self.subTest(path=path), patch.object(sys, "argv", ["tcp_workflow.py", "publish", "--report-path", path]), \
+                 patch.object(tcp_workflow.workflow, "run") as run, patch("sys.stderr"):
+                with self.assertRaises(SystemExit) as error:
+                    tcp_workflow.main()
+                self.assertEqual(error.exception.code, 2)
+                run.assert_not_called()
 
 
 class GateLifecycleTests(unittest.TestCase):

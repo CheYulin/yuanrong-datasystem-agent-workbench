@@ -53,7 +53,32 @@ python3 tcp_workflow.py publish
 | Mutual exclusion | Both roots' `suite.lock` names refer to the same inode; fixed ports and cgroups cannot be used concurrently |
 | Publication destination | `xqyun-32c32g:/var/www/html/perf/kvc-tcp-20261020`; the native report path remains separate |
 
-`stage` requires a completed successful native suite, revalidates native artifact hashes and preserves the immutable `tcp-stage.json`. It copies scripts/configuration and links the existing private product installations. `prepare` requires a fresh environment record; neither action is an overwrite or reset command. The entrypoint exposes `--target`, `--base`, `--root` and `--local-output`; its TCP environment directory is fixed to the location above. Do not reuse existing output/environment directories for an independent reproduction.
+`stage` requires a completed successful native suite, revalidates native artifact hashes and preserves the immutable `tcp-stage.json`. It copies scripts/configuration and links the existing private product installations. `prepare` requires a fresh environment record; neither action is an overwrite or reset command. The entrypoint exposes `--target`, `--base`, `--root`, `--local-output`, `--environment-root`, `--rfc` and `--report-path`. The table lists this run's unchanged defaults. Choose fresh runtime, local output and environment directories plus a sibling `perf/` namespace for an independent reproduction. `--rfc` selects the local documents included in the report/ZIP; the default finds the canonical RFC or an extracted `docs/` directory.
+
+For example, from an extracted ZIP's scripts directory, keep the same options on all ten actions (replace the replay suffix for each independent run):
+
+```bash
+TCP_REPLAY=(python3 tcp_workflow.py
+  --target tiantiyun-80c128g
+  --base /home/worktrees/kvc-fair-20261020
+  --root /home/worktrees/kvc-fair-tcp-replay-20261020
+  --local-output "$HOME/workspace/scratch/2026-10-20-kvc-tcp-replay"
+  --environment-root /home/cache/kvc-fair-20261020/environment-tcp-replay-20261020
+  --rfc "$PWD/docs"
+  --report-path perf/kvc-tcp-replay-20261020)
+"${TCP_REPLAY[@]}" stage
+"${TCP_REPLAY[@]}" prepare
+"${TCP_REPLAY[@]}" probe
+"${TCP_REPLAY[@]}" smoke
+"${TCP_REPLAY[@]}" run
+"${TCP_REPLAY[@]}" profile
+"${TCP_REPLAY[@]}" restore
+"${TCP_REPLAY[@]}" collect
+"${TCP_REPLAY[@]}" report
+"${TCP_REPLAY[@]}" publish
+```
+
+In a repository checkout, use the canonical RFC's absolute path for `--rfc` instead. The replay report above publishes to `/var/www/html/perf/kvc-tcp-replay-20261020`; it preserves the original TCP namespace. Adjust the browser acceptance `QA_URL` to that sibling path. The shared lock still serializes replays with the original experiment.
 
 `probe` starts both service endpoints per product, checks complete fresh PUT/GET bytes and EXIST hit/miss, and records independent TCP syscall evidence under `protocol-gate-001/`. DataSystem additionally checks three sizes at each of two SDK entry endpoints; routed storage may use either configured worker, so actual payload endpoints are recorded separately. `run` refuses to start until the protocol gate is valid and the common smoke has ended without failures. Protocol tracing stops before performance measurement; services restart empty for each formal cell. The TCP matrix keeps the original workload and quotas: 81 cells, 216 operation results and 72 three-repeat groups. The nine PUT resource observations remain separate.
 
@@ -98,7 +123,7 @@ The private archived reports are retained under `/home/cache/kvc-fair-20261020/e
 
 Three trials; concurrency2/8/16; 1KiB/64KiB/1MiB. Pure PUT inserts `min(2GiB,65536*size)` fresh bytes before a post-measure finish/validation barrier. GET and EXIST use64MiB of preloaded bytes, warmup3s, measurement20s. EXIST measures hits and misses separately at1KiB. Full bytes materialization and native completion acknowledgments are part of the API latency. PUT windows shorter than10s are labeled. Histogram percentiles use64buckets per power-of-two interval and expose upper/lower bounds.
 
-Eight physical NUMA0 cores each for all product services and all clients,12GiB cgroup each, swap disabled. Monitoring uses two NUMA1 cores. The comparison is native same-node RPC/SHM or TCP, with raw bytes adapter costs included; it does not represent a common network transport, GPU KV cache, cross-node RDMA, inference latency or fault recovery test.
+Eight physical NUMA0 cores each for all product services and all clients,12GiB cgroup each, swap disabled. Monitoring uses two NUMA1 cores. The original native profile uses same-node RPC/SHM or TCP. The separate TCP profile configures every product for TCP and keeps its results independent. Both include raw-bytes adapter costs; neither represents GPU KV cache, cross-node RDMA, inference latency or fault recovery.
 
 ## LMCache helper: offline harness fixture
 
@@ -109,3 +134,28 @@ python3 lmcache/harness_correctness.py --kind fake --output /tmp/kvc-fake-helper
 ```
 
 Choose a new output directory for each check. The separate `--kind real` helper uses the existing `lmcache/adapter_lmcache.py` and requires prepared real services; it is not part of the offline fixture check. Both adapter paths are checked before the helper creates evidence.
+
+## Browser and download acceptance
+
+After the complete TCP report is generated and published, run the actual browser checks from this scripts directory, using an installed Playwright module and Chromium. Set `PLAYWRIGHT_MODULE` and `CHROME_BIN` to absolute paths when the local defaults do not exist.
+
+```bash
+QA_URL=https://yche.me/perf/kvc-tcp-20261020/index.html \
+QA_EXPECT_TRANSPORT=tcp QA_EXPECT_ROWS=216 QA_REQUIRE_PROFILE=1 \
+QA_OUT=/absolute/path/to/tcp-public-qa node qa_report.mjs
+```
+
+The command exits nonzero on failed checks and saves `browser-qa.json` plus screenshots. It exercises 1440/900/390 px, all eight ECharts charts, controls, raw-result/CSV/payload identity, three-repeat medians, nine independent resource observations, captions, overflow, TCP-specific docs/verification and the separate native-baseline link. TCP hero and quality must distinguish performance-cell historical failures from verified protocol-preflight rounds. The raw archive is checked by HEAD here; that is not a claim that its HTTP body was downloaded and hashed.
+
+For local preview, serve a site root containing the report under `perf/kvc-tcp-20261020/` and the existing shared `/assets/` dependencies, with `python3 -m http.server 18766 --bind 127.0.0.1 --directory /absolute/site-root`. Use the corresponding local `QA_URL`; public-baseline reachability is skipped locally while its link is still inspected.
+
+After measurements have stopped, verify the actual local or publication-directory downloads as well:
+
+```bash
+sha256sum --check SHA256SUMS
+python3 -m zipfile -t reproduce.zip
+gzip -t raw-evidence.tar.gz
+tar -tzf raw-evidence.tar.gz > /tmp/kvc-tcp-archive-members.txt
+```
+
+These integrity checks complement the browser checks; they do not replace visual and interaction acceptance. Do not bulk-copy, hash or archive the benchmark target while SDK windows are running.
