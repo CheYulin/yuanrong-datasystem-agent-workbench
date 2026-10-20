@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import shutil
 import tempfile
 
 
@@ -132,3 +133,13 @@ def write_immutable(path, result):
         os.link(pending, path)
     finally:
         os.unlink(pending)
+
+
+def copy_file(source, out, relative):
+    source = Path(source)
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("Expected regular evidence file: " + str(source))
+    target = out / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    return {"path": relative, "sha256": digest(target), "bytes": target.stat().st_size}

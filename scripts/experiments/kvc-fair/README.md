@@ -3,6 +3,9 @@
 ## Modularization in progress
 
 P1 provides independently verifiable step receipts and complete source bundles.
+P2–P4 have migrated build/run/observation/collection ownership. P5 adds a report
+consumer for bound offline intermediates, linked Markdown/Mermaid pages and a
+portable offline package; the complete workflow remains in progress.
 See [modular commands](docs/commands.md) and [current module boundaries](docs/architecture.md).
 `python3 -m kvcbench --help` lists implemented commands only. The native, TCP and
 batch experiment drivers below remain the execution entries during migration;

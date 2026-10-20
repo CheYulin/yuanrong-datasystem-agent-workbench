@@ -1,0 +1,82 @@
+"""Read only accepted, explicitly hash-bound offline report inputs."""
+from pathlib import Path
+import json
+
+from kvcbench.core.steps import identifier
+from kvcbench.core.result_state import report_completion
+from kvcbench.platform.files import read_json, validate_reference, digest
+
+REQUIRED = {'analysis', 'series', 'builds', 'workflow', 'evidence'}
+
+
+def load(path, *, diagnostic=False):
+    path = Path(path)
+    spec = read_json(path)
+    if spec.get('schema_version') != 1:
+        raise ValueError('Unsupported report input schema')
+    run_id, profile = identifier(spec['run_id']), identifier(spec['profile'])
+    relocations = {}
+    reference_key = lambda record: json.dumps(record, sort_keys=True, separators=(',', ':'))
+    for item in spec.get('relocations', []):
+        original, local = item['original'], item['local']
+        if any(original[field] != local[field] for field in ('sha256', 'bytes', 'mode')) or reference_key(original) in relocations:
+            raise ValueError('A relocation must preserve the exact unique original file identity')
+        relocations[reference_key(original)] = local
+    def resolve(record):
+        return validate_reference(relocations.get(reference_key(record), record))
+    if set(spec.get('inputs', {})) != REQUIRED | {'audit'}:
+        raise ValueError('Report requires the complete explicit input set')
+    paths = {name: resolve(record) for name, record in spec['inputs'].items()}
+    values = {name: read_json(source) for name, source in paths.items()}
+    audit, analysis = values['audit'], values['analysis']
+    for name in ('audit', 'analysis', 'workflow'):
+        if values[name].get('run_id') != run_id or values[name].get('profile') != profile:
+            raise ValueError('Report input run/profile differs: ' + name)
+    if audit.get('bindings') != {name: spec['inputs'][name]['sha256'] for name in sorted(REQUIRED)}:
+        raise ValueError('Audit is bound to a different analysis/evidence set')
+    if not diagnostic and (audit.get('evidence_verified') is not True or audit.get('complete') is not True or audit.get('issues')):
+        raise ValueError('Normal report requires a complete independently verified audit')
+    if not diagnostic and not report_completion(analysis)['complete']:
+        raise ValueError('Analysis does not contain a complete verified native-batch matrix')
+    if audit.get('native_passed') is not analysis.get('passed'):
+        raise ValueError('Audit and analysis disagree on native success')
+    if not isinstance(values['series'], list) or not isinstance(values['builds'], list) or len(values['builds']) != 3:
+        raise ValueError('Explicit resource series and three product build records are required')
+    if not diagnostic and any(row.get('build_exit') != 0 or row.get('identity_valid') is not True for row in values['builds']):
+        raise ValueError('Normal report requires three accepted native build records')
+    names = {row.get('product') for row in values['builds']}
+    if names != {'datasystem', 'mooncake', 'lmcache'}:
+        raise ValueError('Build input must identify all three products exactly once')
+    evidence = values['evidence']
+    if not isinstance(evidence, list):
+        raise ValueError('Explicit report evidence references are required')
+    destinations = set()
+    namespaces = {'results', 'raw', 'workflow', 'build-logs', 'environment', 'qualification', 'runtime', 'observations', 'audits', 'builds', 'history', 'failed-attempts', 'measured-runtime'}
+    for row in evidence:
+        destination = Path(row['destination'])
+        if (destination.is_absolute() or not destination.parts or '..' in destination.parts
+                or destination.as_posix() != row['destination'] or destination.parts[0] not in namespaces
+                or destination.as_posix() in destinations):
+            raise ValueError('Unsafe or duplicate report evidence destination')
+        destinations.add(destination.as_posix())
+        resolve(row['source'])
+    if any(any(parent.as_posix() in destinations for parent in Path(name).parents) for name in destinations):
+        raise ValueError('Evidence destination files conflict with directories')
+    for row in analysis.get('rows', []):
+        for key in ('evidence', 'outcome_evidence'):
+            if row.get(key) and row[key] not in destinations:
+                raise ValueError('A reported evidence link is not in the bound inventory: ' + row[key])
+    documents = []
+    for record in spec.get('documents', []):
+        source = resolve(record)
+        if source.suffix != '.md' or source.name in {item.name for item in documents}:
+            raise ValueError('Document inputs must be distinct explicit Markdown files')
+        documents.append(source)
+    bundle = resolve(spec['source_bundle'])
+    if bundle.suffix != '.zip':
+        raise ValueError('An explicit verified reproduction source ZIP is required')
+    for name, source in paths.items():
+        if digest(source) != spec['inputs'][name]['sha256']:
+            raise ValueError('Report inputs changed while being read')
+    return {'spec': spec, 'values': values, 'paths': paths, 'documents': documents,
+            'bundle': bundle, 'diagnostic': diagnostic, 'run_id': run_id, 'profile': profile, 'resolve': resolve}

@@ -18,6 +18,10 @@ from kvcbench.platform.receipts import Workflow, file_reference, verify_commit
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    command = commands.add_parser("report", help="Render accepted offline analysis/audit inputs without rerunning products")
+    command.add_argument("--inputs", type=Path, required=True)
+    command.add_argument("--out", type=Path, required=True)
+    command.add_argument("--diagnostic", action="store_true")
     command = commands.add_parser("build", help="Fresh pinned source builds with real per-product receipts")
     command.add_argument("--spec", type=Path, required=True)
     command = commands.add_parser("bundle", help="Create a new complete source bundle and verification receipt")
@@ -46,6 +50,9 @@ def run(args):
         if not Path(old).is_absolute() or not Path(new).is_absolute() or old in roots:
             raise ValueError("Root mappings must be unique explicit absolute paths")
         roots[old] = new
+    if args.command == "report":
+        from kvcbench.report.render import render
+        return render(args.inputs, args.out, diagnostic=args.diagnostic), 0
     if args.command == "build":
         from kvcbench.build.service import build
         outcome = build(read_json(args.spec))

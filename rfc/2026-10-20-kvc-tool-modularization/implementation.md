@@ -10,10 +10,10 @@
 | --- | --- | --- |
 | P0 | 已完成设计 | 五个主模块、142 项基线迁移表、W01–W18 中间结果和独立验收契约 |
 | P1 | 已验收 | core/platform/build 包、回执与只读复核、显式源码包；部署/源码快照/ZIP 接入嵌套模块；完整回归与干净包通过 |
-| P2 | 进行中 | metadata/catalog/stage、配方与 source-build 已接入；第三次真实构建正在运行，完整实验计划和 stage/workflow 准入待接入 |
+| P2 | 进行中 | metadata/catalog/stage、配方与 source-build 已接入；第四次三产品构建命令退出 0，DS 缓存来源校验需独立重验；完整实验计划和 stage/workflow 准入待接入 |
 | P3 | 进行中 | 运行/资格/epoch/worker/batch adapter 与 observe 已分离，目标机观测 smoke 通过；产品 runtime/环境恢复/业务回执及真实产品 smoke 待完成 |
 | P4 | 进行中 | 原件 snapshot/index、analysis/audits 与来源复核已迁移，历史原件重算一致；完整 W12–W14 准入与实际新实验审计待完成 |
-| P5 | 待实施 | 报告模板/文档/资源/复现包、独立交付与浏览器验收 |
+| P5 | 进行中 | 新 report 消费者、ECharts/文档/离线包已实现且浏览器/干净包验证通过；上游 report-inputs 自动生成与 W16–W18 仍待接入 |
 | P6 | 待实施 | 旧入口退出、引用迁移、干净包验收与完整新实验及最终报告刷新 |
 
 ## 3. P1 实际中间结果
@@ -116,3 +116,30 @@ LMCache probe 改用 `-I -B`，目标机实际复核加载了固定 source/lmcac
 目标机 `compiler-probe-001` 以实际 GCC 15 和显式 CMake compiler 参数完成 configure/build/execute，三个命令均退出 0，实际 1.028712926 秒；测试证明参数经过 executable driver 传递，不代表完整 DataSystem 已构建成功。两项 compiler 输入/实际 cache/篡改单测已包含上述 516 项。
 
 第二次构建已终态：Mooncake、LMCache 通过，DataSystem 失败，构建域排空并移除。第三次以全新 `...-003` 根目录和 `kvcbuild20261021modular003` 域启动，使用 `code-p4-004` 冻结包；旧目录与失败不改写。完整 native catalog、P3 剩余环境/恢复、P4 工作流绑定、P5/P6、全新正式矩阵及站点交付都仍未完成。
+
+
+## 11. P5a 已绑定中间结果的报告与离线交付
+
+新的 report/inputs、render、model、documents、offline、relocate 分别负责输入组合、页面、展示投影、文档网页、离线包和位置映射。report 入口不导入 build/run/observe/collect；旧的混合报告流程明确保留于 compat 供历史格式复核。共用 inventory、SHA/gzip/操作账本和原始 tar 检查归 platform；上传与注册归 delivery，原来仅修改本地文档/ZIP 的 refresh 归 report 并拒绝对新 render-record 报告原地更新。
+
+正常 report 要求 run/profile 一致、完整的 analysis/series/builds/workflow/evidence/audit、审计 SHA 绑定、完整固定矩阵和三个通过的构建记录。诊断预览保持 publication_eligible=false；完整原生失败矩阵仍保留 native_passed=false，失败图表不填零。MD 保留原件并生成互链网页，Mermaid/ECharts 全部本地资源，编号章节、左导航、居中图注与移动目录已实现。下载 URL 使用 ZIP SHA 版本参数。
+
+离线 ZIP 包含代码、report/index.html 与全部本地阅读资源、输入原件和 portable template；relocate 仅新建相同文件身份的位置映射，不重写原 audit/analysis/evidence 字节。Unix mode 与 SHA 不符时拒绝重建；旧的 inplace refresh 对新不可变报告拒绝写入。上游自动生成 report-inputs 以及完整 W15–W18 业务回执仍须接入，不将手工布局 fixture 当成完整工作流。
+
+- 全回归 python3 -m unittest discover -s . -p 'test_*.py'：524 项通过，48.840 秒，日志 p5-release-all-009.log。随后版本化 ZIP 入口与报告契约重点 23 项通过，1.203 秒。接口消费者覆盖错 run/错绑定、未验收阻断、完整原生失败保留、篡改拒绝、原始 audit 不改写及 legacy 刷新保护。
+- 用历史 R7 原件制作明确标记的 diagnostic 布局页；未发布，不能作为新测试结果。真实 Chromium 148.0.7778.97 在 1440/390/320 三种宽度检查 9 张 ECharts、48 条 failed/N/A、移动目录、居中图注和 Mermaid，页面无整体横向溢出、无 JS 错误。EXIST 命中 DS 的 B=16/256/4096 聚合保持 null。p5-browser-layout-002 保留实际截图和检查结果。
+- 干净解压后的 report 同样在三种宽度通过浏览器检查（p5-browser-offline-003），包括 1 张实际 Mermaid SVG，未以空图集冒充图形验收。
+- 从实际解压代码 cwd 执行（清除 PYTHONPATH、关闭 pyc 写入）help、relocate、report 重生成均退出 0，实际命令耗时 0.114363981 /0.265265754 /2.822331619 秒。证据 p5-clean-command-check-002，每条 argv/cwd/退出/耗时均独立落盘。更早从工作区调用的检查只证明位置映射，未列为干净代码执行证明。
+- 全部本轮检查属于工具、历史数据回归与页面交付能力；没有新的正式性能矩阵或公开站点交付。SDK 请求循环未改，所增处理均在控制面或离线；模块依赖检查通过。DataSystem 产品仓未修改，无产品上下文结构更新。
+
+## 12. 第四次构建终态与缓存校验修正
+
+第三次构建的 C++ header driver 已实际传递到 RocksDB；libiconv 的旧式函数声明在默认 C 模式下不兼容。目标机最小实际编译对比退出码为默认模式 1、GNU17 0，耗时 0.097051413 秒；C driver 和参数纳入 compiler-inputs，配置中的实际 CC 也要核对。
+
+第四次原生构建命令全部退出 0：Mooncake 376.759765198 秒、DataSystem 965.342663636 秒、LMCache 74.125489483 秒。实际 artifacts 各 3 个，source/build 命令和 cleanup 原件保留，cgroup 排空并移除。Mooncake/LMCache 身份验收通过；DataSystem 只因旧校验器要求本地 RocksDB CMakeCache 而拒绝——该依赖已从缓存复用，本次实际主项目 CMakeCache 和 iconv config.log 存在。
+
+当前 toolchain 校验已支持主项目的实际编译器配置及缓存复用，并有正/负单测；没有伪造缺失的 RocksDB cache 文件，也不修改第四次已封存的失败 metadata/回执。后续需以原始成功命令、原 artifact 哈希和新版只读规则生成新的 revalidation metadata/catalog，再让部署消费显式验收后的构建目录。构建命令成功不等于已有三个 passed 的构建目录，不在此阶段进入正式测量。
+
+P3 剩余环境/恢复和统一资源锁、P4/P5 工作流绑定、P6 入口清理、实际资格/全新正式矩阵、最终报告及公开验收仍保留在目标内。
+
+Mermaid vendor 从已使用的本地阅读器逐字节保留，vendor.json 记录 SHA/size；其 minified 模板字符串含尾随空白，.gitattributes 仅对这一文件关闭 whitespace 报错，不改写第三方字符串，其他源码继续执行完整 diff --check。

@@ -51,3 +51,16 @@ python3 -m kvcbench status --workflow /absolute/new-native-root/workflow
 构建根目录和 `kvcbuild` cgroup 必须全新。命令按冻结版本顺序执行 Mooncake、DataSystem、LMCache，输出各产品 `commands/<product>/`、`build-metadata/<product>.json` 及 W02 产品子步骤回执；只有三产品通过身份/原生产物验证才写 `build-catalog.json`。构建总结果与清理分别为 `build-result.json`、`build-cleanup.json`。失败原件不覆盖，不根据目录存在推断成功。
 
 该 W01/W02 scope 是源码构建，不包含正式压测资格、采样覆盖或整个 W01–W18 实验验收。构建支持的 CPU/内存预算和现场可用性必须在目标机确认；现有缓存用于依赖加速，不把复用旧产物记录为新构建。
+
+
+## 6. 从已绑定中间结果生成报告
+
+新的 report 入口消费显式 analysis/series/builds/workflow/evidence/audit 引用，校验 SHA、mode、run/profile 与审计绑定，正常报告要求完整矩阵和三个通过的构建记录。上游自动生成 report-inputs 的编排仍在接入，不能用空文件冒充审计通过。
+
+```bash
+python3 -m kvcbench report --inputs /absolute/derived/report-inputs.json --out /absolute/new-report
+```
+
+诊断预览显式增加 --diagnostic，保持 publication_eligible=false。原生失败证据完整与 API 成功分别呈现；失败聚合保留 null。report 不执行新的产品请求。
+
+ZIP 包含 report/index.html、ECharts、Mermaid、文档网页与原件、原始输入副本和源码包，支持离线打开。重新生成时按包内 REPRODUCE-REPORT.md 执行 report.relocate，它仅生成新的文件位置映射，校验原件 SHA/size/mode，原始 audit/analysis 不改写。使用保留 Unix 权限的解压工具。新报告保持不可变，legacy refresh 对带 render-record.json 的新报告拒绝原地写入；文档刷新生成新的报告 attempt。

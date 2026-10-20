@@ -51,3 +51,12 @@ P1 提供持久化和绑定机制；每个 W 步骤的业务验收函数仍随 b
 审计来源清单绑定实际 canonical 文件。新 TCP、资源、部署审计分别使用 schema 3、2、4，保留旧 schema 的只读解释；旧记录必须提供其原始 helper 字节，不用今天的薄 facade 冒充原先执行的脚本。当前版本的 closure 包括真实分析、直方图、原生结果校验、资源归约和相关 provenance 声明。
 
 `collect/index.py` 按明确且唯一的 path/role 清单制作新快照，保存 SHA/size/mode 并可独立复核。允许选择已经关闭的 W01–W11 回执，排除本次 W12、自身索引和下游派生目录；复制中变化保留失败现场。terminal_suite 区分“原生失败但执行完整”和“清理未知”，后者阻断正常收集。W12 的锁、现场排空、恢复与上游回执准入仍由总编排提供，索引完整性本身不是这些业务前置条件的证明。
+
+
+## 6. 报告与交付边界
+
+新的 report/inputs.py 消费已落盘并绑定的中间结果；render.py、model.py、documents.py、offline.py 分别处理页面、图表投影、Markdown/Mermaid 阅读页和离线包，report 不导入 build/run/observe/collect。原来混合分析和生成的旧入口明确保留于 compat，用于旧格式复核，不作为新的 report 实现。
+
+源码 inventory、交付树 inventory、SHA/gzip/ledger 与原始 tar 检查归 platform；report/package 使用明确源码清单。发布、注册和历史导航维护归 delivery；新报告树外的 W16–W18 回执接入尚待完成。历史本地 refresh 仍支持旧报告，对新不可变报告禁止原地刷新。
+
+新消费者按 audit 中的 SHA 绑定拒绝跨 run/profile 或错配组合，允许完整的原生失败矩阵保留 failed。离线 relocate 只增补到相同字节/权限的显式位置映射，不重写原始 audit/evidence；干净解压后的实际代码已完成 help、位置映射与重生成验证。

@@ -18,8 +18,9 @@ test "$(git -C "$SOURCE" rev-parse HEAD)" = "$SHA"
 test -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)"
 cd "$SOURCE"
 export DS_OPENSOURCE_DIR=$DOWNLOADS/datasystem-thirdparty
-python3 -m kvcbench.build.toolchain --root "$TASK_ROOT" --compiler "${CXX:?set explicit GCC C++ compiler}" > .evidence/build/compiler-input.json
+python3 -m kvcbench.build.toolchain --root "$TASK_ROOT" --c-compiler "$CC" --compiler "${CXX:?set explicit GCC C++ compiler}" > .evidence/build/compiler-input.json
 export CXX="$TASK_ROOT/compiler-inputs/datasystem/g++"
+export CC="$TASK_ROOT/compiler-inputs/datasystem/gcc"
 export PATH="$TASK_ROOT/compiler-inputs/datasystem:$PATH"
 date -u +%FT%TZ > .evidence/build/started-at.txt
 printf '%s\n' "tag=$TAG" "sha=$SHA" > .evidence/build/source-pin.txt

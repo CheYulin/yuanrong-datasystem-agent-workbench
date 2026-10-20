@@ -1,0 +1,1 @@
+"""KVC delivery module."""

@@ -1,0 +1,2 @@
+# Preserve upstream minified template-literal whitespace byte for byte.
+scripts/experiments/kvc-fair/kvcbench/report/assets/mermaid.min.js -whitespace

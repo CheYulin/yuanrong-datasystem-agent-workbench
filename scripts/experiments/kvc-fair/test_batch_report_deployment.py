@@ -24,7 +24,7 @@ class DeploymentReportTests(unittest.TestCase):
         self.path = self.root / "deployment-audit.json"
         self.raw = audit.Audit(self.root).run()
         self.assertTrue(self.raw["valid"], self.raw["errors"])
-        self.scripts = Path(report.__file__).resolve().parent
+        self.scripts = Path(__file__).resolve().parent
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -472,10 +472,10 @@ class SourceBuildProvenanceReportTests(unittest.TestCase):
         docs = self.fixture.parent / 'docs'
         docs.mkdir()
         (docs / 'fixture.md').write_text('Offline packaging fixture; no native build executed.\n')
-        archive = report.reproduction_archive(Path(report.__file__).resolve().parent, docs, self.fixture.parent)
+        archive = report.reproduction_archive(Path(__file__).resolve().parent, docs, self.fixture.parent)
         with zipfile.ZipFile(archive) as zipped:
             self.assertEqual(zipped.read('kvc-fair/batch_build_stage.py'),
-                             (Path(report.__file__).resolve().parent / 'batch_build_stage.py').read_bytes())
+                             (Path(__file__).resolve().parent / 'batch_build_stage.py').read_bytes())
 
 
 if __name__ == "__main__":
