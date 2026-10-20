@@ -1,6 +1,6 @@
 # 6. 结果验证与最终验收
 
-状态：**In Progress**。r7实际gate、C8 smoke及TCP审计已通过，正式三重复运行中，终态与交付尚未验收。r5原生失败、r6纯KV deadline对照与启动权限失败原样保留，不由新短窗口成功抹去。
+状态：**正式证据矩阵已完成，交付验收进行中**。r7独立重算132有效、18原生失败、30 N/A，180槽与36服务周期齐全、0issues；evidence_verified=true、passed=false。页面、下载包与公网验收尚待完成，不能将完整执行写成所有API成功。
 
 ## 6.1 实际输入与比较边界
 
@@ -62,19 +62,19 @@ r2 的旧 key0-prefix TCP 审计12/16与后续完整 any-key payload 审计16/16
 
 ## 6.6 正式结果与最终验收清单
 
-| 验收项 | 当前状态 / 待填证据 |
+| 验收项 | 实际状态 / 证据 |
 |---|---|
-| r5资格验证 | 原生gate147.334149718s、12-epoch smoke534.366434989s通过；TCP旧parser14/16缺口保留，新同syscall相邻iov修正16/16，详见6.8 |
-| 正式三重复完整身份 | r5实际187.310265231s后失败，0完整组/epoch；设计9组、36epoch、180操作JSON（150支持/30 N/A）尚未完整执行，不是已完成数量 |
-| 各操作成功、失败、部分提交未知数 | 待正式原件重算；不将 smoke 的0失败外推至正式结果 |
-| batch/s、key/s、MiB/s与三重复中位数 | 待正式结果；无等价能力不参与排名，不填零 |
-| P50/P99合并桶与低样本提示 | 待核对每客户端 histogram、成功数和时间边界；不能平均客户端 P99 |
-| CPU/内存/anon+SHM/IO/throttling | 待正式 cgroup 样本和窗口覆盖审计；缺样、counter reset、短PUT不足采样保持 unknown/null |
-| 干扰与生命周期 | 待核 interference 原件、监控退出、所有进程结束与环境恢复；不能因独占授权就宣称没有任何未记录负载 |
-| 结果与源码/配置身份 | 待正式 stage/products/native 制品 SHA 与结果引用的一致性验收 |
-| 报告/原始证据包/复现ZIP | 待生成、逐文件 SHA/成员/安全解包验证；尚无最终包 hash |
-| 本地与公开浏览器验收 | 待运行；不得借用此前单 key 报告的验收计数 |
-| 最终公开地址与交付提交 | 预定 `https://yche.me/perf/kvc-batch-tcp-20261020/index.html`；尚未发布验收，不预填提交 hash |
+| r7资格验证 | gate137.246847605s、12-epoch smoke437.495450633s通过；TCP16case/32方向限定证明通过 |
+| 正式三重复完整身份 | 2026-10-20 06:02:02.821030–07:11:54.524434 UTC，4191.703410091s；9组、36epoch、180槽完整 |
+| 各操作成功与失败 | 独立重算132有效、18有证据原生失败、30 N/A；0missing/invalid、0issues。18失败均DS B16/256/4096 EXIST hit/miss的三重复，不用失败窗口速率排名 |
+| 有效性与证据完整性 | execution_complete=true、valid=false、evidence_verified=true、passed=false；suite failed=[]/fatal=null是无编排失败，不是无原生错误；runner返回1原样保留 |
+| 统计口径 | 全部三轮有效才给中位数；21个有效窗口低于1000 batch、21个有效窗口短于10s；合并直方图整批桶上界，不除以B |
+| CPU/内存/IO覆盖 | 20,924样本；实际间隔P50 200.268978ms、P95 200.2896885ms、最大222.396611ms；所有150个SDK窗均至少11样本，不能把样本最大值当连续真实峰值 |
+| 部署关闭项 | 21集群/42独立状态目录、pure-KV旗标一致、无DB特征文件；42份stdout指定存储错误匹配0；live只覆盖gate1/21，其余20为启动记录/日志 |
+| 资源与干扰 | server/client内存事件与swap为0；client仅一个SDK窗有1次/1003µs限流；monitor memory.max事件+4568且无OOM，parent传播不重复相加；背景leader/主机差额单列，见资源结果 |
+| 恢复 | environment-restored.json：0.209946995s、errors=[]，cgroups_before/after均空；setroubleshootd在restore前已active，不能宣称全程停用 |
+| 报告/下载包/浏览器 | 正式生成与本地/公开验收进行中，尚不填最终SHA或验收计数 |
+| 公开地址与提交 | 预定 https://yche.me/perf/kvc-batch-tcp-20261020/index.html；阶段7233cca、30c77d9已提交，交付提交尚待实际产生 |
 
 正式r3尝试213.962156825秒后失败；DataSystem B16 EXIST hit的8客户端各1个deadline错误，两个Worker此前已出现同一默认RocksDB目录的文件缺失/大小不符错误。门禁和smoke的成功只对其执行步骤成立，不能认证长窗口或目录隔离。默认目录问题、启动脚本最小修复及旧单key基线的影响详见 [verification.md](verification.md) 第5.6–5.7节；旧DS值不得作为修正后batch收益的公平基准，修正后的B1需随新矩阵重测。
 
@@ -117,3 +117,7 @@ r5正式05:16:59.135590–05:20:06.445844 UTC，187.310265231秒后在B16 EXIST 
 本次检查的是构建输入准入、失败分类、资源/部署审计、报告和交付工具，没有修改DataSystem/Mooncake/LMCache的原生代码，也未把本地工具测试写成产品UT/ST、恢复或性能证据。R7执行输入仍以其冻结清单为准；后增加的复现分支、失败回执链接和浏览器断言是交付工具修订，不能追认成目标机已执行源码。共享suite锁、PID/start-ticks所有权、事务回滚和目录隔离由相关fixture覆盖；没有产品持久化/并发协议或模块结构变化，`.repo_context`无需更新。正式性能结论、公开页面和ZIP验收仍待实际终态。
 
 补充fixture后再次执行同一discover命令，355项通过（框架34.148秒）；7项profile测试通过（0.560秒），此次由`workflow.run`保存实际外层起止与耗时。4项新增回执/DOM片段测试覆盖0成功原生失败、CSV链接、错误/状态/回执篡改及HTML转义；它们是synthetic矩阵，不充当正式运行数据。
+
+## 6.12 r7终态输入与独立核验
+
+正式summary SHA256为 `3a797fe66006d5f6cadeeb5643f16e9d52be4be79dc6ecf387724fd6e148d24d`；部署审计SHA256为 `936de7a4f005c5bf6639678e0ab39cd0605f5cd18926806ff0c1e494e0e78cea`。三方原生源码未修改。采集完成后分别执行analyzer、resource audit、deployment audit；各自原件、执行helper和输入SHA由最终报告重新绑定，不能由本文数字替代原始证据。完整结果与残余背景观测见后续交付文档。

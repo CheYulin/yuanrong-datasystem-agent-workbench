@@ -51,4 +51,4 @@ sequenceDiagram
     A-->>W: 证据完整性与性能有效性分别判定
 ```
 
-命令入口为 `batch_workflow.py stage` → `qualify` → `run` → `restore` → `collect` → 审计 → 报告。每条外部命令及远端服务周期均保存实际单调时钟耗时。R6 是否通过以实际产物为准，本文件不预告测量结果。
+命令入口为 `batch_workflow.py stage` → `qualify` → `run` → `restore` → `collect` → 审计 → 报告。每条外部命令及远端服务周期均保存实际单调时钟耗时。r7已完成三重复，独立重算132有效、18原生失败、30 N/A；配置最小化不等于修复原生deadline错误，终态和交付证据见验收文档。

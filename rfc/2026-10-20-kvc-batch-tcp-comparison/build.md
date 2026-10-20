@@ -67,6 +67,8 @@ Mooncake另存`timing_scope.own_compile_including_failed_configuration_attempt_s
 | `builds/mooncake.json` | `8a63949d2d5f27bb6d4491215ed8c926797db1a7a5d0a30c1ac85c90573d95a3` |
 | `builds/lmcache.json` | `b9fb5f547320e98424bc62a8aeba15524453195074615ee4aee081858ce4dd6a` |
 
+原始完整构建日志另保留在[首次实验的原始归档](https://yche.me/perf/kvc-fair-20261020/raw-evidence.tar.gz)的`formal-001/build-and-script-evidence/`下，含三产品build.log、build-summary和Mooncake xxHash日志。本地只读检查确认这些成员存在；旧实验的DataSystem性能隔离限制不改变这些保存的构建日志。当前批量raw tar的“完整运行日志”指本次及所列批量历史，不把旧构建日志声称为本轮重新生成。
+
 ## 2.5 从ZIP内配方重建并直达pure-KV
 
 解压`reproduce.zip`后的脚本根是`kvc-fair/`，构建配方为其中的`mooncake/build.sh`、`datasystem/build.sh`、`lmcache/build_lmcache.sh`。控制机需要Python3、SSH/scp/rsync，并可连接具备2.1条件的重放节点；构建需要访问固定源码与依赖下载地址。下面所有远端根和本地输出必须选择全新目录，不要覆盖原实验。

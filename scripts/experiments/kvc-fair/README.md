@@ -1,5 +1,32 @@
 # KVC fair comparison scripts
 
+## Current entry: native batch TCP / pure KV
+
+For the 1 / 16 / 256 / 4096 independent-keys-per-call experiment, start with
+`docs/README.md`, `docs/build.md` and `docs/script-design.md` in the downloaded
+bundle. In the repository these are under `rfc/2026-10-20-kvc-batch-tcp-comparison/`.
+The current orchestration entry is `batch_workflow.py`; its `pure-kv` profile
+turns off RocksDB writes and Stream Cache sockets. Choose fresh runtime,
+environment, local-output and publication paths for every replay.
+
+New builds can enter the batch protocol directly with
+`batch_workflow.py stage --builds-only-native-root <fresh-native-build-root>`
+after `workflow.py stage/build`; the exact parameterized commands and
+prerequisites are in `docs/build.md`. This branch does not require the legacy
+native/TCP performance suites below. It has local fixture validation; this run
+reused identified source-build artifacts rather than executing a new rebuild.
+
+A complete batch run containing verified native read-only failures returns 1.
+Inspect `execution_complete`, `failed`, `fatal` and the independent analysis;
+still run the guarded restore and collect actions. Complete evidence does not
+mean every API passed. Use `batch_refresh_delivery.py` for this batch report.
+The reproduction ZIP carries scripts and selected evidence; the full report
+directory and raw-evidence tar are separate deliverables.
+
+The following native/single-key instructions are retained as historical tools.
+Their DataSystem shared-default RocksDB deployment is not a fair isolated
+performance baseline; see the current RFC and the published isolation notices.
+
 Scope: the pinned 2026-10-20 DataSystem rc44, Mooncake release and LMCache release, CPU on `tiantiyun-80c128g`. The full design and Mermaid diagrams live in the paired RFC `rfc/2026-10-20-kvc-fair-comparison/` or the downloaded `docs/` directory. This is an experiment-specific driver, not a replacement product build system.
 
 ## Reproduce

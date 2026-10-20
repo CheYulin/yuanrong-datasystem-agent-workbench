@@ -1,6 +1,6 @@
 # 5. 阶段验证记录
 
-当前为In-Progress：r7新根已实际通过完整gate、C8 smoke和16/16 TCP审计，正式三重复正在执行，尚未验收。此前r5正式失败、r6 deadline动态对照及Mooncake启动权限失败均原样保留，不把新短窗口通过当作旧问题已修复。
+当前正式证据矩阵已完成：r7独立重算132有效、18原生失败、30 N/A、0issues；9组/36epoch齐全，evidence_verified=true而passed=false。部署和资源审计已完成，交付浏览器/公开下载验收进行中。历史失败原样保留，不把短窗口通过当作原生问题已修复。
 
 ## 5.1 运行前自检
 
@@ -152,3 +152,9 @@ r6恢复原件记录0.207646857s、`errors=[]`（SHA `510835caea13499d1f75cc4169
 从本地已采集原件确认r7 gate137.246847605秒、3个gate epoch通过；C8 smoke437.495450633秒、12个epoch通过；独立重算50有效支持结果、10 N/A、0issues。TCP审计13.311996920秒、16组合/32方向通过。summary SHA依次`00d0fbf0568a304140a1f95d26b4595ea76d9eb880040f8a1d85084047ff295b`、`9ca51eee53225b6077d41999fa20dbc4cc48bf3855ce8cdf4c4b40ca9a3db203`，TCP证明SHA `4f8aff3a0b517cff731aed16e3f6817eb9933b7cf4050a0734ca216eafa8781d`；stage SHA `991692d50b4fc05ae1150671da3f47d17dd53919ac24cfda2f51649b08b059eb`。
 
 正式运行已启动，其完整身份、原生失败与资源覆盖尚待终态采集，不提前补150有效/30 N/A。运行期间不SSH、rsync、扫描源码或哈希目标制品。r7真实复用既有固定构建物，没有走新增from-source bootstrap或重新编译；新可选`--builds-only-native-root`仅完成本地20项机制测试，目的是让后续重放不被无关旧native/TCP formal阻断，不能冒称r7实际执行入口。完整命令与构建元数据/配方/现态/制品绑定合同见 [script-design.md](script-design.md) 4.3。
+
+## 5.16 r7正式终态与部署/资源独立审计
+
+正式4191.703410091秒，18个原生失败均有rc1、SDK原件SHA、原生错误、measure_failed事件、epoch及suite有序清单，既不是N/A也不是编排fatal。部署审计29.106029330秒，431输入前后重核，21集群/42状态目录、7项pure-KV旗标一致；DB特征文件0，42份stdout共1800B、指定存储文件错误匹配0，42份普通eviction状态各26B。live仍仅gate1/21。当前实际batch_analyze源码与未执行的冻结副本不同，实际4个依赖SHA/bytes另存audit，保留121份冻结输入而不覆盖。
+
+20924个原始采样、150个实际SDK窗均完成资源核对；server/client无内存事件及swap，monitor上限事件、client少量限流与外部背景CPU另行披露，详见[资源结果](resource-results.md)。本地工具回归355+7项与29项报告专项检查是工具fixture，不替代产品UT/ST、原生并发/持久化恢复测试；本任务无产品代码改动和模块结构变化，repo_context无需更新。

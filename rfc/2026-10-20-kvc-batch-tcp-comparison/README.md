@@ -2,6 +2,8 @@
 
 用户已确认 key 数指**一次 SDK API 调用的批量大小**，不是缓存总 key 数。本补测与已发布的单 key TCP 实验分开保存、分开统计。
 
+当前正式证据已独立重算：**132有效 / 18原生失败 / 30 N/A**，共180槽、36个服务周期；`evidence_verified=true`但`passed=false`。18失败均为DataSystem大批量EXIST三重复。交付状态以[验收文档](validation.md)为准。
+
 ## 1.1 固定边界
 
 - 目标：`tiantiyun-80c128g`，同节点两个服务，全部 TCP；沿用已构建的 DataSystem v0.9.2.rc44、Mooncake v0.3.13.post1、LMCache v0.5.6，重新核验构建物 SHA256，不宣称重新编译。
