@@ -31,17 +31,31 @@ def main():
         for row in record['files']:
             if hashlib.sha256((destination / row['path']).read_bytes()).hexdigest() != row['sha256']:
                 raise RuntimeError('Saved evidence snapshot hash mismatch: ' + row['path'])
+            if 'mode' in row and (destination / row['path']).stat().st_mode & 0o777 != row['mode']:
+                raise RuntimeError('Saved evidence snapshot mode mismatch: ' + row['path'])
         print(json.dumps({'output': str(destination), 'already_captured': True, 'files': len(record['files'])}))
         return
     sources = set(root.glob('*.py'))
     for sub in ['scripts/datasystem', 'mooncake', 'lmcache', 'configs']:
         sources.update(p for p in (root / sub).glob('*') if p.is_file() and p.suffix in {'.py', '.sh', '.lock', '.json', '.log', '.txt', '.exit', '.sha256'})
     sources.add(root / 'products.json')
+    stage_path = root / 'batch-stage.json'
+    if stage_path.is_file():
+        from kvcbench.platform.files import regular
+        stage = json.loads(stage_path.read_text())
+        sources.update(regular(root, name) for name in stage['inputs'])
     for sub in ['datasystem/.evidence', 'mooncake/.evidence', 'lmcache/.evidence']:
         sources.update(p for p in (root / sub).rglob('*') if p.is_file() and p.suffix in {'.log', '.txt', '.json', '.exit', '.sha256'})
     staging = Path(tempfile.mkdtemp(prefix='.evidence-snapshot-', dir=suite))
     rows = []
-    initial = json.loads((suite / 'script-hashes.json').read_text())
+    if (suite / 'script-hashes.json').is_file():
+        initial = json.loads((suite / 'script-hashes.json').read_text())
+    elif stage_path.is_file():
+        initial = {name: row['sha256'] for name, row in stage['inputs'].items()}
+    else:
+        raise FileNotFoundError('A session hash inventory or frozen batch stage is required')
+    from kvcbench.platform.files import regular
+    sources.update(regular(root, name) for name in initial)
     try:
         for source in sorted(sources):
             if source.is_symlink():
@@ -54,7 +68,8 @@ def main():
             shutil.copy2(source, target)
             digest = hashlib.sha256(target.read_bytes()).hexdigest()
             rows.append({'source': str(source), 'path': str(relative), 'sha256': digest,
-                         'bytes': target.stat().st_size, 'matches_current_session_script_hash': digest == initial[str(relative)] if str(relative) in initial else None})
+                         'bytes': target.stat().st_size, 'mode': target.stat().st_mode & 0o777,
+                         'matches_current_session_script_hash': digest == initial[str(relative)] if str(relative) in initial else None})
         (staging / 'snapshot-manifest.json').write_text(json.dumps({
             'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'files': rows,
             'scope': 'Snapshot of scripts present and source-build/smoke evidence after measurements stopped. Match against per-session script hashes and approved changes to determine what executed; post-run helpers are not implied to have run during measurement.'}, indent=2))

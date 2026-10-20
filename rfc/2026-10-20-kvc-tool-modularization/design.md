@@ -1,6 +1,6 @@
 # KVC 对比工具模块化重构设计
 
-**Status: Draft · 2026-10-20 · 仅设计，尚未实施**
+**Status: In-Progress · 设计基线 2026-10-20 · P1 于 2026-10-21 启动，见 [实施记录](implementation.md)**
 
 现状基线为 workbench `d5907ed041f44261bff82c99ac41bc96e2f0d18d`。下文“现状”为该提交的源码事实，“目标”为待实施方案。完整文件去向见 [migration-map.csv](migration-map.csv)，验收要求见 [validation.md](validation.md)。
 
@@ -429,6 +429,6 @@ python3 -m kvcbench publish --report <report-root> --destination <site.json>
 | 配置合并后 silently 改公平性 | 一次物化、冻结来源与 hash，协议更改必须新 profile | 实验维护者；计划与生效配置对照 |
 | “收集”再次变成巨型模块 | sync/readers/analysis/audits 明确子职责，report 只展示 | collect/report 维护者；依赖与模块审查 |
 
-本次只新增 RFC 和索引，未移动现有文件、修改产品构建参数、触发压测或发布网站。产品热路径、并发状态和持久化行为均无实际改动；上述是后续实施必须满足的约束，不能据文档宣称运行安全或性能已验证。DataSystem 后续说明统一使用 **Coordinator**；历史源码符号、配置与原始日志保持原名，Mooncake 自身的 Master 名称保留。
+设计提交阶段只新增 RFC 和索引；当前实施进度见 [implementation.md](implementation.md)。设计提交时未移动现有文件、修改产品构建参数、触发压测或发布网站。产品热路径、并发状态和持久化行为均无实际改动；上述是后续实施必须满足的约束，不能据文档宣称运行安全或性能已验证。DataSystem 后续说明统一使用 **Coordinator**；历史源码符号、配置与原始日志保持原名，Mooncake 自身的 Master 名称保留。
 
 当前方案明确采用五个主模块、普通 Python 包、显式配置与产物清单、阶段迁移和有期限的命令兼容。具体文件拆分的函数粒度在对应阶段结合测试调整；不需要先搭建新的调度平台。

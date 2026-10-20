@@ -13,7 +13,8 @@ import sys
 import tempfile
 import time
 
-from profile_put import drain
+from kvcbench.platform.cgroup import drain
+from kvcbench.build.bundle import install_package
 
 
 def digest(path):
@@ -58,6 +59,7 @@ def stage(args):
         for path in sorted(bundle.glob("*")):
             if path.is_file() and path.suffix == ".py":
                 shutil.copy2(path, temporary / path.name)
+        install_package(bundle, temporary)
         for product, target in [("datasystem", temporary / "scripts/datasystem"),
                                 ("mooncake", temporary / "mooncake"), ("lmcache", temporary / "lmcache")]:
             target.mkdir(parents=True)

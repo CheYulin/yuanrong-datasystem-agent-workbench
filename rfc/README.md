@@ -29,7 +29,7 @@
 
 | 日期 | RFC | Status | 落地位置（datasystem） |
 |------|-----|--------|-----------------------|
-| 2026-10-20 | [2026-10-20-kvc-tool-modularization/](2026-10-20-kvc-tool-modularization/README.md) | **Draft** | KVC 工具模块化：构建、运行、观测、收集、报告，逐文件迁移、逐步验收与中间结果；尚未实施 |
+| 2026-10-20 | [2026-10-20-kvc-tool-modularization/](2026-10-20-kvc-tool-modularization/README.md) | **In-Progress** | KVC 工具模块化：P1 回执/完整工具包已验收，后续构建、运行、观测、收集、报告及新实验结果待完成 |
 | 2026-10-20 | [2026-10-20-kvc-fair-comparison/](2026-10-20-kvc-fair-comparison/README.md) | **In-Progress** | DataSystem rc44 / Mooncake / LMCache 发布源码构建、双服务 CPU 实验、公共脚本与 ECharts 报告 |
 | 2026-09-13 | [2026-09-13-urma-wr-outstanding-token/](2026-09-13-urma-wr-outstanding-token/README.md) | **In-Progress** | PR !2422：进程级 capacity=100，准入预算 5000us、WR 退役阈值 5000ms；2026-10-09 当前设计与验证见 [detailed-design](2026-09-13-urma-wr-outstanding-token/detailed-design.md)、[validation-report](2026-09-13-urma-wr-outstanding-token/validation-report.md) |
 | 2026-08-15 | [2026-08-15-ds-trace-bottleneck-report/](2026-08-15-ds-trace-bottleneck-report/README.md) | **In-Progress** | `scripts/ds_trace_bottleneck.py`：消费 `ds-trace-triage` run-directory，生成 TopN 主问题关键瓶颈分析与自包含 ECharts 页面 |

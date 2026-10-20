@@ -54,6 +54,7 @@ def main():
         for name in ["mooncake","lmcache"]:
             run(["rsync","-a",str(HERE/name)+"/",args.target+":"+root+"/"+name+"/"])
         run(["rsync","-a",str(HERE/"datasystem")+"/",args.target+":"+root+"/scripts/datasystem/"])
+        run(["rsync", "-a", "--exclude", "__pycache__", str(HERE/"kvcbench")+"/", args.target+":"+root+"/kvcbench/"])
         text=(HERE/"products.json").read_text().replace("/home/worktrees/kvc-fair-20261020",root)
         args.local_output.mkdir(parents=True,exist_ok=True)
         manifest=args.local_output/"products-staged.json";manifest.write_text(text)

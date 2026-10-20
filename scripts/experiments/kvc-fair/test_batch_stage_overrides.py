@@ -103,6 +103,18 @@ class StageOverlayTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((self.target / "mooncake/launch_master.sh").stat().st_mode), 0o751)
         self.assertEqual(stat.S_IMODE((self.bundle / "mooncake/launch_master.sh").stat().st_mode), 0o640)
 
+    def test_nested_package_is_installed_and_bound_to_actual_frozen_bytes_and_mode(self):
+        module = self.bundle / "kvcbench/platform/fixture.py"
+        write(module, "# fixture package input\n", 0o640)
+        names = sorted([p.relative_to(self.bundle).as_posix() for p in self.bundle.rglob('*') if p.is_file()]
+                       + ['bundle-inputs.json'])
+        write(self.bundle / 'bundle-inputs.json', json.dumps({'schema_version': 1, 'paths': names}))
+        result = self.stage()
+        target = self.target / 'kvcbench/platform/fixture.py'
+        self.assertEqual(target.read_bytes(), module.read_bytes())
+        self.assertEqual(result['inputs']['kvcbench/platform/fixture.py']['mode'], 0o640)
+        self.assertEqual(result['inputs']['kvcbench/platform/fixture.py']['sha256'], hashlib.sha256(module.read_bytes()).hexdigest())
+
     def test_existing_root_and_alias_rejected_without_overwriting_evidence(self):
         self.stage()
         original = snapshot(self.target)

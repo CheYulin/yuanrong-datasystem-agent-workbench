@@ -9,7 +9,9 @@ import shutil
 import tempfile
 import time
 
-from profile_put import digest, drain
+from kvcbench.platform.files import digest
+from kvcbench.platform.cgroup import drain
+from kvcbench.build.bundle import install_package
 
 
 def copy_datasystem_runtime(bundle, temporary):
@@ -59,6 +61,7 @@ def stage(args):
         try:
             for path in bundle.glob("*.py"):
                 shutil.copy2(path, temporary / path.name)
+            install_package(bundle, temporary)
             for product, destination in [("datasystem", "scripts/datasystem"), ("mooncake", "mooncake"), ("lmcache", "lmcache")]:
                 target = temporary / destination
                 target.mkdir(parents=True)

@@ -1,5 +1,13 @@
 # KVC fair comparison scripts
 
+## Modularization in progress
+
+P1 provides independently verifiable step receipts and complete source bundles.
+See [modular commands](docs/commands.md) and [current module boundaries](docs/architecture.md).
+`python3 -m kvcbench --help` lists implemented commands only. The native, TCP and
+batch experiment drivers below remain the execution entries during migration;
+the full W01–W18 workflow is not yet wired to the new CLI.
+
 ## Current entry: native batch TCP / pure KV
 
 For the 1 / 16 / 256 / 4096 independent-keys-per-call experiment, start with

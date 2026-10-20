@@ -9,7 +9,6 @@ python3 profile_put.py --root /home/worktrees/kvc-fair-20261020 \
 import argparse
 import datetime
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +20,9 @@ import sys
 import time
 import traceback
 
+from kvcbench.platform.files import digest
+from kvcbench.platform.cgroup import drain, members, placement
+
 PURPOSE = "supplemental_resource_only"
 SIZES = [1024, 65536, 1048576]
 PRODUCTS = {"datasystem", "mooncake", "lmcache"}
@@ -28,14 +30,6 @@ PRODUCTS = {"datasystem", "mooncake", "lmcache"}
 
 def utc():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-
-def digest(path):
-    value = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(8 << 20), b""):
-            value.update(chunk)
-    return value.hexdigest()
 
 
 def atomic_json(path, value):
@@ -46,40 +40,6 @@ def atomic_json(path, value):
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
-
-
-def members(root, roles=None):
-    paths = [root / "cgroup.procs"] if roles is None else []
-    for role in roles or ["server", "client", "monitor"]:
-        group = root / role
-        required = group / "cgroup.procs"
-        if not required.is_file():
-            raise FileNotFoundError("Required cgroup membership unavailable: " + str(required))
-        paths.extend([required, *group.rglob("cgroup.procs")])
-    if roles is None:
-        paths.extend(root.rglob("cgroup.procs"))
-    return {str(path): path.read_text().split() for path in sorted(set(paths))}
-
-
-def drain(root, roles=None, timeout=3):
-    deadline = time.monotonic() + timeout
-    while True:
-        observed = members(root, roles)
-        busy = {path: values for path, values in observed.items() if values}
-        trees = [root / role for role in roles] if roles is not None else [root]
-        populated = [str(path) for tree in trees for path in tree.rglob("cgroup.events")
-                     if dict(line.split() for line in path.read_text().splitlines()).get("populated") == "1"]
-        if not busy and not populated:
-            return {"checked_utc": utc(), "members": observed, "populated": populated}
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Cgroup drain failed: " + json.dumps({"members": busy, "populated": populated}))
-        time.sleep(0.05)
-
-
-def placement(path):
-    def enter():
-        (path / "cgroup.procs").write_text(str(os.getpid()))
-    return enter
 
 
 def stop_process(process):

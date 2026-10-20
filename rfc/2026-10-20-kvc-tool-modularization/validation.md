@@ -8,7 +8,7 @@
 
 ## 2. 本次设计检查
 
-本阶段仅修改 RFC 和 RFC 索引，不执行产品构建、目标节点清理、压测、网站发布或代码迁移。以下为 2026-10-20 实际检查结果；未执行的后续实现验收仍在第 3 节单列。
+2026-10-20 设计阶段仅修改 RFC 和 RFC 索引，不执行产品构建、目标节点清理、压测、网站发布或代码迁移。以下为 2026-10-20 实际检查结果；未执行的后续实现验收仍在第 3 节单列。
 
 | 检查 | 结果 |
 | --- | --- |
@@ -83,10 +83,11 @@ import csv, re, subprocess
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 rfc = Path('rfc/2026-10-20-kvc-tool-modularization')
+baseline = 'd5907ed041f44261bff82c99ac41bc96e2f0d18d'
 rows = list(csv.DictReader((rfc / 'migration-map.csv').open()))
 expected = set(subprocess.check_output(
-    ['git', 'ls-files', 'scripts/experiments/kvc-fair'], text=True).splitlines())
-helpers = subprocess.check_output(['git', 'ls-files',
+    ['git', 'ls-tree', '-r', '--name-only', baseline, '--', 'scripts/experiments/kvc-fair'], text=True).splitlines())
+helpers = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', baseline, '--',
     'rfc/2026-10-20-kvc-batch-tcp-comparison',
     'rfc/2026-10-20-kvc-fair-comparison'], text=True).splitlines()
 expected.update(p for p in helpers if Path(p).suffix in

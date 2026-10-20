@@ -114,7 +114,7 @@ def validate_resume(args, products, plan):
     metadata = {"products.json": products,
                 "parameters.json": expected["parameters"],
                 "script-hashes.json": {str(p.relative_to(args.root)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                       for p in args.root.glob("*.py")},
+                                       for p in [*args.root.glob("*.py"), *(args.root / "kvcbench").rglob("*.py")]},
                 "plan.json": [{"repeat": r, "product": p["name"], "size": s, "concurrency": c} for r, p, s, c in plan]}
     for name, value in metadata.items():
         path = args.output / name

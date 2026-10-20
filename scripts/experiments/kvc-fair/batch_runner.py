@@ -12,7 +12,10 @@ import sys
 import time
 import traceback
 
-from profile_put import atomic_json, digest, drain, stop_process, utc
+from profile_put import atomic_json, stop_process
+from kvcbench.platform.files import digest
+from kvcbench.platform.cgroup import drain
+from kvcbench.core.timing import utc
 
 CGROUP = Path("/sys/fs/cgroup/kvcfair20261020")
 BATCHES = [1, 16, 256, 4096]
