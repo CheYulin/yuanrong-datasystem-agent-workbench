@@ -295,10 +295,10 @@ class AdmissionTests(unittest.TestCase):
             runner.args = SimpleNamespace(action="run", repeats=3, gate="gate")
             runner.event = lambda *args, **kwargs: None
             runner.check_gate = lambda: None
-            monitor = SimpleNamespace(returncode=0, send_signal=lambda sig: None, wait=lambda timeout: 0)
+            observer = SimpleNamespace(start=lambda: (_ for _ in ()).throw(OSError("fixture second monitor spawn")), stop=lambda: None)
+            runner.observer_factory = lambda *args: observer
             with patch.object(batch_runner, "drain", return_value={}) as drain, \
-                    patch.object(batch_runner, "plan", return_value=[]), \
-                    patch.object(batch_runner.subprocess, "Popen", side_effect=[monitor, OSError("fixture second monitor spawn")]):
+                    patch.object(batch_runner, "plan", return_value=[]):
                 self.assertEqual(runner.run(), 1)
                 drain.assert_called()
             summary = json.loads((out / "summary.json").read_text())

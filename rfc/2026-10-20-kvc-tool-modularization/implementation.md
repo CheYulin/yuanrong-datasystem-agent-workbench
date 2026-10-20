@@ -77,3 +77,16 @@ P2a 结束时尚未启动本任务的新编译或压测。P2 后续状态以第 
 - 实际构建已在 `tiantiyun-80c128g` 的 `/home/worktrees/kvc-native-modular-20261021-001` 启动，执行代码来自冻结的 `code-p2b-002`。使用 8 个指定 CPU、32 GiB 内存、swap=0 的独立 `kvcbuild20261021modular001/build` 域；启动后已观察到 Mooncake 的原生 CMake 编译输出。
 
 当前构建尚未完成验收；没有新的正式压测成绩。P2 配置物化、运行/观测、收集、分析审计及报告交付仍须继续。上述源码与控制面修改未改变 SDK 测量循环；构建进程并发、清理与中间结果绑定已检查，实际三产品构建能力以最终回执为准。未修改产品源码、产品构建规则或其测试路径，无产品 `.repo_context` 结构更新需求。
+
+
+## 8. P3a 运行、观测与离线归约的依赖拆分
+
+- scalar/batch worker、资格验证和三个 batch 适配器迁入 run；独立的 plan 和 runner 管理 epoch。旧入口仅作临时转发，后续 P6 收束。六份迁移实现共 36 个函数/类定义已与迁移前源码逐一定义比较 AST，结果完全相同；SDK 测量循环、调用和校验逻辑未改写。
+- 原生结果完整性校验归 core/case_validation，直方图归 core/statistics；在线只读错误继续策略不再导入 batch_analyze。资源采样归约归 collect/resources，batch_analyze 不再导入 report。run 的观测会话 factory 由调用方显式提供，不反向导入 observe。
+- environment、host、interference 和 light 采样归 observe。新增 suite 会话与只读 validation：ready 是独立首样本/启动快照；final 在所有自有采样进程退出后绑定已关闭文件。正常 runner 已使用该会话，在必需采样未就绪时阻断测量；失败依然写 summary 并排空资源。
+- 首轮全回归发现 9 个 DataSystem adapter fixture 仍通过动态旧文件加载并 patch 薄 facade，未命中 canonical 函数全局；测试改为直接验证 canonical adapter，保留原有原生调用和失败语义断言。该失败日志 `p3a-all.log` 保留，没有弱化校验条件。
+- 修订后全回归 `python3 -m unittest discover -s . -p 'test_*.py'`：509 项通过，49.986 秒（unittest 自报）；后续新增只读 validation 与篡改拒绝检查的重点回归 89 项通过，1.134 秒。四项观测会话契约覆盖 ready 后追加采样、停止封存及篡改拒绝、第二进程启动失败清理、必需工具死亡和已有目录保护。
+- 真实节点执行源码冻结于 `code-p3a-001`，包包含 189 个文件，ZIP SHA256 `f916b59e9072b8d847cb3debff53a5d8ed5f48c9b96608a393abd6c6f1f293d5`。在持原 R7 suite.lock、所有实验角色为空的前提下执行观察 smoke，实际 4.659130967 秒；ready hash 在持续采样后不变，正常停止后 cgroup 再次为空。证据为 `observe-smoke-001/` 与 `observe-smoke-001-result.json`，原始文件收回后使用独立 validator 核验了 11 个封存文件。
+- 观测 smoke 仅验证采样链路；构建同时在另一个域运行，不将此样本解释为产品性能或正式矩阵资源覆盖。Mooncake 实际构建退出 0，metadata identity_valid=true；DataSystem 构建仍在执行，全部三产品的聚合验收尚待终态。
+
+P3 尚未完成：产品 runtime/现场环境与恢复还需迁移，W07–W11 的业务回执仍须由总编排逐步绑定，不能以 ready/final 文件存在代替全工作流验收。P4/P5/P6、真实三产品资格/正式矩阵、刷新报告和公开交付继续保留在目标内。共享锁、进程身份、写请求不重放和历史原件不改写的边界保持；未修改 DataSystem 产品代码，无产品上下文结构变更。

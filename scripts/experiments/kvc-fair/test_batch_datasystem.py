@@ -6,9 +6,7 @@ import unittest
 from unittest.mock import patch
 
 
-SPEC = importlib.util.spec_from_file_location("batch_datasystem", Path(__file__).with_name("batch_datasystem.py"))
-batch = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(batch)
+from kvcbench.run.products import datasystem_batch as batch
 
 
 class FakeClient:
