@@ -31,6 +31,13 @@ def regular(root, relative):
     return current
 
 
+def real_directory(path):
+    path = Path(path).absolute()
+    if any(item.is_symlink() for item in [path, *path.parents]) or not path.is_dir():
+        raise ValueError("Expected a real directory without symlink ancestors")
+    return path.resolve(strict=True)
+
+
 def identity(path):
     path = Path(path)
     before = path.stat()

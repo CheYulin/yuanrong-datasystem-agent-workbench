@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "kvc_20261020",
+  "products": {
+    "datasystem": {
+      "tag": "v0.9.2.rc44",
+      "sha": "2ff37e2f7c5fb45f3feea7c3fb969b8f84b920d6",
+      "official_source": "https://gitcode.com/openeuler/yuanrong-datasystem",
+      "source": "datasystem",
+      "python": "datasystem/.venv/bin/python",
+      "script": "scripts/datasystem/build.sh",
+      "artifacts": [
+        "datasystem/output/*.whl",
+        "datasystem/output/*.tar.gz",
+        "datasystem/output/datasystem/service/datasystem_worker"
+      ],
+      "native_required": [
+        "datasystem_worker"
+      ],
+      "scope": "DataSystem worker and SDK built from pinned C++ source; ETCD and some OS/Python/third-party dependencies may be prebuilt binaries. No source build of ETCD is claimed."
+    },
+    "mooncake": {
+      "tag": "v0.3.13.post1",
+      "sha": "719735896c86b56fabec6cf3e825fb2ea640597a",
+      "official_source": "https://github.com/kvcache-ai/Mooncake",
+      "source": "mooncake/source",
+      "python": "mooncake/venv/bin/python",
+      "script": "mooncake/build.sh",
+      "artifacts": [
+        "mooncake/wheels/*.whl",
+        "mooncake/source/build/**/mooncake_master",
+        "mooncake/deps/lib/libxxhash.so*"
+      ],
+      "native_required": [
+        "mooncake_transfer_engine-"
+      ],
+      "scope": "Mooncake's native C++ implementation compiled into a wheel from the pinned source recipe; private xxHash is built from source; OS packages and Python build/runtime dependencies may be binary distributions."
+    },
+    "lmcache": {
+      "tag": "v0.5.6",
+      "sha": "3e11e10812b448142c6cdb177a3058652bd826fa",
+      "official_source": "https://github.com/LMCache/LMCache",
+      "source": "lmcache/source",
+      "python": "lmcache/venv311/bin/python",
+      "script": "lmcache/build_lmcache.sh",
+      "artifacts": [
+        "lmcache/source/lmcache/lmcache_*.so"
+      ],
+      "native_required": [
+        "lmcache_native.",
+        "lmcache_fs.",
+        "lmcache_redis."
+      ],
+      "scope": "LMCache itself built from pinned source with NO_GPU_EXT=1, preserving lmcache_native/lmcache_fs/lmcache_redis C++ extensions. CPU PyTorch and other Python/OS dependencies are binaries; PyTorch and CUDA extensions are not built from source."
+    }
+  }
+}

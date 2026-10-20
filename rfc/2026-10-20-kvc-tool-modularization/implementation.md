@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | P0 | 已完成设计 | 五个主模块、142 项基线迁移表、W01–W18 中间结果和独立验收契约 |
 | P1 | 已验收 | core/platform/build 包、回执与只读复核、显式源码包；部署/源码快照/ZIP 接入嵌套模块；完整回归与干净包通过 |
-| P2 | 待实施 | 版本/配置物化、产品构建与构建来源、模块化 stage |
+| P2 | 进行中 | P2a 已迁移 metadata/catalog/stage 与配置归属；构建服务、实际新构建及 workflow 接入待完成 |
 | P3 | 待实施 | 运行/资格/epoch/worker/environment 与 observe 分离及真实产品 smoke |
 | P4 | 待实施 | 原件收集、离线 reader/analysis/audits、来源链与逐步验收 |
 | P5 | 待实施 | 报告模板/文档/资源/复现包、独立交付与浏览器验收 |
@@ -51,3 +51,15 @@
 - 提交前执行 `git diff --check` 与 `git diff --cached --check`，检查 staged 范围仅为 KVC 工具与本 RFC/索引；没有将日志、ZIP、二进制或目标机快照提交到仓库。
 
 本阶段尚未改变产品构建参数、SDK 请求循环或原始 R7 结果，未向目标节点写入新实验。最终新的测试矩阵、资源曲线和网页结果必须待后续阶段实际运行后产生。
+
+## 6. P2a 构建记录与部署归属
+
+- 原 build_metadata 实现迁入 `kvcbench/build/metadata.py`，固定 tag/SHA/配方/产物布局数据迁入 `configs/versions/kvc_20261020.json`；旧路径为兼容入口，不再复制实现。
+- 原 builds-only 的来源验证和快照归 `build/catalog.py`，锁归 `platform/locks.py`；运行 stage 归 `run/stage.py`。stage 通过显式同步 provider 使用构建和代码安装能力，core/platform/run 不反向导入 build/collect/report/diagnostics。
+- 旧参数组合归 `compat/commands.py`，消除 stage 与构建辅助脚本互相导入；静态配置与包一起安装，仍保留新目录、模式冻结、原 inode、独立 Worker 目录和原生协议。
+- 重点构建/部署/回执/包用例：56 项通过，6.057 秒；整套回归 **498 项通过，49.194 秒**。160 文件完整包实际通过校验，干净解压后的 metadata 与 builds-only CLI help、模块依赖检查通过。
+- 证据：`p2-stage-provider-tests.log`、`p2-ownership-all.log`、`p2-ownership-bundle-001/`、`p2-ownership-extracted-001/`。新包只验收该 scope，不表示三产品已新构建或正式运行。
+
+目标节点检查确认：系统 Python 为 3.9，三个 SDK 使用的 3.11 工具链与系统解释器需要明确区分；编译器和观测工具已有，源码版本继续冻结于本次对比版本。现有缓存只有原始旧格式构建记录，缺少 rich source-build metadata 所需字段，不能把它们补写为一次新构建成功。后续新构建需要显式共享 Python 路径和真实开始/结束/退出/产物记录；旧数据继续只读。
+
+P2 尚未完成：构建配方迁移与 source-build service、配置物化/plan、每产品实际构建与 W 步骤接入仍须继续。目标节点没有本任务的新编译或压测进程在运行；不能将此状态当成正在等待一个后台构建。

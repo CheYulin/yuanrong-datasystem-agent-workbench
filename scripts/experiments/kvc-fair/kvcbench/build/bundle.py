@@ -38,7 +38,7 @@ def install_package(source, destination):
         return []
     installed = []
     for name in inventory(source):
-        if Path(name).parts[0] != "kvcbench":
+        if Path(name).parts[0] not in {"kvcbench", "configs"}:
             continue
         original = regular(source, name)
         target = destination / name

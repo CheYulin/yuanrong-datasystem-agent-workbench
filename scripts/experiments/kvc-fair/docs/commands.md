@@ -1,6 +1,6 @@
 # 1. 模块化命令与阶段验收
 
-从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。当前已实现 P1 的回执和工具包能力；正式实验入口在后续阶段迁移，现有 batch 驱动暂时保留。
+从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。当前已实现 P1 回执/工具包与 P2a 构建元数据/部署的模块归属；新的正式 workflow 命令仍在接入，现有 batch 驱动暂时保留。
 
 ## 2. 制作和复核完整代码包
 

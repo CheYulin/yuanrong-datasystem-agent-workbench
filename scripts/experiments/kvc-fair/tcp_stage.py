@@ -85,7 +85,7 @@ def stage(args):
         # A hard link makes both roots use the same flock without a symlink API.
         os.link(base / "suite.lock", temporary / "suite.lock")
         shutil.copy2(temporary / "lmcache/start_server_tcp.sh", temporary / "lmcache/start_server.sh")
-        (temporary / "configs").mkdir()
+        (temporary / "configs").mkdir(exist_ok=True)
         for product in manifest["products"]:
             name = product["name"]
             for key in ["python", "adapter", "config"]:
