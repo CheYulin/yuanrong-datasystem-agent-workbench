@@ -60,7 +60,7 @@ def main():
                                   "external_cpu_cores": sum(row["cpu_cores"] for row in rows),
                                   "potential_shared_cpu_cores": sum(row["cpu_cores"] for row in rows if row["can_run_on_experiment_cpus"]),
                                   "top_processes": rows[:20],
-                                  "scope": "Process CPU deltas, not per-thread exact CPU placement; short-lived processes may be missed"}) + "\n")
+                                  "scope": "Process CPU deltas with leader-thread affinity estimate, not exact per-thread CPU placement or an interference bound; short-lived processes may be missed"}) + "\n")
             previous, before = current, now
 
 

@@ -15,3 +15,5 @@
 ## 5.2 已保留的准备期失败
 
 第一次全量 harness fixture 执行出现一处 fixture 缺 baseline plan、另一处 fake clock 恰好结束于原始字节版本，无法触发预期的损坏恢复；均为测试夹具缺陷，补齐81格plan并调整模拟时钟后通过。另一次命令最后的 `rg huge` 无匹配退出1，前置 unittest/compile 已通过；删除未经实际 runtime 证实的文档 flag 表述。这些失败不属于目标机实验数据。
+
+第一版 stage 在尚未 prepare、启动服务或测试前完成，随后只读审查发现 symlink parent 目录约束需要物理路径判断，并将 gate strace 改为分线程 hex 输出以支持新 batch TCP 载荷证明。第一版目录原样保留，正式环境改用全新 `-r2` 根目录，重新记录 staging 命令和构建物 SHA，不修改已冻结输入。

@@ -2,11 +2,11 @@
 """Run source-pinned TCP batch gates and counterbalanced, serialized measurements."""
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -92,12 +92,24 @@ class Runner:
             self.execute(start, cell / "lifecycle.log", env, 180)
             time.sleep(2)
             if self.args.action == "gate":
+                if row["product"] == "datasystem":
+                    from tcp_probe_ds_sizes import configuration_evidence
+                    evidence = configuration_evidence(Path(variables["run_dir"]), ["127.0.0.1:31531", "127.0.0.1:31532"])
+                    for worker in evidence["workers"]:
+                        destination = cell / f"worker-{worker['worker_index']}.flags"
+                        shutil.copy2(worker["path"], destination)
+                        worker["collected_copy"] = str(destination)
+                    shutil.copy2(evidence["processes_path"], cell / "processes.json")
+                    evidence["collected_processes_copy"] = str(cell / "processes.json")
+                    atomic_json(cell / "tcp-configuration.json", evidence)
                 for index in [0, 1]:
                     for mode in ["insert"] if row["product"] == "lmcache" else ["insert", "upsert"]:
                         output = cell / f"client-{index}-{mode}.json"
+                        wire = cell / f"wire-client-{index}-{mode}"
+                        wire.mkdir()
                         command = ["python3", str(self.root / "cgroup.py"), "--group", "client", "exec", "--",
-                                   "strace", "-f", "-ttt", "-T", "-yy", "-s", "256",
-                                   "-e", "trace=network,read,write,readv,writev", "-o", str(output.with_suffix(".strace")),
+                                   "strace", "-ff", "-ttt", "-T", "-yy", "-xx", "-s", "2048",
+                                   "-e", "trace=network,read,write,readv,writev", "-o", str(wire / "strace"),
                                    product["python"], str(self.root / "batch_gate.py"), "--adapter", product["adapter"],
                                    "--config", product["config"], "--client-index", str(index), "--write-mode", mode,
                                    "--run-id", self.out.name + "-" + cell.name + "-c" + str(index) + "-" + mode,
@@ -119,7 +131,7 @@ class Runner:
                     command = ["python3", str(self.root / "cgroup.py"), "--group", "client", "exec", "--",
                                product["python"], str(self.root / "batch_benchmark.py"),
                                "--adapter", product["adapter"], "--config", product["config"], "--op", op,
-                               "--batch", str(batch), "--run-id", self.out.name + "-" + cell.name,
+                               "--batch", str(batch), "--run-id", self.out.name + "-r" + str(row["repeat"]),
                                "--out", str(output), "--duration", str(self.args.duration),
                                "--warmup", str(self.args.warmup), "--put-keys", str(self.args.put_keys)]
                     if preloaded:
@@ -205,7 +217,7 @@ class Runner:
                     if (not raw.get("valid") or raw.get("client_index") != index
                             or raw.get("value_size") != 1024 or raw.get("batch_sizes") != BATCHES
                             or not all(case.get("valid") for case in raw.get("cases", []))
-                            or len(raw.get("cases", [])) != len(BATCHES)):
+                            or [case.get("batch_keys") for case in raw.get("cases", [])] != BATCHES):
                         raise RuntimeError("Gate endpoint/batch evidence incomplete")
 
 

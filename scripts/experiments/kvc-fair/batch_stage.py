@@ -13,8 +13,8 @@ from profile_put import digest, drain
 
 
 def stage(args):
-    base, root, bundle = args.base.resolve(), args.root.absolute(), args.bundle.resolve()
-    if root.exists() or root.is_symlink() or base in root.parents or root in base.parents:
+    base, root, bundle = args.base.resolve(), args.root.resolve(strict=False), args.bundle.resolve()
+    if root.exists() or args.root.is_symlink() or base in root.parents or root in base.parents:
         raise ValueError("Use a fresh sibling batch root")
     with (base / "suite.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -77,7 +77,7 @@ def stage(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base", type=Path, default=Path("/home/worktrees/kvc-fair-tcp-20261020"))
-    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020"))
+    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r2"))
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))
     args = p.parse_args()

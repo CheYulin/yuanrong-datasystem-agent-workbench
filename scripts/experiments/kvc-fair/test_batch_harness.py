@@ -218,6 +218,7 @@ class AdmissionTests(unittest.TestCase):
             runner = object.__new__(batch_runner.Runner)
             runner.root, runner.out = root, out
             runner.args = SimpleNamespace(action="run", repeats=3, gate="gate")
+            runner.products = {name: {} for name in ["datasystem", "mooncake", "lmcache"]}
             runner.event = lambda *args, **kwargs: None
             runner.lifecycle = lambda row, number: "fake-cell"
             fake = SimpleNamespace(returncode=0, send_signal=lambda sig: None, wait=lambda timeout: 0)
@@ -226,6 +227,25 @@ class AdmissionTests(unittest.TestCase):
                     patch.object(batch_runner.subprocess, "Popen", return_value=fake) as popen:
                 self.assertEqual(runner.run(), 1)
                 popen.assert_not_called()
+            summary = json.loads((out / "summary.json").read_text())
+            self.assertIn("complete successful native batch gate", summary["failed"][0])
+
+    def test_symlink_parent_cannot_stage_inside_immutable_baseline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            base, bundle = self.base_fixture(parent)
+            plan = json.loads((base / "formal-tcp-001/plan.json").read_text())
+            completed = [f"r{row['repeat']}-{row['product']}-s{row['size']}-c{row['concurrency']}" for row in plan]
+            (base / "formal-tcp-001/summary.json").write_text(json.dumps(
+                {"ended": "fixture-end", "valid": True, "failed": [], "completed": completed}))
+            alias = parent / "sibling-looking-alias"
+            alias.symlink_to(base, target_is_directory=True)
+            args = SimpleNamespace(base=base, root=alias / "new-root", bundle=bundle,
+                                   cgroup=parent / "fake-cgroup")
+            with patch.object(batch_stage, "drain"):
+                with self.assertRaisesRegex(ValueError, "sibling"):
+                    batch_stage.stage(args)
+            self.assertFalse((base / "new-root").exists())
 
     def test_second_monitor_start_failure_still_writes_summary_and_drains(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -247,6 +267,35 @@ class AdmissionTests(unittest.TestCase):
             self.assertFalse(summary["valid"])
             self.assertIn("fixture second monitor spawn", summary["failed"][0])
             self.assertTrue(summary["ended"])
+
+    def test_measurement_run_id_and_key_bytes_do_not_depend_on_product(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = object.__new__(batch_runner.Runner)
+            runner.root, runner.out = root, root / "output"
+            runner.out.mkdir()
+            runner.args = SimpleNamespace(action="run", duration=20, warmup=3, put_keys=262144)
+            runner.products = {
+                name: {"python": "/fixture/python", "adapter": f"/fixture/{name}.py",
+                       "config": f"/fixture/{name}.json", "start": ["/fixture/start", name],
+                       "stop": ["/fixture/stop", name]}
+                for name in ["datasystem", "mooncake", "lmcache"]}
+            runner.event = lambda *args, **kwargs: None
+            run_ids = []
+
+            def execute(argv, log, env, timeout=1200):
+                if "--op" in argv:
+                    run_ids.append(argv[argv.index("--run-id") + 1])
+                    out = Path(argv[argv.index("--out") + 1])
+                    out.write_text(json.dumps({"valid": True, "success": 1, "keys_s": 16, "duration_s": 20}))
+
+            runner.execute = execute
+            with patch.object(batch_runner, "drain", return_value={}), patch.object(batch_runner.time, "sleep"):
+                for number, name in enumerate(runner.products, 1):
+                    runner.lifecycle({"repeat": 0, "product": name,
+                                      "operations": [{"batch": 16, "operation": "get", "supported": True}]}, number)
+            self.assertEqual(len(run_ids), 3)
+            self.assertEqual(len(set(run_ids)), 1, "same repeat requires identical key bytes across products")
 
 
 if __name__ == "__main__":

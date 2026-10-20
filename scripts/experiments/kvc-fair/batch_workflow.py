@@ -15,7 +15,7 @@ def main():
     p.add_argument("action", choices=["stage", "prepare", "gate", "smoke", "run", "restore", "collect", "report", "publish"])
     p.add_argument("--target", default="tiantiyun-80c128g")
     p.add_argument("--publication-host", default="xqyun-32c32g")
-    p.add_argument("--root", default="/home/worktrees/kvc-batch-tcp-20261020")
+    p.add_argument("--root", default="/home/worktrees/kvc-batch-tcp-20261020-r2")
     p.add_argument("--base", default="/home/worktrees/kvc-fair-tcp-20261020")
     p.add_argument("--local-output", type=Path, default=Path.home() / "workspace/scratch/2026-10-20-kvc-batch-tcp")
     p.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-batch-tcp")
@@ -50,7 +50,7 @@ def main():
              "--suite", root + "/formal-batch-001", "--profile-suite", root + "/batch-gate-001",
              "--environment-root", args.environment_root, "--out", root + "/formal-batch-001/environment-restored.json", "--restore"])
     elif args.action == "collect":
-        for name in ["batch-gate-001", "batch-smoke-001", "formal-batch-001", "builds"]:
+        for name in ["batch-gate-001", "batch-smoke-001", "formal-batch-001", "builds", "run"]:
             destination = args.local_output / name
             destination.mkdir(parents=True, exist_ok=True)
             run(["rsync", "-az", args.target + ":" + root + "/" + name + "/", str(destination) + "/"])
