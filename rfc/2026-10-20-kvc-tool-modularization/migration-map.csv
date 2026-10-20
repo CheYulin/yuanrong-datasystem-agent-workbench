@@ -1,0 +1,143 @@
+source_path,primary_module,target_paths_relative_to_tool_root,action,phase,notes
+scripts/experiments/kvc-fair/README.md,docs,README.md,update,P6,保留工具根目录，改为新 CLI 与模块导航
+scripts/experiments/kvc-fair/analyze_results.py,collect,kvcbench/collect/analysis/legacy.py,move,P4,保留旧 native 格式
+scripts/experiments/kvc-fair/batch-report.css,report,kvcbench/report/assets/css/batch-report.css,move,P5,现有外观与 profile 对应，先不合并样式行为
+scripts/experiments/kvc-fair/batch-report.html,report,kvcbench/report/assets/templates/batch-report.html,move,P5,模板不内嵌采集与统计逻辑
+scripts/experiments/kvc-fair/batch-report.js,report,kvcbench/report/assets/js/batch-report.js,move,P5,ECharts 与状态/链接语义保持
+scripts/experiments/kvc-fair/batch_acceptance.py,delivery,kvcbench/delivery/acceptance.py,move,P5,交付验收和 native_matrix 状态分列
+scripts/experiments/kvc-fair/batch_analyze.py,collect,kvcbench/collect/analysis/batch.py | kvcbench/collect/analysis/resources.py | kvcbench/core/statistics.py,split,P1-P4,移除对 report/benchmark 入口的反向依赖
+scripts/experiments/kvc-fair/batch_benchmark.py,run,kvcbench/run/worker.py | kvcbench/run/profiles/ | kvcbench/core/statistics.py,split,P1-P3,先保持 scalar/batch 各自循环边界；只提取已有统计原语
+scripts/experiments/kvc-fair/batch_build_stage.py,build,kvcbench/build/metadata.py | kvcbench/run/stage.py,split,P2,复用 builds-only 验证，不依赖历史 formal 成功
+scripts/experiments/kvc-fair/batch_compose_gate.py,collect,kvcbench/collect/audits/integrity.py,move,P4,组合已有门禁证据不等于重新执行；前置诊断由 pipeline 编排
+scripts/experiments/kvc-fair/batch_datasystem.py,run,kvcbench/run/products/datasystem/batch_adapter.py,move,P3,原生 batch 语义及 N/A 保持
+scripts/experiments/kvc-fair/batch_deployment_audit.py,collect,kvcbench/collect/audits/deployment.py,move,P4,保留实际输入、窗口、代码身份和原件 hash 约束
+scripts/experiments/kvc-fair/batch_diagnostic.py,diagnostics,kvcbench/diagnostics/correctness.py,move,P3,无跟踪批量正确性诊断，执行 Mooncake/LMCache gate 并供 compose 绑定；不是 PUT profiling
+scripts/experiments/kvc-fair/batch_ds_deadline_diagnostic.py,diagnostics,kvcbench/diagnostics/deadline.py,move,P3,调用与调度可在模块内分文件，不移入 worker 循环
+scripts/experiments/kvc-fair/batch_ds_diagnostic_runner.py,diagnostics,kvcbench/diagnostics/deadline.py,move,P3,调用与调度可在模块内分文件，不移入 worker 循环
+scripts/experiments/kvc-fair/batch_environment.py,observe,kvcbench/observe/system.py,move,P3,主机与环境只读快照
+scripts/experiments/kvc-fair/batch_epoch_verify.py,collect,kvcbench/collect/audits/epochs.py,move,P4,保留实际输入、窗口、代码身份和原件 hash 约束
+scripts/experiments/kvc-fair/batch_gate.py,run,kvcbench/run/qualification.py | kvcbench/run/profiles/,split,P3,保留原生接口与实际正确性证据
+scripts/experiments/kvc-fair/batch_interference.py,observe,kvcbench/observe/interference.py,move,P3,外部进程只观测；不得 signal
+scripts/experiments/kvc-fair/batch_isolation_notice.py,migration,tools/migrations/20261020/,archive,P5,保留原文件名与历史用途；非新实验主命令
+scripts/experiments/kvc-fair/batch_lmcache.py,run,kvcbench/run/products/lmcache/batch_adapter.py,move,P3,原生 batch 语义及 N/A 保持
+scripts/experiments/kvc-fair/batch_mooncake.py,run,kvcbench/run/products/mooncake/batch_adapter.py,move,P3,原生 batch 语义及 N/A 保持
+scripts/experiments/kvc-fair/batch_queue_probe.py,diagnostics,kvcbench/diagnostics/queue.py,move,P3,不更改正式队列配置
+scripts/experiments/kvc-fair/batch_refresh_delivery.py,delivery,kvcbench/delivery/refresh.py,move,P5,文档白名单刷新，不覆盖原始证据或原 ZIP 身份
+scripts/experiments/kvc-fair/batch_repair_navigation.py,migration,tools/migrations/20261020/,archive,P5,保留原文件名与历史用途；非新实验主命令
+scripts/experiments/kvc-fair/batch_report.py,report,kvcbench/collect/analysis/ | kvcbench/collect/audits/ | kvcbench/collect/archive.py | kvcbench/report/model.py | kvcbench/report/render.py | kvcbench/report/bundle.py,split,P1-P5,核验/统计从 renderer 抽出；新工具包完整，旧 frozen-runtime 原样
+scripts/experiments/kvc-fair/batch_resource_audit.py,collect,kvcbench/collect/audits/resources.py,move,P4,保留实际输入、窗口、代码身份和原件 hash 约束
+scripts/experiments/kvc-fair/batch_runner.py,run,kvcbench/run/planner.py | kvcbench/run/runner.py | kvcbench/run/outcomes.py | kvcbench/run/profiles/ | kvcbench/core/outcomes.py,split,P3,各 profile 协议保持；共享失败纯校验放 core，run/outcomes 只控制继续/停止
+scripts/experiments/kvc-fair/batch_stage.py,run,kvcbench/run/stage.py | kvcbench/run/environment.py | configs/experiments/,split,P2,配置物化/部署与环境准备分离；保留旧格式 reader
+scripts/experiments/kvc-fair/batch_tcp_verify.py,collect,kvcbench/collect/audits/integrity.py | kvcbench/collect/audits/tcp.py | kvcbench/collect/readers/,split,P4,按历史 schema 选择 reader，不改原件
+scripts/experiments/kvc-fair/batch_workflow.py,cli,kvcbench/cli.py | kvcbench/pipeline.py | kvcbench/compat/commands.py,split,P1-P6,迁移期保留同名薄入口，分别转入 native/single_tcp/batch_tcp profile；P6 退出
+scripts/experiments/kvc-fair/benchmark.py,run,kvcbench/run/worker.py | kvcbench/run/profiles/ | kvcbench/core/statistics.py,split,P1-P3,先保持 scalar/batch 各自循环边界；只提取已有统计原语
+scripts/experiments/kvc-fair/build_metadata.py,build,kvcbench/build/metadata.py | configs/versions/kvc_20261020.json,split,P2,分离固定版本声明与产物来源核验
+scripts/experiments/kvc-fair/capture_evidence.py,collect,kvcbench/collect/freeze.py,move,P1-P4,先用显式 manifest 覆盖新目录；完成后持锁快照
+scripts/experiments/kvc-fair/cgroup.py,platform,kvcbench/platform/cgroup.py,move,P1,保留配额、验证与归属语义
+scripts/experiments/kvc-fair/collect_timings.py,collect,kvcbench/collect/analysis/timings.py,move,P4,离线时间归约与原始事件写入分开
+scripts/experiments/kvc-fair/commit_publication.py,delivery,kvcbench/delivery/git.py,move,P5,站点主干与 remote 审计独立于实验
+scripts/experiments/kvc-fair/datasystem/README.md,docs,docs/build/datasystem.md,move,P2,产品构建和运行入口文档，链接指向正式模块
+scripts/experiments/kvc-fair/datasystem/adapter_datasystem.py,run,kvcbench/run/products/datasystem/adapter_datasystem.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/datasystem/build.sh,build,kvcbench/build/recipes/datasystem/build.sh,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/datasystem/build_summary.py,build,kvcbench/build/recipes/datasystem/build_summary.py,move,P2,产品特有元数据，公共部分使用 build.metadata
+scripts/experiments/kvc-fair/datasystem/common_smoke.sh,tests,tests/live/datasystem/common_smoke.sh,move,P3,显式真实产品 smoke；默认单元测试不执行
+scripts/experiments/kvc-fair/datasystem/runtime.py,run,kvcbench/run/products/datasystem/runtime.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/datasystem/smoke.py,tests,tests/live/datasystem/smoke.py,move,P3,显式真实产品 smoke；默认单元测试不执行
+scripts/experiments/kvc-fair/datasystem/smoke.sh,tests,tests/live/datasystem/smoke.sh,move,P3,显式真实产品 smoke；默认单元测试不执行
+scripts/experiments/kvc-fair/datasystem/test_runtime_safety.py,tests,tests/integration/datasystem_runtime_safety.py,move,P1-P3,独立 CLI 需 --out；不导入为 unittest；受控进程不需要真实产品节点
+scripts/experiments/kvc-fair/echarts.min.js,report,kvcbench/report/assets/vendor/echarts.min.js,move,P5,保留版本/来源/hash/许可证声明
+scripts/experiments/kvc-fair/finish_environment.py,run,kvcbench/run/environment.py | kvcbench/platform/environment.py | kvcbench/platform/locks.py | kvcbench/platform/process.py,split,P1-P3,原环境变更范围不扩张；保留账本与恢复保护
+scripts/experiments/kvc-fair/identify_interference.py,observe,kvcbench/observe/interference.py,move,P3,外部进程只观测；不得 signal
+scripts/experiments/kvc-fair/light_monitor.py,observe,kvcbench/observe/light.py,move,P3,仅诊断轻量观测，不混入正式 profile
+scripts/experiments/kvc-fair/lmcache/adapter_lmcache.py,run,kvcbench/run/products/lmcache/adapter_lmcache.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/lmcache/adapter_lmcache_tcp.py,run,kvcbench/run/products/lmcache/adapter_lmcache_tcp.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/lmcache/build_lmcache.sh,build,kvcbench/build/recipes/lmcache/build_lmcache.sh,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/lmcache/fake_mechanics_backend.py,tests,tests/fixtures/lmcache/fake_mechanics_backend.py,move,P3,测试替身不在正式包适配器路径
+scripts/experiments/kvc-fair/lmcache/harness_correctness.py,tests,tests/live/lmcache_harness_correctness.py,move,P3,实际 CPU MP 机制验证，需显式执行
+scripts/experiments/kvc-fair/lmcache/requirements.lock,build,kvcbench/build/recipes/lmcache/requirements.lock,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/lmcache/runtime.py,run,kvcbench/run/products/lmcache/runtime.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/lmcache/smoke_lmcache.py,tests,tests/live/lmcache/smoke_lmcache.py,move,P3,显式真实产品 smoke；默认单元测试不执行
+scripts/experiments/kvc-fair/lmcache/start_server.sh,run,kvcbench/run/products/lmcache/start_server.sh,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/lmcache/start_server_tcp.sh,run,kvcbench/run/products/lmcache/start_server_tcp.sh,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/monitor.py,observe,kvcbench/observe/supervisor.py | kvcbench/observe/system.py | kvcbench/observe/samples.py,split,P3,系统工具启动、状态和样本实现分离
+scripts/experiments/kvc-fair/mooncake/README.md,docs,docs/build/mooncake.md,move,P2,产品构建和运行入口文档，链接指向正式模块
+scripts/experiments/kvc-fair/mooncake/adapter.py,run,kvcbench/run/products/mooncake/adapter.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/mooncake/build.sh,build,kvcbench/build/recipes/mooncake/build.sh,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/mooncake/common-smoke.sh,tests,tests/live/mooncake/common-smoke.sh,move,P3,显式真实产品 smoke；默认单元测试不执行
+scripts/experiments/kvc-fair/mooncake/env.sh,run,kvcbench/run/products/mooncake/env.sh,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/mooncake/install_os_deps.sh,build,kvcbench/build/recipes/mooncake/install_os_deps.sh,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/mooncake/launch_master.sh,run,kvcbench/run/products/mooncake/launch_master.sh,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/mooncake/localdeps-install.sh,build,kvcbench/build/recipes/mooncake/localdeps-install.sh,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/mooncake/os-packages.lock,build,kvcbench/build/recipes/mooncake/os-packages.lock,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/mooncake/peer.py,run,kvcbench/run/products/mooncake/peer.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/mooncake/process_identity.py,platform,kvcbench/platform/process.py,extract,P1,保留 Mooncake 命令根与身份额外约束
+scripts/experiments/kvc-fair/mooncake/requirements-installed.lock,build,kvcbench/build/recipes/mooncake/requirements-installed.lock,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/mooncake/requirements.lock,build,kvcbench/build/recipes/mooncake/requirements.lock,move,P2,保留依赖/版本/命令和 executable mode
+scripts/experiments/kvc-fair/mooncake/smoke.py,tests,tests/live/mooncake/smoke.py,move,P3,显式真实产品 smoke；默认单元测试不执行
+scripts/experiments/kvc-fair/mooncake/start.sh,run,kvcbench/run/products/mooncake/start.sh,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/mooncake/stop.sh,run,kvcbench/run/products/mooncake/stop.sh,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/mooncake/summarize_build.py,build,kvcbench/build/recipes/mooncake/summarize_build.py,move,P2,产品特有元数据，公共部分使用 build.metadata
+scripts/experiments/kvc-fair/prepare_env.py,run,kvcbench/run/environment.py | kvcbench/platform/environment.py | kvcbench/platform/locks.py | kvcbench/platform/process.py,split,P1-P3,原环境变更范围不扩张；保留账本与恢复保护
+scripts/experiments/kvc-fair/prepare_resume.py,run,kvcbench/run/environment.py | kvcbench/platform/environment.py | kvcbench/platform/locks.py | kvcbench/platform/process.py,split,P1-P3,原环境变更范围不扩张；保留账本与恢复保护
+scripts/experiments/kvc-fair/prepare_tcp_gate_retry.py,run,kvcbench/run/profiles/single_tcp.py,move,P3,显式新的资格尝试；不自动重试测量中的失败写请求
+scripts/experiments/kvc-fair/products.json,config,configs/versions/kvc_20261020.json | configs/capabilities/kvc_20261020.json | configs/experiments/,split,P2,保留来源与新配置物化的明确映射
+scripts/experiments/kvc-fair/profile_put.py,diagnostics,kvcbench/platform/files.py | kvcbench/platform/cgroup.py | kvcbench/platform/process.py | kvcbench/diagnostics/put.py,split,P1-P3,先提取原有公共机制，再保留 PUT 诊断入口
+scripts/experiments/kvc-fair/publish.py,delivery,kvcbench/delivery/publish.py,move,P5,站点锁、注册 CAS、gzip 与路径约束保持
+scripts/experiments/kvc-fair/qa_batch_report.mjs,tests,tests/acceptance/qa_batch_report.mjs,move,P5,参数化工具和浏览器路径；保留已有验收语义
+scripts/experiments/kvc-fair/qa_integrity.mjs,tests,tests/acceptance/qa_integrity.mjs,move,P5,参数化工具和浏览器路径；保留已有验收语义
+scripts/experiments/kvc-fair/qa_report.mjs,tests,tests/acceptance/qa_report.mjs,move,P5,参数化工具和浏览器路径；保留已有验收语义
+scripts/experiments/kvc-fair/refresh_delivery.py,delivery,kvcbench/delivery/refresh.py,move,P5,文档白名单刷新，不覆盖原始证据或原 ZIP 身份
+scripts/experiments/kvc-fair/report-template.html,report,kvcbench/report/assets/templates/report-template.html,move,P5,模板不内嵌采集与统计逻辑
+scripts/experiments/kvc-fair/report.css,report,kvcbench/report/assets/css/report.css,move,P5,现有外观与 profile 对应，先不合并样式行为
+scripts/experiments/kvc-fair/report.js,report,kvcbench/report/assets/js/report.js,move,P5,ECharts 与状态/链接语义保持
+scripts/experiments/kvc-fair/report.py,report,kvcbench/collect/analysis/ | kvcbench/collect/audits/ | kvcbench/collect/archive.py | kvcbench/report/model.py | kvcbench/report/render.py | kvcbench/report/bundle.py,split,P1-P5,核验/统计从 renderer 抽出；新工具包完整，旧 frozen-runtime 原样
+scripts/experiments/kvc-fair/run_suite.py,run,kvcbench/run/planner.py | kvcbench/run/runner.py | kvcbench/run/outcomes.py | kvcbench/run/profiles/,split,P3,各 profile 协议保持；在线结果契约下沉
+scripts/experiments/kvc-fair/tcp_probe_ds_sizes.py,diagnostics,kvcbench/diagnostics/sizes.py | kvcbench/run/products/datasystem/verification.py,split,P3,主运行依赖的校验能力从诊断中下沉
+scripts/experiments/kvc-fair/tcp_protocol_gate.py,run,kvcbench/run/qualification.py | kvcbench/run/profiles/,split,P3,保留原生接口与实际正确性证据
+scripts/experiments/kvc-fair/tcp_stage.py,run,kvcbench/run/stage.py | kvcbench/run/environment.py | configs/experiments/,split,P2,配置物化/部署与环境准备分离；保留旧格式 reader
+scripts/experiments/kvc-fair/tcp_wire_probe.py,diagnostics,kvcbench/diagnostics/wire.py,move,P3,协议观测保留与对应执行身份绑定
+scripts/experiments/kvc-fair/tcp_workflow.py,cli,kvcbench/cli.py | kvcbench/pipeline.py | kvcbench/compat/commands.py,split,P1-P6,迁移期保留同名薄入口，分别转入 native/single_tcp/batch_tcp profile；P6 退出
+scripts/experiments/kvc-fair/test_batch_analysis.py,tests,tests/unit/test_batch_analysis.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_build_stage.py,tests,tests/unit/test_batch_build_stage.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_compose_gate.py,tests,tests/unit/test_batch_compose_gate.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_datasystem.py,tests,tests/unit/test_batch_datasystem.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_datasystem_runtime.py,tests,tests/unit/test_batch_datasystem_runtime.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_deployment_audit.py,tests,tests/unit/test_batch_deployment_audit.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_ds_deadline_diagnostic.py,tests,tests/unit/test_batch_ds_deadline_diagnostic.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_ds_diagnostic_runner.py,tests,tests/unit/test_batch_ds_diagnostic_runner.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_epoch_verify.py,tests,tests/unit/test_batch_epoch_verify.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_epochs.py,tests,tests/unit/test_batch_epochs.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_failures.py,tests,tests/unit/test_batch_failures.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_gate.py,tests,tests/unit/test_batch_gate.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_harness.py,tests,tests/unit/test_batch_harness.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_isolation_notice.py,tests,tests/unit/test_batch_isolation_notice.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_lmcache.py,tests,tests/unit/test_batch_lmcache.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_mooncake.py,tests,tests/unit/test_batch_mooncake.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_outcome_links.py,tests,tests/unit/test_batch_outcome_links.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_refresh_delivery.py,tests,tests/unit/test_batch_refresh_delivery.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_repair_navigation.py,tests,tests/unit/test_batch_repair_navigation.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_report_deployment.py,tests,tests/unit/test_batch_report_deployment.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_resource_audit.py,tests,tests/unit/test_batch_resource_audit.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_runner_failure.py,tests,tests/unit/test_batch_runner_failure.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_stage_overrides.py,tests,tests/unit/test_batch_stage_overrides.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_batch_tcp_verify.py,tests,tests/unit/test_batch_tcp_verify.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_collect_timings_tcp.py,tests,tests/unit/test_collect_timings_tcp.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_lmcache_profile.py,tests,tests/unit/test_lmcache_profile.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_mooncake_pure_kv_launcher.py,tests,tests/unit/test_mooncake_pure_kv_launcher.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_tcp_retry.py,tests,tests/unit/test_tcp_retry.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_tcp_workflow.py,tests,tests/unit/test_tcp_workflow.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/test_versioned_delivery.py,tests,tests/unit/test_versioned_delivery.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
+scripts/experiments/kvc-fair/timed.py,core,kvcbench/core/timing.py | kvcbench/platform/command.py,split,P1,统一命令与阶段耗时，保留时钟域
+scripts/experiments/kvc-fair/verify_results.py,collect,kvcbench/collect/audits/integrity.py | kvcbench/collect/audits/tcp.py | kvcbench/collect/readers/,split,P4,按历史 schema 选择 reader，不改原件
+scripts/experiments/kvc-fair/verify_tcp.py,collect,kvcbench/collect/audits/integrity.py | kvcbench/collect/audits/tcp.py | kvcbench/collect/readers/,split,P4,按历史 schema 选择 reader，不改原件
+scripts/experiments/kvc-fair/workflow.py,cli,kvcbench/cli.py | kvcbench/pipeline.py | kvcbench/compat/commands.py,split,P1-P6,迁移期保留同名薄入口，分别转入 native/single_tcp/batch_tcp profile；P6 退出
+rfc/2026-10-20-kvc-batch-tcp-comparison/appendix-mobile-layout-v1.py,migration,tools/migrations/20261020/appendix-mobile-layout-v1.py,archive,P5,一次性修补留作历史，不加入主命令；相关文档引用同步更新
+rfc/2026-10-20-kvc-batch-tcp-comparison/appendix-mobile-layout-v2.py,migration,tools/migrations/20261020/appendix-mobile-layout-v2.py,archive,P5,一次性修补留作历史，不加入主命令；相关文档引用同步更新
+rfc/2026-10-20-kvc-batch-tcp-comparison/build-appendix.html,report,kvcbench/report/assets/templates/build-appendix.html | configs/reports/kvc_20261020.json,split,P5,通用构建附录模板与版本/配置事实分开
+rfc/2026-10-20-kvc-batch-tcp-comparison/publish-build-appendix.py,migration,tools/migrations/20261020/publish-build-appendix.py,archive,P5,一次性修补留作历史，不加入主命令；相关文档引用同步更新
+rfc/2026-10-20-kvc-batch-tcp-comparison/publish-linked-documents.py,delivery,kvcbench/delivery/refresh.py | tools/migrations/20261020/publish-linked-documents.py,split,P5,通用有限刷新进入模块，固定两个报告补丁归档
+rfc/2026-10-20-kvc-batch-tcp-comparison/qa-build-appendix.mjs,tests,tests/acceptance/qa-build-appendix.mjs,move,P5,参数化报告/文档路径和 Playwright/Chromium；当前硬编码不带入正式能力
+rfc/2026-10-20-kvc-batch-tcp-comparison/qa-linked-documents.mjs,tests,tests/acceptance/qa-linked-documents.mjs,move,P5,参数化报告/文档路径和 Playwright/Chromium；当前硬编码不带入正式能力
+rfc/2026-10-20-kvc-batch-tcp-comparison/render-linked-documents.py,report,kvcbench/report/documents.py | kvcbench/report/assets/css/reader.css | kvcbench/report/assets/js/reader.js | configs/reports/kvc_20261020.json,split,P5,提取通用 reader，固定实验叙事转配置；保留历史执行原件
+rfc/2026-10-20-kvc-batch-tcp-comparison/requirements-reader.txt,report,requirements-report.txt,move,P5,报告/文档依赖独立，不要求目标产品 SDK
+rfc/2026-10-20-kvc-batch-tcp-comparison/restore-appendix-build-records.py,migration,tools/migrations/20261020/restore-appendix-build-records.py,archive,P5,一次性修补留作历史，不加入主命令；相关文档引用同步更新
