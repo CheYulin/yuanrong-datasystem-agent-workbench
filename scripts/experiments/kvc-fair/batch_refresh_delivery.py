@@ -15,7 +15,7 @@ import tempfile
 import time
 import zipfile
 
-from refresh_delivery import digest, verify_manifest
+from refresh_delivery import digest, inventory, verify_manifest
 from report import finalize_artifacts, operation_ledger, version_zip_href
 
 
@@ -207,6 +207,9 @@ def refresh_locked(args, out):
         chmod_paths = {stage / name for name in before if mutable(name) or name in controlled}
         chmod_paths |= set(gzip_paths) | {Path(str(path) + ".gz") for path in gzip_paths}
         finalize_artifacts(stage, gzip_paths=gzip_paths, chmod_paths=chmod_paths)
+        complete = inventory(stage)
+        (stage / "SHA256SUMS").write_text("".join(record["sha256"] + "  " + name + "\n"
+                                               for name, record in sorted(complete.items()) if name != "SHA256SUMS"))
         staged = verify_manifest(stage)
         expected_controlled = {"index.html": {"sha256": hashlib.sha256(expected_html).hexdigest(), "mode": 0o644},
                                "index.html.gz": {"sha256": hashlib.sha256(gzip.compress(expected_html, mtime=0)).hexdigest(), "mode": 0o644}}

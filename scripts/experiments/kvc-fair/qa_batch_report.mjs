@@ -14,6 +14,34 @@ const report={url:base,started:new Date().toISOString(),checks:[],viewports:[],e
 const check=(name,pass,details={})=>{report.checks.push({name,pass,...details});};
 const near=(a,b)=>a===b||Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=Math.max(1,Math.abs(b))*1e-10;
 const median=values=>{const data=values.toSorted((a,b)=>a-b),n=data.length;return n%2?data[(n-1)/2]:(data[n/2-1]+data[n/2])/2;};
+function reportArtifactURLs(hrefs,base){
+  const page=new URL(base),directory=new URL('.',page).pathname;
+  const urls=hrefs.filter(h=>h&&!h.startsWith('#')).map(h=>new URL(h,page));
+  return [...new Map(urls.filter(url=>url.origin===page.origin&&url.pathname.startsWith(directory)).map(url=>[url.href,url])).values()];
+}
+async function verifyReportArtifact(request,url,manifestEntries){
+  const attempts=[];
+  for(const method of ['HEAD','HEAD','GET']){
+    const relative=decodeURIComponent(url.pathname.slice(new URL('.',base).pathname.length)),expected=manifestEntries.get(relative);
+    if(method==='GET'&&(!expected||!/\.(?:json|jsonl|md|csv|html|py|sh|txt|js|css)$/.test(url.pathname)))break;
+    const start=process.hrtime.bigint(),attempt={method,requested_url:url.href,started:new Date().toISOString()};
+    let pass=false;
+    try{
+      const response=await request.fetch(url.href,{method,timeout:15000,maxRedirects:0});
+      Object.assign(attempt,{status:response.status(),response_url:response.url(),headers:response.headers()});
+      pass=response.status()===200&&response.url()===url.href;
+      if(method==='GET'){
+        const body=await response.body();
+        Object.assign(attempt,{bytes:body.length,sha256:createHash('sha256').update(body).digest('hex'),expected_sha256:expected});
+        pass=pass&&attempt.sha256===expected;
+      }
+      await response.dispose();
+    }catch(error){pass=false;attempt.error=String(error);}
+    attempt.ended=new Date().toISOString();attempt.duration_s=Number(process.hrtime.bigint()-start)/1e9;attempt.pass=pass;attempts.push(attempt);
+    if(pass)return{pass:true,status:attempt.status,verification:method==='HEAD'?'HEAD200':'GET200+manifestSHA256',attempts};
+  }
+  return{pass:false,status:attempts.at(-1)?.status??null,verification:'exhausted bounded requests',attempts};
+}
 const products=['datasystem','mooncake','lmcache'],batches=[1,16,256,4096],operations=['put','upsert','get','exist_hit','exist_miss'];
 try {
   for(const width of [1440,900,390]){
@@ -115,18 +143,33 @@ try {
     }
     await page.locator('#resources').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,`${width}-resources.png`),fullPage:false});
     await page.locator('#performance').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,`${width}-performance.png`),fullPage:false});
-    if(width===390){const toggle=page.locator('#toc-toggle'),before=await toggle.getAttribute('aria-expanded');await toggle.click();const after=await toggle.getAttribute('aria-expanded');await toggle.click();check('mobile: navigation button changes and restores expanded state',before!==after&&await toggle.getAttribute('aria-expanded')===before);}
+    if(width===390){
+      const selector=await page.locator('#toc-toggle').isVisible()?'#toc-toggle':'.yche-toc-button',toggle=page.locator(selector),before=await toggle.getAttribute('aria-expanded'),panelId=await toggle.getAttribute('aria-controls');
+      if(!/^[A-Za-z][\w-]*$/.test(panelId||''))throw Error('Mobile directory lacks a safe controlled panel');
+      const panel=page.locator('#'+panelId);await toggle.click();
+      const opened=await toggle.getAttribute('aria-expanded'),panelVisible=await panel.isVisible(),links=await panel.locator('a[href]').evaluateAll(items=>items.map(a=>a.getAttribute('href'))),chapters=await page.locator('main h2[id]').evaluateAll(items=>items.map(h=>'#'+h.id));
+      await page.screenshot({path:path.join(output,'390-navigation-open.png'),fullPage:false});
+      await panel.locator('a[href="#resources"]').click();
+      await page.waitForFunction(({selector,panelId})=>{const target=document.querySelector('#resources'),panel=document.getElementById(panelId),top=target.getBoundingClientRect().top;return location.hash==='#resources'&&top>=0&&top<innerHeight&&document.querySelector(selector).getAttribute('aria-expanded')==='false'&&(panel.hidden||getComputedStyle(panel).display==='none');},{selector,panelId},{timeout:5000});
+      const navigation=await page.evaluate(()=>({hash:location.hash,top:document.querySelector('#resources').getBoundingClientRect().top,height:innerHeight}));
+      check('mobile: visible directory reaches chapter and closes',panelVisible&&JSON.stringify(links)===JSON.stringify(chapters)&&navigation.hash==='#resources'&&navigation.top>=0&&navigation.top<navigation.height&&await toggle.getAttribute('aria-expanded')==='false'&&!await panel.isVisible(),{selector,panelId,links,navigation});
+      await toggle.click();await toggle.click();
+      check('mobile: navigation button changes and restores expanded state',before==='false'&&opened==='true'&&await toggle.getAttribute('aria-expanded')===before,{selector,panelId});
+    }
     check(`${width}: no JS exceptions`,state.pageErrors.length===0,{errors:state.pageErrors});
     if(width===1440&&!base.startsWith('file:')){
       const response=await page.request.get(new URL('data.json',base).href),downloaded=await response.json();
       check('downloaded data matches rendered payload',response.ok()&&JSON.stringify(downloaded)===JSON.stringify(data));
       const href=await page.locator('a[download][href^="reproduce.zip"]').getAttribute('href'),url=new URL(href,base),expected=url.searchParams.get('sha256');
       const zip=await page.request.get(url.href),bytes=await zip.body(),observed=createHash('sha256').update(bytes).digest('hex');
-      const manifest=await (await page.request.get(new URL('SHA256SUMS',base).href)).text();
+      const manifestURL=new URL('SHA256SUMS',base),manifestResponse=await page.request.get(manifestURL.href,{maxRedirects:0}),manifestBytes=await manifestResponse.body(),manifest=manifestBytes.toString('utf8'),manifestSHA=createHash('sha256').update(manifestBytes).digest('hex');
       const matches=manifest.split('\n').filter(line=>/  reproduce\.zip$/.test(line));
-      check('versioned ZIP body SHA equals URL and unique manifest entry',zip.ok()&&/^[a-f0-9]{64}$/.test(expected||'')&&expected===observed&&matches.length===1&&matches[0].startsWith(observed+'  '),{expected,observed,bytes:bytes.length});
-      const links=await page.locator('a[href]').evaluateAll(links=>links.map(a=>a.getAttribute('href')).filter(h=>h&&!h.startsWith('#')&&!h.startsWith('http')&&!h.startsWith('../')));
-      for(const href of new Set(links)){const url=new URL(href,base),r=await page.request.head(url.href);check('relative artifact '+href,r.ok(),{status:r.status()});}
+      check('versioned ZIP body SHA equals URL and unique manifest entry',zip.status()===200&&zip.url()===url.href&&url.origin===new URL(base).origin&&url.pathname===new URL('reproduce.zip',base).pathname&&!url.hash&&url.search==='?sha256='+expected&&/^[a-f0-9]{64}$/.test(expected||'')&&expected===observed&&manifestResponse.status()===200&&manifestResponse.url()===manifestURL.href&&matches.length===1&&matches[0].startsWith(observed+'  '),{expected,observed,bytes:bytes.length,requested_url:url.href,response_url:zip.url(),manifest_sha256:manifestSHA,manifest_response_url:manifestResponse.url(),manifest_status:manifestResponse.status(),manifest_bytes:manifestBytes.length});
+      const manifestEntries=new Map(manifest.split('\n').flatMap(line=>{const match=/^([a-f0-9]{64})  (.+)$/.exec(line);return match?[[match[2],match[1]]]:[];}));
+      const links=await page.locator('a[href]').evaluateAll(links=>links.map(a=>a.getAttribute('href')));
+      const urls=reportArtifactURLs(links,base),results=new Array(urls.length);let next=0;
+      await Promise.all(Array.from({length:Math.min(3,urls.length)},async()=>{while(next<urls.length){const index=next++;results[index]=await verifyReportArtifact(page.request,urls[index],manifestEntries);}}));
+      results.forEach((result,index)=>{const{pass,...details}=result;check('report artifact '+urls[index].href,pass,details);});
     }
     const optionalFailure=item=>{const url=new URL(item.url);return url.pathname==='/favicon.ico'||url.pathname==='/site-api/admin/pages'&&item.status===401;};
     check(`${width}: required requests succeeded`,state.networkErrors.every(optionalFailure)&&state.httpErrors.every(optionalFailure),{networkErrors:state.networkErrors,httpErrors:state.httpErrors});

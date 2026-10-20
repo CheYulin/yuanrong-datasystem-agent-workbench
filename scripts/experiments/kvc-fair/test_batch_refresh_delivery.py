@@ -65,6 +65,32 @@ class BatchRefreshTests(unittest.TestCase):
             self.assertTrue(result["original_output_unchanged"])
             self.assertEqual(snapshot(args.out), before)
 
+    def test_manifested_nested_history_manifest_survives_dryrun_and_apply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.fixture(Path(directory))
+            name = "delivery-ui/navigation-repair/" + "a" * 64 + "/SHA256SUMS"
+            nested = args.out / name
+            nested.parent.mkdir(parents=True)
+            original = b"b" * 64 + b"  archived-index.html\r\n"
+            nested.write_bytes(original)
+            nested.chmod(0o644)
+            entries = subject.inventory(args.out)
+            (args.out / "SHA256SUMS").write_text("".join(
+                value["sha256"] + "  " + path + "\n"
+                for path, value in sorted(entries.items()) if path != "SHA256SUMS"))
+            before = snapshot(args.out)
+            dry = subject.refresh(args)
+            self.assertTrue(dry["original_output_unchanged"])
+            self.assertEqual(snapshot(args.out), before)
+            args.apply = True
+            subject.refresh(args)
+            self.assertEqual(snapshot(args.out)[name], before[name])
+            expected = hashlib.sha256(original).hexdigest() + "  " + name
+            lines = (args.out / "SHA256SUMS").read_text().splitlines()
+            self.assertEqual(lines.count(expected), 1)
+            self.assertEqual(subject.verify_manifest(args.out)[name],
+                             {"sha256": hashlib.sha256(original).hexdigest(), "mode": 0o644})
+
     def test_apply_updates_docs_while_all_frozen_core_bytes_modes_stay_exact(self):
         with tempfile.TemporaryDirectory() as directory:
             args = self.fixture(Path(directory)); before = snapshot(args.out)

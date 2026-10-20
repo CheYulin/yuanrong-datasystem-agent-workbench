@@ -1,6 +1,6 @@
 # 6. 结果验证与最终验收
 
-状态：**正式证据矩阵已完成，交付验收进行中**。r7独立重算132有效、18原生失败、30 N/A，180槽与36服务周期齐全、0issues；evidence_verified=true、passed=false。页面、下载包与公网验收尚待完成，不能将完整执行写成所有API成功。
+状态：**正式证据矩阵完成，修正后的首次公开验收通过**。r7独立重算132有效、18原生失败、30 N/A，180槽与36服务周期齐全、0issues；evidence_verified=true、passed=false。本地347、首次修正公开348、两旧页89检查通过；最终文档刷新后的ZIP身份与验收以独立收据为准，不能将完整执行写成所有API成功。
 
 ## 6.1 实际输入与比较边界
 
@@ -73,8 +73,8 @@ r2 的旧 key0-prefix TCP 审计12/16与后续完整 any-key payload 审计16/16
 | 部署关闭项 | 21集群/42独立状态目录、pure-KV旗标一致、无DB特征文件；42份stdout指定存储错误匹配0；live只覆盖gate1/21，其余20为启动记录/日志 |
 | 资源与干扰 | server/client内存事件与swap为0；client仅一个SDK窗有1次/1003µs限流；monitor memory.max事件+4568且无OOM，parent传播不重复相加；背景leader/主机差额单列，见资源结果 |
 | 恢复 | environment-restored.json：0.209946995s、errors=[]，cgroups_before/after均空；setroubleshootd在restore前已active，不能宣称全程停用 |
-| 报告/下载包/浏览器 | 正式生成与本地/公开验收进行中，尚不填最终SHA或验收计数 |
-| 公开地址与提交 | 预定 https://yche.me/perf/kvc-batch-tcp-20261020/index.html；阶段7233cca、30c77d9已提交，交付提交尚待实际产生 |
+| 报告/下载包/浏览器 | 生成返回0；本地347检查及初版ZIP清洁解包通过，详见6.13；公开逐版本验收另记，不借旧版本通过记录 |
+| 公开地址与提交 | 已登记 https://yche.me/perf/kvc-batch-tcp-20261020/index.html；站点首次报告bdd7bfa、旧页提示d2dca0c/f5eec79已提交；最终文档与收据独立核验 |
 
 正式r3尝试213.962156825秒后失败；DataSystem B16 EXIST hit的8客户端各1个deadline错误，两个Worker此前已出现同一默认RocksDB目录的文件缺失/大小不符错误。门禁和smoke的成功只对其执行步骤成立，不能认证长窗口或目录隔离。默认目录问题、启动脚本最小修复及旧单key基线的影响详见 [verification.md](verification.md) 第5.6–5.7节；旧DS值不得作为修正后batch收益的公平基准，修正后的B1需随新矩阵重测。
 
@@ -128,4 +128,18 @@ r5正式05:16:59.135590–05:20:06.445844 UTC，187.310265231秒后在B16 EXIST 
 
 实际清洁解包验收1822成员、134348850 bytes，CRC/路径/文件类型/逐成员SHA/原模式通过；121份冻结输入精确集合和1696份公开镜像字节匹配。6项CLI help、756项Python编译、56项shell语法、4项Node语法通过。ZIP提供脚本、模板、文档和精选证据，未包含最终index/data.js/data.json；离线网页需保留整个公开报告目录的相对依赖，不能把此ZIP标为最终网页离线包。
 
-实际工具源码分别为SHA256 `71ee3dbeced313764d102fcc2db2dcdf5045b00443489f94c64cb921ee491d8a`（executed-qa.mjs）、`e3ee0c97ef1f5a37e8aa8fa6a43c9f284a1dc10229f7e33a878e858ebc2a4c46`（package_qa.py）。原件保存在R7的final-local-browser-qa与final-package-qa；后续交付快照按内容SHA保存，不替换原冻结测量或生成器源码。公开发布、旧页面提示与最终文档刷新仍按实际命令继续登记。
+实际工具源码分别为SHA256 `71ee3dbeced313764d102fcc2db2dcdf5045b00443489f94c64cb921ee491d8a`（executed-qa.mjs）、`e3ee0c97ef1f5a37e8aa8fa6a43c9f284a1dc10229f7e33a878e858ebc2a4c46`（package_qa.py）。原件保存在R7的final-local-browser-qa与final-package-qa；后续交付快照按内容SHA保存，不替换原冻结测量或生成器源码。公开发布、旧页面提示与最终文档刷新按后续实际命令登记。
+
+## 6.14 首次公开验收与页面兼容修正
+
+首轮上传和服务端全SHA核验完成，首页恰新增1条（288→289）。两旧页以各自原清单SHA执行CAS后只加入适用范围提示和历史前像，旧数据/图/ZIP保持字节不变；公开8视图、89项检查通过，两旧ZIP均实际GET校验，新报告链接200。
+
+新页公开v1/v2/v3失败原件都保留：v1附件筛选误含共享根导航；v2必需附件HEAD超时，后续该文件及三对照HEAD/GET均200且GET SHA匹配；v3三视口344项断言、实际ZIP与完整公开manifest绑定均通过，但移动菜单点击失败。DOM命中测试证实本页面固定header样式挡住共享reader生成按钮，同时原按钮被reader隐藏。只修本页的共享页头兼容样式并保留修前证据；最终复验结果按实际收据继续登记，不能将344个已通过断言写成整套通过。
+
+最后文档刷新之后的实际公开/解包结果将由独立[交付验收收据](https://yche.me/perf/kvc-batch-tcp-20261020/delivery-acceptance.json)绑定到最终ZIP；收据的delivery通过与原生矩阵passed=false分别保留。首次公开检查及失败原件快照、修订QA和追加工具均按内容SHA单独归档，不追认成原始生成器或测量输入。
+
+公开v4已实际348/348通过（1440/900/390视口），无JS/必需网络错误；128个附件128次HEAD首次全200，没有启用重试或GET后备。共享按钮真实打开七章目录、跳至resources（标题top107.515625px）、关闭和恢复均通过。浏览器105.578825445s、命令108.198493912s；QA原件SHA256为`efc3b4a95598dea699ddffa5bf31d06d04ab6301ae030189d61788de0355f55b`，执行QA源码为`2b707b5d476807a28c84d6e6ae559a02a715ecc229b15a48cfcb6ee02676a813`。10张截图已保存，6张直接检查，桌面左导航及手机菜单可用。
+
+v4实际GET的初版ZIP仍为5a91bfcc…c3279/16182002 bytes，完整公开清单SHA为8e5d4348…63323/221736 bytes，分别与本地同版身份绑定。UI修复后以原解包工具新开目录复核，1822成员/121冻结输入/1696镜像、CRC/模式/语法/CLI全部通过，8.284531377s；其包/清单在检查前后不变。追加工具也已用该真实v4及解包结果dry-run通过（4.029533972s、348检查），未提前生成最终收据。
+
+交付专用工具补测：导航事务11项通过（0.169s），文档刷新15项通过（0.615s），其中新增已入清单的嵌套历史SHA256SUMS在dry-run/apply后保留原字节/模式及根清单唯一条目。它们是后处理工具fixture，不是新的产品性能/恢复重复。最终源码与所有失败/成功QA原件快照按SHA随包保存。

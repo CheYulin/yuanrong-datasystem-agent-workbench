@@ -59,6 +59,8 @@ sequenceDiagram
 | batch_tcp_verify.py | 离线解析门禁 syscall 跟踪，校验每个方向的正返回 TCP 字节与同用例完整1024-byte已知payload样本；不把样本证明扩大到全部字节 |
 | qa_batch_report.mjs | 在1440/900/390宽度验证实际矩阵、图表数据绑定、空资源、导航、caption、下载包HTTP字节SHA与相对资产 |
 | batch_refresh_delivery.py | 补充验收文档与交付工具快照时保留全部原运行输入、proof、history和ZIP源文件字节；只替换唯一ZIP链接版本和对应HTML gzip |
+| batch_acceptance.py | 最终公开浏览器与清洁解包都通过后，核对实际下载ZIP/URL/清单/解包为同一SHA，独立追加验收JSON和gzip；再次核对原页面/ZIP/数据字节与权限不变 |
+| batch_repair_navigation.py | 公开reader兼容修正：精确manifest CAS、唯一HTML样式href替换、独立内容地址CSS、修前HTML/gzip/清单和实际helper归档；原CSS/JS/ZIP与测量证据冻结 |
 | batch_resource_audit.py | 只读原采样，分窗口核对CPU限流、memory事件增量、swap与外部进程leader-affinity估计；parent/monitor不与server/client叠加 |
 | batch_deployment_audit.py | 从实际epoch计划推出21次DataSystem启动，核对42个独立DB目录与启动/排空证据，流式扫描RocksDB文件错误并绑定原日志SHA；仅gate有procfs live快照，其余20次明确为启动记录 |
 

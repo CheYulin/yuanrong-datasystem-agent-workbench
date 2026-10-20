@@ -87,3 +87,28 @@ python3 batch_refresh_delivery.py \
 ```
 
 刷新脚本不连接节点或站点，不运行产品、压力测试或页面生成器。原始输入哈希、完整实测矩阵和统计结果保持冻结；最终浏览器与下载验收证据由单独执行记录证明。
+
+## 1.5 最终版本的独立验收收据
+
+文档刷新后重新执行公开浏览器和清洁解包检查，两份实际结果必须绑定同一个最终ZIP。`batch_acceptance.py`默认dry-run，要求所有浏览器断言通过、实际URL为指定公开页面、URL/body/清单ZIP SHA与本地一致，并核对解包的SHA、字节数、CRC、成员安全和测前清单。`--apply`仅新增`delivery-acceptance.json`及mtime=0的gzip，更新校验表；目录锁、原始文件逐SHA/权限复核与回滚保护保持已验页面、ZIP、原始归档不变。
+
+```sh
+python3 batch_acceptance.py --out "$batch_local/report" \
+  --browser <最终公开浏览器qa.json> --package <最终解包audit.json> \
+  --public-url https://yche.me/perf/kvc-batch-tcp-20261020/index.html
+# 审阅实际版本绑定后追加 --apply；再同步新增收据、gzip和SHA256SUMS。
+```
+
+收据保存两份原JSON的UTF-8字节与SHA、实际工具身份以及追加前清单SHA。它在ZIP固定后独立生成，因此文档中的首次ZIP与最终下载身份各有实际记录，不把最终验收时间伪写进较早的ZIP。生成此收据也不新增原生测试重复或更改接口有效性。
+
+ZIP中原生成器和初版QA保持原样；修订的公开QA、追加工具及实际验收脚本按SHA文件名保存在`delivery-tools/manifest.json`所列路径。解包后在`kvc-fair`根设置`PYTHONPATH=.`，调用该清单中的完整SHA文件名（如`delivery-tools/<SHA>-batch_acceptance.py`）；不要把原冻结QA的公开导航检查错误当作已修正版本。工作仓库内则可直接使用同名canonical入口。
+
+文档刷新工具还会读取与自身同目录的`qa_batch_report.mjs`。从包重放该交付步骤时，先在独立工具副本中将清单所列最新`batch_refresh_delivery.py`和`qa_batch_report.mjs`快照复制为这两个原文件名，再设置`PYTHONPATH`指向其余已解包工具运行；原ZIP及其冻结源码保持原样。根目录清单只排除根`SHA256SUMS`自身，已入清单的嵌套历史`SHA256SUMS`也必须继续覆盖；新增回归对此逐字节验证。
+
+## 1.6 已确认的共享页头兼容问题与修复事务
+
+公开reader将原`.site-header`移入`#site-nav`并隐藏原目录按钮，生成自己的`.yche-toc-button`。原CSS的固定定位仍生效，覆盖新按钮；实际命中测试与点击超时确认这是可用性问题。修正仅追加`#site-nav .site-header.yche-legacy-links`范围的定位、inset、z-index、最小高度、padding、阴影与背景重置，脱离共享reader的本地原生页头保持原样。
+
+`batch_repair_navigation.py --out <报告目录> --expected-manifest <当前SHA256SUMS的SHA>`默认dry-run；独立审阅后追加`--apply`。它复核原清单/模式/唯一href/gzip，在新内容地址CSS中追加精确规则，只替换HTML的唯一样式href，保留修前HTML/gzip/清单、实际helper与事务描述。逐文件替换失败会回滚，最终清单最后提交。原CSS、JS、ZIP、数据、native输入和原始归档保持原样；后续`batch_refresh_delivery`只对已修HTML中的ZIP版本href更新。
+
+实际内容地址CSS SHA为`d72169383b8411f49765154f95f229ab7a005d0b593cdc37e811bd6e9fe07863`，helper SHA为`47d6ddb95a897e24e886ae8d331f2119227eca17436a4bcb9b681713c7844e44`。隔离路由fixture已证明真实共享目录命中、展开七章、关闭与章节跳转；事务11项fixture覆盖精确范围、CAS拒绝、stage篡改与两类回滚。隔离fixture不代替实际部署后的完整公开验收。
