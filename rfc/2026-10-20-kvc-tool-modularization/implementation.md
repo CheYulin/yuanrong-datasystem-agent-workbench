@@ -238,3 +238,15 @@ P6 首批归整：30 个根目录 unittest 迁入 `tests/unit/{build,run,collect
 - 冻结新后处理/交付包 `collection-bundle-001` 共 316 项，manifest SHA `3a3e2a2f7e19ff037dc9d71427c6494dc0aae8455a2a5c9aebe53183d50266f7`，ZIP SHA `c764b9e6c40a7851efd5f2ac76a2c4818a1a86a722ffec65fe527972630251a0`。尚未在正式测量开放时上传至目标节点。
 
 本阶段按 ds-self-verify 检查：产品仓无改动；改动限工具/RFC，测量热循环未改；原运行根/原件/失败 attempt 未覆盖；上传使用新版本目录，失败不会覆盖已有报告。实际新矩阵、W12–W18 端到端和公开交付仍须由本次真实原件证明。
+
+## 18. 实际交付样例、launcher 归属与 Coordinator 遗漏纠正
+
+W15/W16 的完整隔离样例 `report-workflow-synthetic-002` 已实际通过：封存生成、manifest/链接、安全解压及模式恢复、执行包内源码 relocate/render、显示数据 SHA 比较、原报告与离线报告的三种视口/九图/四文档/Mermaid/失败空值检查。其 W14 明确标为 synthetic delivery fixture，原生数据全为 fixture，不用于正式产品成绩。第一样例保留失败：合法包根 bundle-manifest.json 被过严规则拒绝；仅放行固定成员名，其余安全规则不变。
+
+Mooncake 的 env/start/stop/master launcher 与 LMCache 两种 server launcher 移入 run/products 对应目录，6 个 canonical shell 文件与迁移前逐字节相同，旧位置为薄转发。stage 在存在 canonical 资源时明确选用其源文件，保留旧小型 fixture 兼容分支。Mooncake、LMCache 及 stage/build 相关 35 项通过（6.699 秒）；包含新 publication install 的全量 **556 项通过，57.021 秒**（launcher-all-001.log）。收集策略后续修正另有针对性回归，不并入该计数。
+
+runtime004 外层真实命令已终止：returncode=0，5056.379312235 秒，W09 passed_with_findings、W10/W11 passed；三个实验 cgroup.procs 均为空。实际 W12 尝试依次检出了 source_state 使用 --untracked-files=all 展开 .venv 与既定 normal 策略不一致、保留目录规则误将源码包 report/delivery 模块及其测试视为派生结果。统一为原有 normal 策略，明确白名单源码包前缀，仍拒绝真正派生目录、任意伪造源码前缀和缓存；失败 attempt 保留，新目录重做，不覆盖原件。
+
+**关键遗漏：对实际 argv 的验收复核确认 runtime004 使用 ETCD，coordinator_address 为空。用户要求后续统一 Coordinator，因此这一轮只能保留为旧后端基线，不得作为最终符合要求的对比。** 已从相同固定 tag/SHA 的实际源码和 output/service 确认 Coordinator 二进制与配置已经构建；尚未把它冒充纳入原 metadata。后续按 [coordinator-correction.md](coordinator-correction.md) 验证其与原 tar 成员一致，明确纳入新 catalog、切换实际服务并重跑完整新矩阵；不需重编译或改变产品源码。
+
+按 ds-self-verify 检查本阶段 diff：测量热循环未变；新 launcher 实体逐字节迁移；收集仍要求静止、锁定、绑定和新目录；安全解压只增加合法固定根成员。产品仓无改动。本次没有最终 Coordinator 矩阵、正式新报告或公开验收完成的证据，目标保持未完成。

@@ -14,7 +14,7 @@ class PureKvLauncherTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        source = TOOL_ROOT / "mooncake"
+        source = TOOL_ROOT / "kvcbench/run/products/mooncake"
         for name in ["launch_master.sh", "env.sh"]:
             shutil.copy2(source / name, self.root / name)
         self.binary = self.root / "venv/lib/python3.11/site-packages/mooncake/mooncake_master"

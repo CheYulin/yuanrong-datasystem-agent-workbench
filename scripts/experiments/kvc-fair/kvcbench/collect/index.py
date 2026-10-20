@@ -35,8 +35,14 @@ def validate_members(members):
         if not isinstance(name, str):
             raise ValueError('Evidence paths must be strings')
         path = Path(name)
+        code_prefixes = {(), ('native-build',), ('collector-source',), ('source-bundle', 'payload'), ('runtime-inputs',)}
+        code_at = path.parts.index('kvcbench') if 'kvcbench' in path.parts else None
+        source_code = code_at is not None and path.parts[:code_at] in code_prefixes
+        bundled_source = path.parts[:1] == ('collector-source',) or path.parts[:2] == ('source-bundle', 'payload')
         if (path.is_absolute() or path.as_posix() != name or '..' in path.parts
-                or not path.parts or any(part in RESERVED or part.startswith('.') for part in path.parts)):
+                or not path.parts or any(part.startswith('.') or part == '__pycache__'
+                    or part in RESERVED and not (bundled_source or source_code and index > code_at)
+                    for index, part in enumerate(path.parts))):
             raise ValueError('Unsafe, mutable or derived evidence path: ' + name)
         if 'workflow' in path.parts:
             at = path.parts.index('workflow')

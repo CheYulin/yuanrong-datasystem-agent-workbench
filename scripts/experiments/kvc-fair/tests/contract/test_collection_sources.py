@@ -9,6 +9,14 @@ from kvcbench.platform.files import read_json
 
 
 class CollectionSourceTests(unittest.TestCase):
+    def test_source_package_module_names_are_not_confused_with_derived_outputs(self):
+        for prefix in ('', 'collector-source/', 'native-build/', 'runtime-inputs/', 'source-bundle/payload/'):
+            validate_members([{'path': prefix + 'kvcbench/report/render.py', 'role': 'runtime'}])
+        validate_members([{'path': 'collector-source/tests/unit/delivery/__init__.py', 'role': 'runtime'}])
+        for path in ('report/index.html', 'results/report/index.html', 'results/kvcbench/report/render.py', 'kvcbench/__pycache__/cache.pyc'):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                validate_members([{'path': path, 'role': 'runtime'}])
+
     def test_disabled_storage_empty_directory_is_preserved_and_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary)

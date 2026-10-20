@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-MOONCAKE_ROOT=${MOONCAKE_ROOT:-/home/worktrees/kvc-fair-20261020/mooncake}
-export MOONCAKE_ROOT
-export LD_LIBRARY_PATH="$MOONCAKE_ROOT/deps/lib:${LD_LIBRARY_PATH:-}"
-export GLOG_minloglevel=2
-export MC_LOG_LEVEL=ERROR
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MC_STORE_LOCAL_HOT_CACHE_SIZE=0
-export MOONCAKE_STORE_CHECKSUM=false
+KVC_LAUNCH_ROOT=${KVC_TOOL_ROOT:-${TASK_ROOT:-}}
+if [[ -z "$KVC_LAUNCH_ROOT" ]]; then
+  KVC_LAUNCH_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+  while [[ "$KVC_LAUNCH_ROOT" != / && ! -d "$KVC_LAUNCH_ROOT/kvcbench" ]]; do
+    KVC_LAUNCH_ROOT=$(dirname -- "$KVC_LAUNCH_ROOT")
+  done
+fi
+source "$KVC_LAUNCH_ROOT/kvcbench/run/products/mooncake/env.sh" "$@"

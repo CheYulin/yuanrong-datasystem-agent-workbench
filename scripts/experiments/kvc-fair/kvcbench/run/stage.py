@@ -115,7 +115,8 @@ def stage(args, *, verify_builds=None, snapshot_builds=None, install_inputs=None
             if feature_profile == "pure-kv":
                 for name, target_name in [("mooncake/launch_master.sh", "mooncake/launch_master.sh"),
                                           ("lmcache/start_server_tcp.sh", "lmcache/start_server.sh")]:
-                    source, target = bundle / name, temporary / target_name
+                    canonical = bundle / "kvcbench/run/products" / name
+                    source, target = canonical if canonical.is_file() else bundle / name, temporary / target_name
                     if not source.is_file() or source.is_symlink():
                         raise ValueError("Pure-KV runtime override is missing: " + name)
                     shutil.copy2(source, target)

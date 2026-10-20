@@ -38,6 +38,7 @@ class DeliveryAcceptanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with zipfile.ZipFile(root / 'source.zip', 'w') as archive:
+                archive.writestr('bundle-manifest.json', '{"fixture":true}')
                 for name, mode, content in [('kvc-fair/run.sh', 0o100755, 'exit 0'),
                                             ('kvc-fair/worker/rocksdb/', 0o40750, '')]:
                     entry = zipfile.ZipInfo(name)

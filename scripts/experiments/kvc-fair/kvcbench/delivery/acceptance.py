@@ -85,7 +85,7 @@ def extract(archive, destination):
             path = Path(item.filename)
             mode = item.external_attr >> 16
             if (path.is_absolute() or '..' in path.parts or '\\' in item.filename
-                    or not path.parts or path.parts[0] != 'kvc-fair'
+                    or not path.parts or path.parts[0] != 'kvc-fair' and item.filename != 'bundle-manifest.json'
                     or stat.S_IFMT(mode) not in {0, stat.S_IFREG, stat.S_IFDIR}):
                 raise ValueError('Unsafe reproduction ZIP member: ' + item.filename)
         destination.mkdir(parents=True)

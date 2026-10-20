@@ -134,7 +134,7 @@ def checkouts(runtime):
         source = metadata['source_directory']
         commands = [['git', '-C', source, *arguments] for arguments in [
             ['rev-parse', 'HEAD'], ['rev-parse', metadata['tag'] + '^{commit}'],
-            ['status', '--porcelain', '--untracked-files=all'], ['status', '--porcelain', '--untracked-files=no']]]
+            ['status', '--porcelain', '--untracked-files=normal'], ['status', '--porcelain', '--untracked-files=no']]]
         values = [subprocess.check_output(command, text=True, env=dict(os.environ, GIT_OPTIONAL_LOCKS='0')).strip() for command in commands]
         state = source_state(product, values[2], values[3])
         if values[0] != metadata['sha'] or values[1] != metadata['sha'] or not state['source_worktree_policy_valid']:
