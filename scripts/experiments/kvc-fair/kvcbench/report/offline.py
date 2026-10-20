@@ -19,7 +19,8 @@ def package(out, spec, evidence, *, diagnostic=False):
         remember(original, 'docs/' + Path(original['path']).name)
     remember(spec['source_bundle'], 'provenance/source-bundle.zip')
     for row in evidence:
-        remember(row['source'], row['destination'])
+        if 'source' in row:
+            remember(row['source'], row['destination'])
     original_spec = {key: value for key, value in spec.items() if key not in {'relocations', 'relocation_scope'}}
     template = {'schema_version': 1, 'diagnostic': diagnostic, 'inputs_spec': original_spec,
                 'files': list(references.values())}
@@ -32,6 +33,9 @@ def package(out, spec, evidence, *, diagnostic=False):
             raise ValueError('The source ZIP already contains a rendered report; use its original source bundle')
         for path in files:
             archive.write(path, 'kvc-fair/report/' + path.relative_to(out).as_posix())
+        for row in evidence:
+            if 'directory_mode' in row:
+                archive.write(out / row['destination'], 'kvc-fair/report/' + row['destination'] + '/')
         archive.write(source_zip, 'kvc-fair/report/reproduce.zip')
         def text(name, content):
             info = zipfile.ZipInfo('kvc-fair/' + name)

@@ -65,7 +65,8 @@ def verify_matrix(suite, rows, products, args):
                     {"isolated_epochs": True, "continue_readonly_errors": args.continue_readonly_errors,
                      "protocol": {"duration": args.duration, "warmup": args.warmup, "put_keys": args.put_keys},
                      "adapter": product["adapter"], "config": product["config"],
-                     "run_id": suite.name + "-r" + str(row["repeat"]), "out": str(path),
+                     "run_id": suite.name + "-r" + str(row["repeat"]),
+                     "out": str(Path(getattr(args, 'out', suite)) / cell.name / path.name),
                      "skip_preload": epoch["operations"][0] != case})
                 counts[checked["status"]] += 1
                 if not checked["evidence_verified"]:

@@ -9,7 +9,7 @@ from kvcbench.core.timing import finished, started
 from kvcbench.platform.files import atomic_json, digest, identity, read_json, regular, sync_directory
 
 
-from kvcbench.platform.package import INVENTORY, inventory
+from kvcbench.platform.package import INVENTORY, inventory, verify_zip
 
 
 def install_package(source, destination):
@@ -53,17 +53,10 @@ def verify(root):
     archived = read_json(regular(root, "archive.json"))
     if identity(regular(root, "bundle.zip")) != archived["identity"] or archived["manifest_sha256"] != digest(manifest_path):
         raise ValueError("Archive provenance mismatch")
-    with zipfile.ZipFile(root / "bundle.zip") as source:
-        expected = {"kvc-fair/" + name for name in names} | {"bundle-manifest.json"}
-        if len(source.namelist()) != len(expected) or set(source.namelist()) != expected:
-            raise ValueError("Archive membership differs from the complete bundle")
-        if source.read("bundle-manifest.json") != manifest_path.read_bytes():
-            raise ValueError("Archive manifest differs")
-        for record in manifest["files"]:
-            name = "kvc-fair/" + record["path"]
-            info = source.getinfo(name)
-            if ((info.external_attr >> 16) & 0o7777) != record["mode"] or source.read(name) != (payload / record["path"]).read_bytes():
-                raise ValueError("Archive bytes/mode mismatch: " + name)
+    verify_zip(root / 'bundle.zip', expected_manifest=manifest_path.read_bytes())
+    for record in manifest['files']:
+        if identity(regular(payload, record['path'])) != {key: record[key] for key in ('sha256', 'bytes', 'mode')}:
+            raise ValueError('Bundle payload changed during archive validation')
     return {"valid": True, "files": len(names), "manifest_sha256": digest(manifest_path),
             "archive_sha256": digest(root / "bundle.zip")}
 

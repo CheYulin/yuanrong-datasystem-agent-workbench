@@ -19,6 +19,25 @@ from kvcbench.platform.receipts import Workflow, file_reference, verify_commit
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    command = commands.add_parser("collect", help="Freeze terminal sources, receive immutable evidence and derive audited report inputs")
+    actions = command.add_subparsers(dest="collect_action", required=True)
+    action = actions.add_parser("capture")
+    action.add_argument("--control", type=Path, required=True)
+    action.add_argument("--out", type=Path, required=True)
+    action.add_argument("--invocation", type=Path)
+    action = actions.add_parser("receive")
+    action.add_argument("--host", required=True)
+    action.add_argument("--snapshot", required=True)
+    action.add_argument("--receipt", required=True)
+    action.add_argument("--out", type=Path, required=True)
+    action = actions.add_parser("verify")
+    action.add_argument("--snapshot", type=Path, required=True)
+    action.add_argument("--receipt", type=Path, required=True)
+    action = actions.add_parser("derive")
+    action.add_argument("--received", type=Path, required=True)
+    action.add_argument("--source-bundle", type=Path, required=True)
+    action.add_argument("--out", type=Path, required=True)
+    action.add_argument("--device", default="253:2")
     command = commands.add_parser("workflow", help="Execute explicit runtime steps with owner acceptance receipts")
     command.add_argument("action", choices=["all", "start", "gate", "smoke", "measure", "restore"])
     command.add_argument("--control", type=Path, required=True)
@@ -62,6 +81,18 @@ def parser():
 
 
 def run(args):
+    if args.command == "collect":
+        if args.collect_action == "capture":
+            from kvcbench.collect.capture import capture
+            return capture(args.control, args.out, invocation=args.invocation), 0
+        if args.collect_action == "receive":
+            from kvcbench.pipeline.collection import receive
+            return receive(args.host, args.snapshot, args.receipt, args.out), 0
+        if args.collect_action == "verify":
+            from kvcbench.collect.transport import verify_received
+            return verify_received(args.snapshot, args.receipt), 0
+        from kvcbench.collect.postprocess import derive
+        return derive(args.received, args.out, args.source_bundle, device=args.device), 0
     if args.command == "workflow":
         from kvcbench.pipeline import runtime
         if args.action in {"all", "start"}:

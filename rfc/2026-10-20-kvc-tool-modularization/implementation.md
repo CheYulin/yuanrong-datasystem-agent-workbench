@@ -205,3 +205,17 @@ W01–W18 的完整语义回执接入、P6 旧入口/测试归整及新的正式
 环境新规则只移除本次创建的 runtime mask，已有 mask 保留；恢复有 baseline/hash 绑定，空 cpuset 用换行正确写回。mihumo 仅在重新观察到明确的 203 失败重启状态时暂停，恢复的是原激活意图，不声称修复原有故障。源码、永久 unit、SELinux 策略和历史原件均未修改。新步骤回执与重验在套件边界发生，不在每次 SDK 调用热路径新增 IO、锁或采样。
 
 W12–W18 的跨节点收集/报告/公开验收、P6 归整和最终新结果仍是未完成项。后续将复核运行句柄/实际终态，再冻结原件及生成新的报告输入，禁止在开放流上提前封存或覆盖这次候选输入。
+
+## 16. W12 原件冻结、W13 离线派生与 W14 独立复核入口
+
+新增 `collect capture/receive/verify/derive`。capture 要求 W01–W11（含入场和 smoke 子步骤）均已封存且符合当前 profile；重新持构建锁及共同运行锁，核对实际原生输出、源码 checkout、资源域排空和正式终态，再复制到新目录。索引 schema2 记录 runtime/control/native/bundle/revalidator/collector/invocation 等明确来源，不修改远端原始路径；receive 用映射核验原始回执完整链，原始构建失败结论仍保留为失败，后续重验通过另有记录。
+
+DataSystem 关闭 RocksDB 后的空数据库目录和 mode 也列入冻结索引，收集与离线包保留它们；Coordinator 的 etcd-data 状态目录不收集，实际 RocksDB 文件若存在则保留供审计拒绝，不静默过滤。符号链接和非普通节点不跟随，并列出跳过记录。采集程序自身源码也进入快照，使 W12 validator 能在脱离目标节点后复核。
+
+W13 从原始 SDK 结果/窗口重算矩阵、CSV、资源序列与三产品原始构建元数据。W14 独立重读归约，并核对构建、资格/TCP payload、21 个 DataSystem 部署 epoch、环境恢复、观测终态和资源覆盖；生成绑定 analysis/series/builds/workflow/evidence、四份当前文档和当前源码 ZIP 的 audit。正常报告仍只消费六份明确输入与已绑定文件；本次没有在 SDK 调用热路径新增 IO 或锁。
+
+长窗口资源验收要求至少两个样本、90% 时间跨度、最大 1 秒间隔及必需工具持续可用；短 PUT 或提前返回的原生只读错误窗口采样不足显式列为 finding，未知指标保持 null。整个观测跨度也检查 OOM 差值，避免遗漏 case 间发生的 OOM。历史 R7 离线回归发现早期必需工具退出，因此新的覆盖检查正确拒绝该历史数据；不将其包装为当前正式新运行结论。
+
+本节代码尚未对正在运行的 runtime004 部署，也未接触其开放采样流；必须等 W09–W11 结束后用新冻结包执行实际 W12–W14。上一个完整本地回归 549 项通过（60.991 秒，`collection-all-001.log`）；空目录及离线包新增覆盖后的相关 18 项通过（1.737 秒），完整复核见下一条实际记录。上述自动测试使用隔离 fixture，不替代正式原生矩阵。W15–W18 语义交付回执与 P6 目录归整仍未完成。
+
+最终本地回归：`python3 -m unittest discover -s . -p 'test_*.py'` **551 项通过，75.811 秒**，日志 `collection-all-002.log`；8 个 owner AST 导入边界检查无跨层依赖。保留旧 TCP gate fixture 的未关闭锁 ResourceWarning，尚待 P6 归整。按 ds-self-verify 复核本阶段：diff 范围仅工具/RFC，资源锁内冻结、只读映射验收、新输出目录及失败保留已检查；无产品热路径/持久化格式改动，原始证据不覆盖，产品仓无需 `.repo_context` 结构更新。没有把本地 fixture 通过写成新压测通过。

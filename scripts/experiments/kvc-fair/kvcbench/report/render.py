@@ -55,7 +55,12 @@ def render(inputs, out, *, diagnostic=False):
     for name, record in spec['inputs'].items():
         copy_bound(record, out / 'provenance' / (name + '.json'), resolve=prepared['resolve'])
     for item in values['evidence']:
-        copy_bound(item['source'], out / item['destination'], resolve=prepared['resolve'])
+        if 'directory_mode' in item:
+            target = out / item['destination']
+            target.mkdir(parents=True, exist_ok=False)
+            target.chmod(item['directory_mode'])
+        else:
+            copy_bound(item['source'], out / item['destination'], resolve=prepared['resolve'])
     docs = out / 'docs'
     docs.mkdir()
     for record in spec.get('documents', []):

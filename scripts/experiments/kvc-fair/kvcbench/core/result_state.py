@@ -1,5 +1,7 @@
 """Pure completeness rules for fixed native-batch matrices; native errors stay failures."""
 
+REPORT_DATA_INPUTS = frozenset({'analysis', 'series', 'builds', 'workflow', 'evidence'})
+
 
 def report_completion(analysis):
     summary, rows = analysis.get("summary", {}), analysis.get("rows", [])

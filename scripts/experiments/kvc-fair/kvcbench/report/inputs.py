@@ -3,10 +3,10 @@ from pathlib import Path
 import json
 
 from kvcbench.core.steps import identifier
-from kvcbench.core.result_state import report_completion
+from kvcbench.core.result_state import report_completion, REPORT_DATA_INPUTS
 from kvcbench.platform.files import read_json, validate_reference, digest
 
-REQUIRED = {'analysis', 'series', 'builds', 'workflow', 'evidence'}
+REQUIRED = REPORT_DATA_INPUTS
 
 
 def load(path, *, diagnostic=False):
@@ -51,6 +51,7 @@ def load(path, *, diagnostic=False):
     if not isinstance(evidence, list):
         raise ValueError('Explicit report evidence references are required')
     destinations = set()
+    file_destinations = set()
     namespaces = {'results', 'raw', 'workflow', 'build-logs', 'environment', 'qualification', 'runtime', 'observations', 'audits', 'builds', 'history', 'failed-attempts', 'measured-runtime'}
     for row in evidence:
         destination = Path(row['destination'])
@@ -59,8 +60,13 @@ def load(path, *, diagnostic=False):
                 or destination.as_posix() in destinations):
             raise ValueError('Unsafe or duplicate report evidence destination')
         destinations.add(destination.as_posix())
-        resolve(row['source'])
-    if any(any(parent.as_posix() in destinations for parent in Path(name).parents) for name in destinations):
+        if 'directory_mode' in row:
+            if set(row) != {'destination', 'directory_mode'} or type(row['directory_mode']) is not int or not 0 <= row['directory_mode'] <= 0o777:
+                raise ValueError('Explicit empty directory requires a safe permission mode')
+        else:
+            resolve(row['source'])
+            file_destinations.add(destination.as_posix())
+    if any(any(parent.as_posix() in file_destinations for parent in Path(name).parents) for name in destinations):
         raise ValueError('Evidence destination files conflict with directories')
     for row in analysis.get('rows', []):
         for key in ('evidence', 'outcome_evidence'):
@@ -75,6 +81,10 @@ def load(path, *, diagnostic=False):
     bundle = resolve(spec['source_bundle'])
     if bundle.suffix != '.zip':
         raise ValueError('An explicit verified reproduction source ZIP is required')
+    if audit.get('document_bindings') is not None and audit['document_bindings'] != {source.name: digest(source) for source in documents}:
+        raise ValueError('Document bytes differ from the independently bound current report documents')
+    if audit.get('source_bundle_sha256') is not None and audit['source_bundle_sha256'] != digest(bundle):
+        raise ValueError('Report source bundle differs from the audit-bound package')
     for name, source in paths.items():
         if digest(source) != spec['inputs'][name]['sha256']:
             raise ValueError('Report inputs changed while being read')

@@ -13,6 +13,28 @@ from kvcbench.report.relocate import materialize
 
 
 class ReportInputsTests(unittest.TestCase):
+    def test_empty_storage_directory_survives_report_and_offline_zip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            source, path, spec = self.fixture(parent)
+            evidence = json.loads((source / 'evidence.json').read_text())
+            evidence.append({'destination': 'raw/worker/rocksdb', 'directory_mode': 0o750})
+            atomic_json(source / 'evidence.json', evidence)
+            spec['inputs']['evidence'] = reference(source, 'evidence.json')
+            audit = json.loads((source / 'audit.json').read_text())
+            audit['bindings']['evidence'] = spec['inputs']['evidence']['sha256']
+            atomic_json(source / 'audit.json', audit)
+            spec['inputs']['audit'] = reference(source, 'audit.json')
+            atomic_json(path, spec)
+            render(path, parent / 'report', diagnostic=True)
+            directory = parent / 'report/raw/worker/rocksdb'
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o750)
+            with zipfile.ZipFile(parent / 'report/reproduce.zip') as archive:
+                entry = archive.getinfo('kvc-fair/report/raw/worker/rocksdb/')
+                self.assertTrue(entry.is_dir())
+                self.assertEqual(entry.external_attr >> 16 & 0o777, 0o750)
+
     def fixture(self, parent):
         source = parent / 'inputs'
         source.mkdir()

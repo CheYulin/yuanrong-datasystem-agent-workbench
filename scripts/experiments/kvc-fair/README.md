@@ -35,7 +35,18 @@ python3 -m kvcbench workflow measure --control /absolute/new-control
 
 每一步记录输入、结果、产物清单、验收、摘要和 commit。`measure` 成功结束或失败后都执行环境恢复；准备部分失败也保留 intent 并恢复。现场恢复入口为 `workflow restore --control <control>`，不能用它自动重放请求。步骤或输出已存在时不续写；重新测量使用新 run 和状态目录。
 
-W01–W11 的运行编排已接入并正在进行真实节点验证，W12–W18 的完整收集/报告/交付编排仍在接入。独立报告入口已实现；上游必须提供真实绑定产物，不能以空文件或历史结果代替新矩阵。
+W01–W11 的运行编排已接入并正在进行真实节点验证。W12 收集与 W13/W14 离线派生入口已接入，尚待这次正式矩阵结束后用新原件验收；W15–W18 的完整交付编排仍在接入。独立报告入口已实现；上游必须提供真实绑定产物，不能以空文件或历史结果代替新矩阵。
+
+测量、观测停止和环境恢复均结束后，在目标节点的新冻结工具包目录执行收集；原运行目录与失败记录保持原样。每次操作使用新输出目录：
+
+```bash
+python3 -m kvcbench collect capture --control /absolute/control --out /absolute/snapshot --invocation /absolute/outer-command
+python3 -m kvcbench collect receive --host tiantiyun-80c128g --snapshot /absolute/snapshot --receipt /absolute/snapshot-receipt --out /absolute/received
+python3 -m kvcbench collect derive --received /absolute/received --source-bundle /absolute/current-bundle/bundle.zip --out /absolute/derived
+python3 -m kvcbench report --inputs /absolute/derived/report-inputs.json --out /absolute/report
+```
+
+capture 在构建锁和共同运行锁内复制终态原件、构建物、原始回执及执行源码。receive 保留原始路径，通过显式来源映射重新核验，不改写原件。derive 从原始 SDK 窗口重算矩阵和资源，并独立检查构建、TCP、部署、恢复及采样覆盖；生成四份当前 Markdown 文档及绑定输入。原生失败仍显示失败，缺采样不填零。关闭 RocksDB 后的空目录及其权限也属于冻结证据。
 
 ## 3. 检查与文档
 
