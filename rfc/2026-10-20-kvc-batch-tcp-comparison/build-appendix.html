@@ -1,0 +1,72 @@
+<section id="build-appendix" class="build-appendix">
+<h2>附录 A. 源码版本、编译步骤与关键配置</h2>
+<p>{{SCOPE}}</p>
+<style>.build-appendix{min-width:0;scroll-margin-top:90px}#build-appendix table{width:100%;min-width:760px!important;border-collapse:collapse;font-size:14px}.build-appendix th,.build-appendix td{padding:12px;text-align:left;vertical-align:top;border:1px solid #ccd6e1;overflow-wrap:anywhere}.build-appendix th{background:#eaf0f7;color:#173047}.build-appendix .appendix-scroll{overflow-x:auto;margin:16px 0}.build-appendix pre{overflow-x:auto;background:#142333;color:#edf5ff;padding:16px;border-radius:8px;line-height:1.65;font-size:13px}.build-appendix code{overflow-wrap:anywhere}.build-appendix details{margin:16px 0}.build-appendix summary{cursor:pointer;font-weight:600}.build-appendix .appendix-note{padding:14px;border-left:4px solid #287a89;background:#edf6f7;color:#183746}.build-appendix h3{margin-top:28px}.build-appendix a{overflow-wrap:anywhere}#appendix-version-table td:nth-child(-n+2){white-space:nowrap}</style>
+<h3 id="appendix-versions">A.1 实际 tag 与完整源码 commit</h3>
+<div class="appendix-scroll"><table id="appendix-version-table"><thead><tr><th>产品</th><th>实际源码 tag</th><th>完整 commit</th><th>构建物 / 版本注意事项</th></tr></thead><tbody>
+<tr><td>DataSystem</td><td><b>v0.9.2.rc44</b></td><td><code>2ff37e2f7c5fb45f3feea7c3fb969b8f84b920d6</code></td><td>Release Worker + CPython 3.11 wheel。2026-10-20 原版本查询时未找到正式 v0.9.2 tag，采用当时该系列最新 rc44，不能标为 final。<a href="builds/datasystem.json">构建记录</a></td></tr>
+<tr><td>Mooncake</td><td><b>v0.3.13.post1</b></td><td><code>719735896c86b56fabec6cf3e825fb2ea640597a</code></td><td>Store / classic Transfer Engine TCP。本 tag 内部包版本为 <b>0.3.12.post1</b>，产物为 <code>mooncake_transfer_engine-0.3.12.post1-cp311-cp311-linux_x86_64.whl</code>；源码身份按 tag + commit 固定。<a href="builds/mooncake.json">构建记录</a></td></tr>
+<tr><td>LMCache</td><td><b>v0.5.6</b></td><td><code>3e11e10812b448142c6cdb177a3058652bd826fa</code></td><td>CPU 版本，编译 lmcache_native / lmcache_fs / lmcache_redis 三个 C++ 扩展；未使用 NO_NATIVE_EXT=1 跳过本体编译。<a href="builds/lmcache.json">构建记录</a></td></tr>
+</tbody></table></div>
+<p class="appendix-note">这些是本次实验锁定的版本，不表示阅读时仍是最新 release。后续 TCP 与批量实验复用这三份构建物并复核 SHA，没有重新编译。三产品跟踪源码未修改。</p>
+<h3 id="appendix-build">A.2 如何构建：环境 → 源码校验 → 本体编译 → 安装</h3>
+<p>构建节点：tiantiyun-80c128g，x86_64 / CentOS Stream 9；私有 CPython <b>3.11.15</b>、各产品独立 venv。以下是可重放的核心命令，依赖安装、锁文件与完整参数见下载配方；需先准备相应工具链和开发依赖。</p>
+<div class="appendix-scroll"><table><thead><tr><th>产品</th><th>实际工具链</th><th>构建模式 / 关闭项</th><th>历史构建保存区间墙钟</th></tr></thead><tbody>
+<tr><td>DataSystem</td><td>GCC 11.5.0 / CMake 3.31.8</td><td>CMake Release；最多 8 个构建任务；Python SDK 开启；完整参数如下。</td><td>1421.745 秒</td></tr>
+<tr><td>Mooncake</td><td>GCC Toolset 15 / g++ 15.2.1，C++20</td><td>Release；CUDA、TENT、ETCD、Rust Store、测试、示例、benchmark 关闭；HTTP 编译能力保留。</td><td>729.546 秒（含失败配置尝试）</td></tr>
+<tr><td>LMCache</td><td>g++ 11.5.0 / CPU PyTorch 2.13.0+cpu</td><td>NO_GPU_EXT=1；MAX_JOBS=4；保留 CPU 原生扩展。</td><td>62 秒；其中 uv 报告 wheel 编译步骤 53.86 秒</td></tr>
+</tbody></table></div>
+<p>墙钟保存区间包含等待及阶段操作，三者当时有并行重叠，不能相加或据此排名编译速度。Python、PyTorch、ETCD 和系统依赖不全部从源码构建；ETCD 使用现有 3.5.9 二进制。</p>
+<details open><summary>DataSystem：源码校验与构建命令</summary><pre><code>git clone --depth 1 --branch v0.9.2.rc44 \
+  https://gitcode.com/openeuler/yuanrong-datasystem.git datasystem
+cd datasystem
+test "$(git rev-parse HEAD)" = 2ff37e2f7c5fb45f3feea7c3fb969b8f84b920d6
+export DS_OPENSOURCE_DIR=/path/to/private-thirdparty-cache
+PYTHON_ROOT=/path/to/cpython-3.11.15-linux-x86_64-gnu
+bash build.sh -b cmake -r -X off -M off -A off \
+  -P "$PYTHON_ROOT" -t off -j 8
+tar -xzf output/yr-datasystem-v0.9.2.tar.gz -C output
+"$PYTHON_ROOT/bin/python3.11" -m venv .venv
+.venv/bin/python -m pip install --force-reinstall --no-deps output/*.whl</code></pre>
+<p>首次构建在 Python 尚未就绪时使用 <code>-P on</code>，随后在主 configure 前通过 Python3_ROOT_DIR / Python3_EXECUTABLE 指向 3.11.15；重放配方直接传解释器目录。grpc 第三方预构建首次出现动态库搜索问题，主 configure 按依赖顺序自动重试成功，没有修改产品源码。<a href="build-appendix/datasystem-build.sh">完整重放配方</a></p></details>
+<details><summary>Mooncake：Release TCP / CPU wheel 构建命令</summary><pre><code>git clone --depth 1 --branch v0.3.13.post1 \
+  https://github.com/kvcache-ai/Mooncake.git source
+test "$(git -C source rev-parse HEAD)" = 719735896c86b56fabec6cf3e825fb2ea640597a
+# 先准备 CPython 3.11.15 venv、Python 构建依赖；xxHash 0.8.3 源码安装至私有 prefix
+export CMAKE_PREFIX_PATH=/path/to/mooncake/deps
+export CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc
+export CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++
+export CMAKE_BUILD_PARALLEL_LEVEL=8
+export CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUG_SYMBOLS=OFF -DWITH_STORE_RUST=OFF -DUSE_CUDA=OFF -DUSE_TENT=OFF -DUSE_ETCD=OFF -DUSE_HTTP=ON -DSTORE_USE_ETCD=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF'
+venv/bin/python -m pip wheel ./source --no-deps --no-build-isolation \
+  --wheel-dir wheels --verbose
+venv/bin/python -m pip install --force-reinstall --no-deps wheels/*.whl</code></pre>
+<p>首次 USE_HTTP=OFF 编译因 MetadataStoragePlugin 不完整类型失败，恢复上游默认 USE_HTTP=ON 后成功；运行时仍关闭 HTTP metadata server，二者含义不同。xxHash 0.8.3 从固定归档构建，io_uring 可选依赖未启用。<a href="build-appendix/mooncake-build.sh">完整重放配方</a></p></details>
+<details><summary>LMCache：CPU 依赖与原生扩展编译命令</summary><pre><code>git clone --depth 1 --branch v0.5.6 \
+  https://github.com/LMCache/LMCache.git source
+test "$(git -C source rev-parse HEAD)" = 3e11e10812b448142c6cdb177a3058652bd826fa
+# 用 CPython 3.11.15 创建 venv311；uv / venv 已准备
+uv pip install --python venv311/bin/python torch==2.13.0 \
+  --index-url https://download.pytorch.org/whl/cpu
+# 安装 source/requirements/build.txt 和排除 torch 的 common.txt；完整步骤见配方
+export NO_GPU_EXT=1 MAX_JOBS=4
+uv pip install --python venv311/bin/python --no-build-isolation --no-deps --editable source
+venv311/bin/python -c 'import lmcache.lmcache_native, lmcache.lmcache_fs, lmcache.lmcache_redis'</code></pre>
+<p>CPU PyTorch 是二进制依赖，未源码编译 PyTorch。当前完整重放配方使用 uv 0.11.19 引导 3.11.15；首次构建使用 uv 0.9.4 及已准备好的解释器，这一后续引导修正没有重写历史构建记录。<a href="build-appendix/lmcache-build.sh">完整重放配方</a></p></details>
+<h3 id="appendix-runtime">A.3 关键运行配置：旧 TCP 与后续纯 KV 分开列示</h3>
+<div class="appendix-scroll"><table><thead><tr><th>产品 / 项目</th><th>旧单 key TCP 页面实际配置</th><th>R7 批量 pure-kv 实际配置</th></tr></thead><tbody>
+<tr><td>共同资源与拓扑</td><td colspan="2">同节点两个服务端点；服务端总额度 8 CPU / 12 GiB，客户端 8 CPU / 12 GiB，监控 2 CPU / 1 GiB；cgroup 独立 CPU / NUMA，swap=0；TCP，单次只压一个产品。两实例的控制面和路由语义不同，不宣称完全同构。</td></tr>
+<tr><td>DataSystem 内存与线程</td><td colspan="2"><code>shared_memory_size_mb=4096</code>/worker；<code>oc_thread_num=8</code>、<code>brpc_server_num_threads=8</code>、<code>brpc_max_concurrency=128</code>。这里 4 GiB 是 Worker 数据池容量，不代表通过 SHM 传输。</td></tr>
+<tr><td>DataSystem 传输与缓存</td><td colspan="2"><code>ipc_through_shared_memory=false</code>；<code>enable_rdma=false</code>、<code>enable_urma=false</code>；<code>l2_cache_type=none</code>、<code>spill_directory=''</code>、<code>spill_size_limit=0</code>；SDK <code>enable_local_cache=False</code>，使用路由式 KV SDK。</td></tr>
+<tr><td>DataSystem RocksDB / stream</td><td><b>未显式关闭</b> RocksDB / stream；两个 Worker 未显式隔离默认 RocksDB 目录，因此旧 DataSystem 性能不能作为隔离公平基线。</td><td><code>rocksdb_write_mode=none</code>；<code>sc_regular_socket_num=0</code>、<code>sc_stream_socket_num=0</code>；每 Worker 独立 fresh <code>rocksdb_store_dir</code>。无 DB/MANIFEST/SST/WAL 制品；仍有普通 eviction 状态文件，不声称零 IO 或零 Rocks 库初始化。</td></tr>
+<tr><td>DataSystem 观测开关</td><td><code>log_monitor=false</code>、<code>minloglevel=2</code>；未使用后续 pure-kv 的全部关闭项。</td><td>再关闭 <code>json_log_monitor</code>、<code>enable_perf_trace_log</code>；<code>request_sample_rate=0</code>、<code>access_sample_rate=0</code>；SDK monitor/perf trace 关闭、ERROR 保留。未找到 SDK JSON monitor 的官方环境开关，不宣称已关闭。</td></tr>
+<tr><td>Mooncake 数据与元数据</td><td colspan="2">classic <code>tcp</code> / <code>P2PHANDSHAKE</code>；每 peer 4 GiB segment，128 MiB local buffer；client store capacity=0；<code>MC_STORE_LOCAL_HOT_CACHE_SIZE=0</code>、<code>MC_STORE_MEMCPY=0</code>；master <code>rpc_thread_num=4</code>。关闭 HA、offload、HTTP metadata server、oplog，dynamic replication=off。</td></tr>
+<tr><td>Mooncake TCP 容量</td><td>未覆盖队列参数；锁定源码默认 queue=1024、pending=1024、lanes=4、admission=1000ms。</td><td><code>MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=8192</code>、<code>MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=8192</code>；<code>MC_TCP_LANES_PER_PEER=4</code>、<code>MC_TCP_ADMISSION_TIMEOUT_MS=1000</code>；所有 B 使用同一组值。</td></tr>
+<tr><td>Mooncake 后台特性</td><td>未使用后续 pure-kv 关闭集，不把 ERROR 日志级别当作 metrics 等已关闭。</td><td>store/TE metrics 关闭；<code>enable_metric_reporting=false</code>、snapshot/restore、disk eviction、KV events、多租户、offload_on_evict/force_evict、promotion_on_hit 均 false；<code>eviction_ratio=0</code>、<code>eviction_high_watermark_ratio=1</code>；checksum=false。admin listener / 必需后台循环保留。</td></tr>
+<tr><td>LMCache CPU / TCP</td><td colspan="2">CPU MP <code>engine_driven</code> + pickle/TCP；<code>--l1-size-gb 4</code>/server、<code>--chunk-size 1</code>、<code>--shm-name ''</code>、<code>--no-l1-use-lazy</code>、<code>--worker-reap-timeout-seconds 0</code>；不配置磁盘 L2。8 GiB 预触页计入资源。</td></tr>
+<tr><td>LMCache 后台特性</td><td><code>--eviction-policy LRU</code>；<code>LMCACHE_LOG_LEVEL=ERROR</code>、<code>LMCACHE_TRACK_USAGE=false</code>；observability / metrics / logging subscribers 沿用默认。</td><td><code>--eviction-policy noop --disable-observability --disable-metrics --disable-logging --kv-event-log-size 0 --coordinator-url ''</code>；<code>LMCACHE_COORDINATOR_EVENT_REPORTING=false</code>。HTTP health frontend 与 1Hz 控制线程保留；本地 P2P EXIST 协议保留。</td></tr>
+</tbody></table></div>
+<p class="appendix-note">R7 配置按纯内存 KV 需求精简，没有穷举全部参数，不能称为全局最优；这些开关未单独做收益归因实验。关闭持久化的配置不用于证明重启恢复能力。本次附录不重新构建或压测，原始数据、ZIP、失败和既有验收收据保持原字节；既有收据描述补充前版本。</p>
+<h3 id="appendix-evidence">A.4 配方、冻结配置与详细证据</h3>
+<p><a href="https://yche.me/perf/kvc-batch-tcp-20261020/docs/build.md">完整构建说明与重放入口</a> · <a href="https://yche.me/perf/kvc-batch-tcp-20261020/docs/configuration-profile.md">pure-kv 配置设计</a> · <a href="build-appendix/tcp-datasystem-runtime.py">旧 TCP 冻结启动脚本</a> · <a href="build-appendix/pure-datasystem-worker0.flags">R7 实际 Worker 旗标</a> · <a href="build-appendix/pure-mooncake-launch-master.sh">R7 冻结 master 启动脚本</a> · <a href="build-appendix/pure-lmcache-start-server.sh">R7 冻结 LMCache 启动脚本</a> · <a href="https://yche.me/perf/kvc-fair-20261020/raw-evidence.tar.gz">原始完整构建日志归档</a> · <a href="https://yche.me/perf/kvc-batch-tcp-20261020/index.html#build-appendix">批量报告附录</a></p>
+</section>
