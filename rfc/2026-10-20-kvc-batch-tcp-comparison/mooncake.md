@@ -20,3 +20,13 @@ PUT / UPSERT 在 staging 分配与拷贝后，各调用一次 `Client::BatchPut`
 审查路径未发现固定 key 数上限，不能据此宣称请求无限。批内对象同时占用注册 staging，RPC 和服务端资源仍会限制请求。本实验 B=4096、每 key 1024 bytes，payload 为 4 MiB；默认客户端 staging 为 128 MiB。真实上限与成功率仍由门禁观察。
 
 新 `batch_mooncake.py` 固定单内存副本、零客户端存储容量、TCP；要求 `MC_STORE_MEMCPY=0`、`MC_STORE_LOCAL_HOT_CACHE_SIZE=0`。`write_mode=insert/upsert` 显式选择对应原生 API。输入去重、bytes 长度检查与返回向量检查计入端到端 API 延迟，metadata 保留这一边界。17 项本地 fake-native fixture 证明四种 B 各调用一次批量入口、错误不触发单 key 回退及部分成功保持未知；这些 fixture 不代表真实产品性能或运行成功。
+
+## 默认配置与批量容量配置的边界
+
+锁定源码的 TCP 默认值为每 peer 4 lanes、1024 queued transfers、1024 pending admissions、1000 ms admission timeout；queue 和 pending 可通过原生环境变量修改，上限均为 65535。[默认值与环境变量解析](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp#L301-L338)。直接队列已满时会尝试 pending admission，pending 也满时存在拒绝路径；这是可能导致批量传输失败的源码机制。[接纳路径](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport_lane_impl.h#L581-L595)。
+
+默认 r2 的带跟踪 B4096 门禁出现过 GET 空结果和 `TRANSFER_FAIL`；之后独立无跟踪 C1 诊断通过，仍未证明 C8 稳定性。默认 C8 smoke 随后又在 B4096 UPSERT 预热出现 `-800 / TRANSFER_FAIL`。这些失败、诊断和命令原始边界单独保留，不能删除失败后把独立诊断写成原门禁成功，也不能归入正式性能重复。
+
+r3 主矩阵使用新的冻结配置：仅将 `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER` 和 `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER` 设为 8192，所有 B 与重复保持一致；lanes、timeout、CPU、内存、原生制品与 API 实现保持原实验边界。它是容量适配后的独立配置，不能当作默认参数性能。完整门禁和 C8 smoke 仍须分别通过后才可进入正式矩阵。
+
+独立 default / queue8192 机制诊断的成功率差异只说明这两个已执行配置的观测结果。尚未捕获明确 queue-full / rejection reason counter，因此报告不能宣称已确认 `QUEUE_FULL` 根因，也不能把诊断耗时或吞吐增加为第四轮正式性能结果。历史执行的 helper 原件与当前报告工具分别归档，原始 JSON、错误和日志保留于 raw evidence。

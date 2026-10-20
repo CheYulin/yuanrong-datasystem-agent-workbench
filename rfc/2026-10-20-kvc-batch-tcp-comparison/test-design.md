@@ -2,7 +2,11 @@
 
 ## 3.1 固定矩阵
 
-主矩阵使用独立 r3 容量适配 profile：Mooncake per-peer queued/pending 均8192，lane 与 admission timeout 原值，全部 B 使用同一配置；DS/LM 及三方 cgroup/并发/协议/数据量均不变。默认 r2 下带跟踪门禁和 C8 无跟踪 smoke 的实际失败单列为诊断证据，不记为主矩阵的性能重复。
+主矩阵使用独立 r5 profile：Mooncake per-peer queued/pending 均8192，lane=4、admission timeout=1000ms显式固定为锁定源码默认值，全部 B 使用同一配置；DataSystem 各 Worker 使用独立新 RocksDB 目录。三方 cgroup/并发/TCP/对象大小保持相同。默认 r2 失败、r3 共享目录正式失败和 r4 旧协议预检分别保留，不记为 r5 性能重复。
+
+每个产品/重复先运行独立 READ 服务周期，只预置65536 keys/64MiB，在四档 B 上测 UPSERT/GET/EXIST，再停止并排空服务。随后每个支持的 B 分别启动全新服务周期，预置同一65536-key池，固定预热32768新keys/32MiB并完整读回，再测262144新keys/256MiB fresh PUT；测前驻留98304 keys/96MiB，所有 B 和支持产品相同。各PUT周期之间以及PUT与READ之间不累计数据。LM 不支持的 PUT 槽保持 N/A，不通过逐 key setup补造批量性能。
+
+正式共9个产品/重复组、36个服务周期；每个周期独立记录启动/停止/排空、起止与 SDK 窗口归属。READ首个支持的操作执行预置，其余复用该池；每个PUT周期都重新预置。初始化、固定量PUT预热、后验校验与关闭不进入 SDK 吞吐窗口。PUT 的固定量预热与其它操作3秒预热是两种明确不同的准备合同。
 
 每 key 1 KiB；B=1/16/256/4096；8 个独立客户端，各 endpoint 4 个；3 轮产品顺序依次 DS→Moon→LM、Moon→LM→DS、LM→DS→Moon。每轮各产品用相同的批量顺序；批量顺序按轮旋转。产品服务每轮启动一次，跨 B 保持热工作集，并明确这不是每格冷启动实验。
 

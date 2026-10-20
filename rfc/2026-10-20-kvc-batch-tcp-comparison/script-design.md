@@ -12,6 +12,7 @@ python3 scripts/experiments/kvc-fair/batch_workflow.py tcp-audit
 python3 scripts/experiments/kvc-fair/batch_workflow.py run
 python3 scripts/experiments/kvc-fair/batch_workflow.py restore
 python3 scripts/experiments/kvc-fair/batch_workflow.py collect
+python3 scripts/experiments/kvc-fair/batch_workflow.py resource-audit
 python3 scripts/experiments/kvc-fair/batch_workflow.py report
 python3 scripts/experiments/kvc-fair/batch_workflow.py publish
 ```
@@ -40,7 +41,7 @@ python3 scripts/experiments/kvc-fair/batch_workflow.py publish
 
 `batch_compose_gate.py` 只组合已完成的正确性证据：严格核对全部冻结输入/构建物、10份组件JSON及原生能力/完整步骤，生成新 `batch-gate-002`，保留组件路径/SHA/实际起止/原失败summary；组合本身耗时2.118175008s，不伪称重跑。r2 后续 smoke 显式使用 `--gate batch-gate-002`，仍在 C8/B4096 更新失败；正式性能测量无 strace。原 gate 与诊断的成功均不充当正式重复。
 
-这条失败链只用于独立复盘：全新目录 `stage --mooncake-queue 0`，失败 gate 后执行 `diagnose`，再执行 `compose --gate batch-gate-002`、`smoke --gate batch-gate-002`；每条命令均传同一组新的 root/environment/local 参数。不要在成功的 r3 上调用这条分支，也不要覆盖已存在的 gate。当前 r3 主矩阵门禁、C8 smoke 均通过，使用原始 `batch-gate-001`，无需组合。
+这条失败链只用于独立复盘：全新目录 `stage --mooncake-queue 0`，失败 gate 后执行 `diagnose`，再执行 `compose --gate batch-gate-002`、`smoke --gate batch-gate-002`；每条命令均传同一组新的 root/environment/local 参数，不要覆盖已存在的 gate。当前主矩阵从 r4 全新目录重新执行，使用原始 `batch-gate-001`，无需组合。r3 的 gate/smoke 虽通过，正式首轮仍因 RPC 超时失败，随后发现双 Worker 默认共享 RocksDB 目录；完整失败原件另列 `history/shared-rocksdb-r3`，不并入 r4 重复。
 
 本次 composer 真实执行源码 SHA 为 `4d0bba088f8de1cc0039ada8d997af9d0528b65b37774c1e9b5a095d03721bbf`；后续 canonical 版本仅补 helper 快照归档，不能把新版哈希标为旧执行源码。诊断真实源码 SHA 为 `393b16235fd633658feaa7f10df7e91c155f893ea8f4f46124b371a2169dda3a`。收集阶段需另取这两个外部 helper 原件，和 stage 文件列表分开校验。
 

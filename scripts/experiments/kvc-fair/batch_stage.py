@@ -70,6 +70,9 @@ def stage(args):
                 if product["name"] == "mooncake" and getattr(args, "mooncake_queue", 0):
                     for name in ["MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER"]:
                         product["env"][name] = str(args.mooncake_queue)
+                if product["name"] == "mooncake":
+                    product["env"]["MC_TCP_LANES_PER_PEER"] = "4"
+                    product["env"]["MC_TCP_ADMISSION_TIMEOUT_MS"] = "1000"
                 (temporary / "configs" / (product["name"] + ".json")).write_text(json.dumps(config, indent=2) + "\n")
             (temporary / "products.json").write_text(json.dumps(manifest, indent=2) + "\n")
             shutil.copytree(base / "formal-tcp-001/builds", temporary / "builds")
@@ -96,7 +99,7 @@ def stage(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base", type=Path, default=Path("/home/worktrees/kvc-fair-tcp-20261020"))
-    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r4"))
+    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r5"))
     p.add_argument("--mooncake-queue", type=int, default=8192)
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))

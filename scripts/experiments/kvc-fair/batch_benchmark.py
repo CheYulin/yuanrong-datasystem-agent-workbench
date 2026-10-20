@@ -62,15 +62,19 @@ def worker(index, args, connection):
                 return adapter.get_batch(request_keys)
             return adapter.exists_batch(request_keys)
         if args["op"] == "put":
-            invoke(0, phase="warm")
-            exact(0, batch, "warm")
+            warm_keys = args.get("put_warmup_keys", 32768) // args["concurrency"]
+            for offset in range(0, warm_keys, batch):
+                invoke(offset, phase="warm")
+                exact(offset, batch, "warm")
         else:
             warm_end = time.monotonic() + args["warmup"]
             i = 0
             while time.monotonic() < warm_end:
                 invoke(i * batch % pool, phase="absent" if args["op"] == "exist_miss" else "pool")
                 i += 1
-        connection.send({"warm": True, "client": index})
+        connection.send({"warm": True, "client": index,
+                         "put_inserted_keys": warm_keys if args["op"] == "put" else 0,
+                         "put_verified_keys": warm_keys if args["op"] == "put" else 0})
         start = connection.recv()["start_ns"]
         stop = start + int(args["duration"] * 1e9)
         while time.monotonic_ns() < start:
@@ -169,15 +173,16 @@ def main():
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--pool-keys", type=int, default=65536)
     p.add_argument("--put-keys", type=int, default=262144)
+    p.add_argument("--put-warmup-keys", type=int, default=32768)
     p.add_argument("--duration", type=float, default=20)
     p.add_argument("--warmup", type=float, default=3)
     p.add_argument("--skip-preload", action="store_true")
     p.add_argument("--run-id", required=True)
     p.add_argument("--out", required=True)
     args = vars(p.parse_args())
-    if any(args[k] <= 0 for k in ["batch", "size", "concurrency", "pool_keys", "put_keys", "duration"]):
+    if any(args[k] <= 0 for k in ["batch", "size", "concurrency", "pool_keys", "put_keys", "put_warmup_keys", "duration"]):
         p.error("positive workload parameters required")
-    if any(args[k] % (args["batch"] * args["concurrency"]) for k in ["pool_keys", "put_keys"]):
+    if any(args[k] % (args["batch"] * args["concurrency"]) for k in ["pool_keys", "put_keys", "put_warmup_keys"]):
         p.error("key pools must be divisible by concurrency * batch")
     ctx = mp.get_context("spawn")
     processes, connections = [], []

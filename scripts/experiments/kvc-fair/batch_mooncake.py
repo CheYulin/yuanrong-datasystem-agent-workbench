@@ -39,7 +39,7 @@ class MooncakeBatchAdapter:
             "local_buffer_size": local_buffer_size, "value_size": self.value_size,
             "tcp_queue_env": {name: os.environ.get(name) for name in [
                 "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER",
-                "MC_TCP_ADMISSION_TIMEOUT_MS"]},
+                "MC_TCP_ADMISSION_TIMEOUT_MS", "MC_TCP_LANES_PER_PEER"]},
             "write_mode": mode, "validation_in_api_timing": True,
             "capabilities": {"put_batch": True, "get_batch": True, "exists_batch": True},
             "native_api": {"put_batch": self.native_write, "get_batch": "get_batch", "exists_batch": "batch_is_exist"},

@@ -319,6 +319,7 @@ class AdmissionTests(unittest.TestCase):
                        "stop": ["/fixture/stop", name]}
                 for name in ["datasystem", "mooncake", "lmcache"]}
             runner.event = lambda *args, **kwargs: None
+            runner.epochs_completed = []
             run_ids = []
 
             def execute(argv, log, env, timeout=1200):
@@ -330,8 +331,10 @@ class AdmissionTests(unittest.TestCase):
             runner.execute = execute
             with patch.object(batch_runner, "drain", return_value={}), patch.object(batch_runner.time, "sleep"):
                 for number, name in enumerate(runner.products, 1):
+                    spec = {"batch": 16, "operation": "exist_hit", "supported": True, "epoch": "read"}
                     runner.lifecycle({"repeat": 0, "product": name,
-                                      "operations": [{"batch": 16, "operation": "get", "supported": True}]}, number)
+                                      "operations": [spec],
+                                      "epochs": [{"id": "read", "kind": "read", "operations": [spec]}]}, number)
             self.assertEqual(len(run_ids), 3)
             self.assertEqual(len(set(run_ids)), 1, "same repeat requires identical key bytes across products")
 

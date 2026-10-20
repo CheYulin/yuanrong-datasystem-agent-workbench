@@ -17,6 +17,7 @@ from profile_put import atomic_json, digest, drain, stop_process, utc
 CGROUP = Path("/sys/fs/cgroup/kvcfair20261020")
 BATCHES = [1, 16, 256, 4096]
 OPS = ["put", "upsert", "get", "exist_hit", "exist_miss"]
+PROTOCOL = "separate-read-and-fresh-put-v1"
 
 
 def supported(product, batch, op):
@@ -30,9 +31,18 @@ def plan(repeats):
         order = products[repeat % 3:] + products[:repeat % 3]
         batches = BATCHES[repeat % 4:] + BATCHES[:repeat % 4]
         for product in order:
+            operations = [{"batch": b, "operation": op, "supported": supported(product, b, op),
+                           "epoch": "read" if op != "put" else f"put-b{b}"}
+                          for b in batches for op in OPS[1:]]
+            operations += [{"batch": b, "operation": "put", "supported": supported(product, b, "put"),
+                            "epoch": f"put-b{b}"} for b in batches]
+            epochs = []
+            for name in ["read", *[f"put-b{b}" for b in batches]]:
+                members = [spec for spec in operations if spec["epoch"] == name and spec["supported"]]
+                if members:
+                    epochs.append({"id": name, "kind": "read" if name == "read" else "fresh_put", "operations": members})
             rows.append({"repeat": repeat, "product": product, "batches": batches,
-                         "operations": [{"batch": b, "operation": op, "supported": supported(product, b, op)}
-                                        for b in batches for op in OPS]})
+                         "workload_protocol": PROTOCOL, "operations": operations, "epochs": epochs})
     return rows
 
 
@@ -48,7 +58,9 @@ class Runner:
             if digest(self.root / name) != row["sha256"]:
                 raise RuntimeError("Frozen stage input changed: " + name)
         atomic_json(self.out / "batch-stage.json", stage)
-        atomic_json(self.out / "parameters.json", {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()})
+        parameters = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
+        parameters["workload_protocol"] = PROTOCOL
+        atomic_json(self.out / "parameters.json", parameters)
         atomic_json(self.out / "products.json", list(self.products.values()))
 
     def event(self, kind, **details):
@@ -75,21 +87,46 @@ class Runner:
                        duration_s=(time.monotonic_ns() - mono) / 1e9, returncode=rc)
 
     def lifecycle(self, row, number):
-        product = self.products[row["product"]]
         cell = self.out / f"r{row['repeat']}-{row['product']}"
         cell.mkdir()
-        variables = {"run_dir": str(self.root / "run" / (self.args.action + "-" + cell.name)),
-                     "server_logs": str(cell / "server-logs")}
+        self.event("group_start", group=cell.name, number=number)
+        if self.args.action == "gate":
+            self.epoch(row, cell, {"id": "gate", "kind": "correctness", "operations": []})
+        else:
+            for spec in row["operations"]:
+                if not spec["supported"]:
+                    atomic_json(cell / f"b{spec['batch']}-{spec['operation']}.json",
+                                {"product": row["product"], "repeat": row["repeat"],
+                                 "batch": spec["batch"], "operation": spec["operation"], "status": "not_supported",
+                                 "reason": "No equivalent native independent-key batch CPU TCP API in pinned release"})
+            for epoch in row["epochs"]:
+                self.epoch(row, cell, epoch)
+        self.event("group_complete", group=cell.name)
+        return cell.name
+
+    def epoch(self, row, cell, epoch):
+        product = self.products[row["product"]]
+        is_gate = self.args.action == "gate"
+        directory = cell if is_gate else cell / "epochs" / epoch["id"]
+        directory.mkdir(parents=True, exist_ok=True)
+        suffix = "" if is_gate else "-" + epoch["id"]
+        variables = {"run_dir": str(self.root / "run" / (self.args.action + "-" + cell.name + suffix)),
+                     "server_logs": str(directory / "server-logs")}
         variables["runtime_dir"] = variables["run_dir"]
         env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", PYTHONHASHSEED="0",
                    **{k: v.format(**variables) for k, v in product.get("env", {}).items()})
         start = [v.format(**variables) for v in product["start"]]
         stop = [v.format(**variables) for v in product["stop"]]
-        self.event("group_start", group=cell.name, number=number)
+        epoch_identity = cell.name + "/" + epoch["id"]
+        ledger = {"identity": epoch_identity, "kind": epoch["kind"], "operations": epoch["operations"],
+                  "run_dir": variables["run_dir"], "workload_protocol": PROTOCOL,
+                  "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(), "valid": False}
+        self.event("epoch_start", group=cell.name, epoch=epoch["id"], run_dir=variables["run_dir"], epoch_kind=epoch["kind"])
+        completed = False
         try:
             drain(CGROUP, ["server", "client"])
-            self.execute(stop, cell / "lifecycle.log", env, 180)
-            self.execute(start, cell / "lifecycle.log", env, 180)
+            self.execute(stop, directory / "lifecycle.log", env, 180)
+            self.execute(start, directory / "lifecycle.log", env, 180)
             time.sleep(2)
             if self.args.action == "gate":
                 if row["product"] == "datasystem":
@@ -120,14 +157,11 @@ class Runner:
                             raise RuntimeError("Native batch gate did not pass")
             else:
                 preloaded = False
-                for spec in row["operations"]:
+                for spec in epoch["operations"]:
                     batch, op = spec["batch"], spec["operation"]
                     output = cell / f"b{batch}-{op}.json"
                     if not spec["supported"]:
-                        atomic_json(output, {"product": row["product"], "repeat": row["repeat"],
-                                             "batch": batch, "operation": op, "status": "not_supported",
-                                             "reason": "No equivalent native independent-key batch CPU TCP API in pinned release"})
-                        continue
+                        raise RuntimeError("Unsupported operations must not enter a service epoch")
                     command = ["python3", str(self.root / "cgroup.py"), "--group", "client", "exec", "--",
                                product["python"], str(self.root / "batch_benchmark.py"),
                                "--adapter", product["adapter"], "--config", product["config"], "--op", op,
@@ -136,25 +170,36 @@ class Runner:
                                "--warmup", str(self.args.warmup), "--put-keys", str(self.args.put_keys)]
                     if preloaded:
                         command.append("--skip-preload")
-                    self.event("measure_prepare", group=cell.name, batch=batch, operation=op)
+                    self.event("measure_prepare", group=cell.name, epoch=epoch["id"], batch=batch, operation=op)
                     self.execute(command, output.with_suffix(".log"), env)
                     raw = json.loads(output.read_text())
                     if not raw.get("valid"):
                         raise RuntimeError("Invalid batch result " + str(output))
                     preloaded = True
-                    self.event("measure_complete", group=cell.name, batch=batch, operation=op,
+                    self.event("measure_complete", group=cell.name, epoch=epoch["id"], batch=batch, operation=op,
                                success=raw["success"], keys_s=raw["keys_s"], duration_s=raw["duration_s"])
-            self.event("group_complete", group=cell.name)
-            return cell.name
+            completed = True
         finally:
-            self.execute(stop, cell / "lifecycle.log", env, 180)
-            drain(CGROUP, ["server", "client"], timeout=10)
+            try:
+                self.execute(stop, directory / "lifecycle.log", env, 180)
+                ledger["drained"] = drain(CGROUP, ["server", "client"], timeout=10)
+                ledger["valid"] = completed
+            finally:
+                ledger.update(end_wall_ns=time.time_ns(), end_mono_ns=time.monotonic_ns())
+                ledger["duration_s"] = (ledger["end_mono_ns"] - ledger["start_mono_ns"]) / 1e9
+                atomic_json(directory / "epoch-summary.json", ledger)
+                self.event("epoch_complete", group=cell.name, epoch=epoch["id"], valid=ledger["valid"], duration_s=ledger["duration_s"])
+        self.epochs_completed.append(epoch_identity)
 
     def run(self):
         rows = plan(1 if self.args.action == "gate" else self.args.repeats)
         atomic_json(self.out / "plan.json", rows)
+        expected_epochs = [f"r{row['repeat']}-{row['product']}/" + epoch["id"] for row in rows
+                           for epoch in ([{"id": "gate"}] if self.args.action == "gate" else row["epochs"])]
+        self.epochs_completed = []
         summary = {"started": utc(), "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(),
-                   "completed": [], "failed": [], "profile": "native-batch-tcp", "action": self.args.action}
+                   "completed": [], "failed": [], "profile": "native-batch-tcp", "action": self.args.action,
+                   "workload_protocol": PROTOCOL, "epochs_expected": expected_epochs, "epochs_completed": self.epochs_completed}
         monitor = interference = None
         try:
             if self.args.action != "gate":
@@ -196,7 +241,8 @@ class Runner:
                 summary["drained"] = drain(CGROUP)
             except BaseException:
                 summary["failed"].append(traceback.format_exc())
-            summary["valid"] = len(summary["completed"]) == len(rows) and not summary["failed"] and summary.get("monitor_exit", 0) == 0 and summary.get("interference_exit", 0) == 0
+            summary["valid"] = (len(summary["completed"]) == len(rows) and self.epochs_completed == expected_epochs
+                                and not summary["failed"] and summary.get("monitor_exit", 0) == 0 and summary.get("interference_exit", 0) == 0)
             atomic_json(self.out / "summary.json", summary)
             self.event("suite_complete", valid=summary["valid"], completed=len(summary["completed"]), duration_s=summary["duration_s"])
         return 0 if summary["valid"] else 1

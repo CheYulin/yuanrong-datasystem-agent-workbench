@@ -9,6 +9,7 @@ const base=process.env.QA_URL||'http://127.0.0.1:18768/index.html';
 const output=process.env.QA_OUT||'/tmp/kvc-batch-qa';
 await fs.mkdir(output,{recursive:true});
 const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||'/home/t14s/.cache/puppeteer/chrome/linux-148.0.7778.97/chrome-linux64/chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+const startedMono=process.hrtime.bigint();
 const report={url:base,started:new Date().toISOString(),checks:[],viewports:[],errors:[]};
 const check=(name,pass,details={})=>{report.checks.push({name,pass,...details});};
 const near=(a,b)=>a===b||Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=Math.max(1,Math.abs(b))*1e-10;
@@ -119,5 +120,5 @@ try {
     await context.close();
   }
 }catch(error){report.errors.push(String(error.stack||error));}
-finally{await browser.close();report.ended=new Date().toISOString();report.passed=report.errors.length===0&&report.checks.every(c=>c.pass);await fs.writeFile(path.join(output,'qa.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({passed:report.passed,checks:report.checks.length,failed:report.checks.filter(c=>!c.pass),errors:report.errors}));}
+finally{await browser.close();report.ended=new Date().toISOString();report.duration_s=Number(process.hrtime.bigint()-startedMono)/1e9;report.passed=report.errors.length===0&&report.checks.every(c=>c.pass);await fs.writeFile(path.join(output,'qa.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({passed:report.passed,checks:report.checks.length,failed:report.checks.filter(c=>!c.pass),errors:report.errors}));}
 process.exitCode=report.passed?0:1;

@@ -38,3 +38,21 @@
 同冻结r2输入的queue-capacity-diagnostic-001共96.501955708s，default native_valid=false、queue8192 native_valid=true；两组均完成、清理成功。仅客户端声明GLOG1，旧server env.sh仍可设置2；未观察到明确QUEUE_FULL/rejection日志，不能把generic TRANSFER_FAIL直接写成已定位的queue-full。首版实际probe源码SHA为ec0b735a63c6f44d9125132b3d2ed19f8bbd1c0714179fb05ff6aa0dd3b405d4，原件在probe-source.py；canonical8e9后补静态controls与目录复用保护，后续复现使用，不能冒称本次执行源码。
 
 严格TCP离线补验以同case/version0任一完整1KiB payload、正确方向/endpoint/窗口、正返回实际字节范围和整批TCP字节下限为合同，16/16组合（32方向）通过，耗时15.667086592s。旧key0未捕获审计原件不改。新审计SHA0fa183e20cec830a0b1b0b54378786379864ad28e65b130c97a5ffcb49e84a12；不扩大为整批每字节均被跟踪打印证明。
+
+## 5.6 r3 正式执行失败与双 Worker 元数据目录冲突
+
+r3 的真实 gate、smoke 和批量 TCP 审计均通过，具体记录见 [validation.md](validation.md)；它们不证明长窗口不会失败。`formal-batch-001/summary.json` 记录正式尝试于2026-10-20 04:32:12.385088 UTC开始，04:35:46.347239结束，耗时213.962156825秒，`valid=false`、未完成任何整产品组。已产生的8个操作JSON有效，第9个 DataSystem B16 EXIST hit 失败；完整尝试和原件保留，不补成三重复结果。
+
+失败操作测量6.407137609秒，8客户端合计120,419个成功batch后各出现1次 `RPC deadline exceeded`，`worker_rpc_client.cpp:44` 的剩余时间为-121至-234微秒。该错误发生在本地发起RPC前的deadline检查，不能仅凭错误名判断Worker实际等待了10秒或推断队列拥塞。固定rc44的 `object_client_impl.cpp:4915` 每次Exist均建立 `ApiDeadlineGuard(requestTimeoutMs_)`；当前没有证据证明公开入口漏reset，因此不将其定性为产品deadline缺陷。
+
+采集到的 `run/run-r0-datasystem/worker0.stdout.log` 有480,625条Rocks错误，worker1有493,154条，共973,779条（仅这两份stdout中的匹配记录，不重复累计glog副本）。两个不同Worker均访问 `/root/datasystem/rocksdb/object_metadata/000029`：worker0报`.ldb`缺失，worker1报`.sst`预期24,802,172 bytes、实际0。首批错误04:34:37.625/38.293 UTC即已出现，早于EXIST测量失败。
+
+两份实际 `wN/worker.flags` 都未配置 `rocksdb_store_dir`。固定rc44归档源码的 `data_worker.cpp:192–206` 使用同一FLAGS目录做pre-init，`worker_oc_server.cpp:2560–2564` 将该目录直接传入metadata manager。由实际错误路径与启动参数可确认本次两个Worker未隔离元数据目录；这足以否定“每次fresh run连同元数据都独立”的前提。是否它单独解释全部deadline错误，尚须隔离后复核，不扩大根因归属。
+
+最小修复仅在启动脚本给每个Worker显式配置 `<fresh run>/wN/rocksdb`，路径写入manifest，拒绝共享/越界/symlink和旧目录重放；不改产品、不调timeout、不关闭原有元数据写入模式。11项本地回归已验证实际mock launch argv/flagfile/manifest绑定、独立目录与拒绝路径，另用真实sleep进程验证PID/start-ticks保护仍有效。修正配置须使用全新根目录重新gate、C8 smoke和全矩阵，不能将r3前8个成功操作补入新重复。
+
+## 5.7 旧单 key 基线的影响边界
+
+本地保存的native `formal-001/build-and-script-evidence/scripts/datasystem/runtime.py`（SHA256 `78164d670aa604e4557964502bd4f2519d5a824effe40ea894a6de635905b78d`）与TCP `formal-tcp-001` 对应文件（`2f8781437faf4fe90a288062b5e102645766077bf3b6b8d5c25c6d5aa871f459`）同样没有显式RocksDB目录；两份products启动命令也未补该参数。因此旧DS结果不能作为独立元数据目录的公平基线，不应用它们与修正后的batch结果计算收益。
+
+旧成功请求、字节校验、采样和公开页面验收仍是当时实际执行证据，原始结果不改写为零或全部失败；但缺少每格Worker stdout的历史原件，无法从现有本地材料量化旧共享目录的污染范围、偏差方向或幅度。新比较必须明确披露这一限制，并以修正后的同配置B1作为批量大小的基线。
