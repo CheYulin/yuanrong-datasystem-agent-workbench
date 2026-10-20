@@ -44,15 +44,20 @@ raw tar 保留当前 `run/`、根 `batch-stage.json` 和逐项冻结的 `runtime
 所选 API 的文字摘要只使用 B1 与 B4096 的完整三轮中位数，给出 keys/s 比率及所选整批分位数的原 µs；N/A 不推算比率。时间线保留原始边界，完整 suite、外层命令与 SDK 窗口可嵌套，不能相加当作总耗时。`--allow-partial` 仅生成明确标识的部分预览，不能替代最终验收。
 
 ```sh
-batch_local=/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r5
+batch_local=/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r7
 python3 batch_report.py \
-  --suite "$batch_local/formal-batch-001" --out "$batch_local/report" \
+  --suite "$batch_local/formal-batch-001" --out "$batch_local/report-new-render" \
   --rfc ../../../rfc/2026-10-20-kvc-batch-tcp-comparison \
   --builds "$batch_local/builds" --gate "$batch_local/batch-gate-001" \
   --smoke "$batch_local/batch-smoke-001" --environment "$batch_local/environment" \
   --runtime-inputs "$batch_local/runtime-inputs" \
   --history "$batch_local/history/default-r2" \
+  --history "$batch_local/history/protocol-preflight-r4" \
+  --history "$batch_local/history/pure-kv-preflight-r6" \
+  --history "$batch_local/deadline-diagnostic-001" \
+  --history "$batch_local/history/tcp-proof-attempts" \
   --failed-attempts "$batch_local/history/shared-rocksdb-r3" \
+  --failed-attempts "$batch_local/history/native-exist-deadline-r5" \
   --tcp-verification "$batch_local/datasystem-batch-tcp-verification.json" \
   --resource-audit "$batch_local/resource-audit" \
   --deployment-audit "$batch_local/deployment-audit.json" \

@@ -62,7 +62,7 @@ sequenceDiagram
 | batch_resource_audit.py | 只读原采样，分窗口核对CPU限流、memory事件增量、swap与外部进程leader-affinity估计；parent/monitor不与server/client叠加 |
 | batch_deployment_audit.py | 从实际epoch计划推出21次DataSystem启动，核对42个独立DB目录与启动/排空证据，流式扫描RocksDB文件错误并绑定原日志SHA；仅gate有procfs live快照，其余20次明确为启动记录 |
 
-共享状态：每客户端私有 key，无共享 key 写竞争。服务端两服务合计同一固定配额；每轮后由旧版 PID/start-ticks/cmdline 保护的 lifecycle 只停止本任务进程，并确认所有实验 cgroup 排空。异常中止整个组并保留原始失败文件，恢复环境需先确认 cgroup 排空。没有产品源代码改动，没有持久化/故障恢复行为修改；不宣称这些性能用例证明容灾或崩溃一致性。
+共享状态：每客户端私有 key，无共享 key 写竞争。服务端两服务合计同一固定配额；每轮后由 PID/start-ticks/cmdline 保护的 lifecycle 只停止本任务进程，并确认所有实验 cgroup 排空。编排、写入或校验异常中止整个组并保留原始失败文件；正式入口显式启用`--continue-readonly-errors`，仅对正常退出且证据完整的原生GET/EXIST状态码错误记录后继续，其失败仍不进入性能聚合。恢复环境需先确认 cgroup 排空。没有产品源代码改动，没有持久化/故障恢复行为修改；不宣称这些性能用例证明容灾或崩溃一致性。
 
 ## 4.1 默认配置失败历史的门禁分层
 
@@ -70,13 +70,13 @@ sequenceDiagram
 
 `batch_compose_gate.py` 只组合已完成的正确性证据：严格核对全部冻结输入/构建物、10份组件JSON及原生能力/完整步骤，生成新 `batch-gate-002`，保留组件路径/SHA/实际起止/原失败summary；组合本身耗时2.118175008s，不伪称重跑。r2 后续 smoke 显式使用 `--gate batch-gate-002`，仍在 C8/B4096 更新失败；正式性能测量无 strace。原 gate 与诊断的成功均不充当正式重复。
 
-这条失败链只用于独立复盘：全新目录 `stage --mooncake-queue 0`，失败 gate 后执行 `diagnose`，再执行 `compose --gate batch-gate-002`、`smoke --gate batch-gate-002`；每条命令均传同一组新的 root/environment/local 参数，不要覆盖已存在的 gate。当前主矩阵从 r4 全新目录重新执行，使用原始 `batch-gate-001`，无需组合。r3 的 gate/smoke 虽通过，正式首轮仍因 RPC 超时失败，随后发现双 Worker 默认共享 RocksDB 目录；完整失败原件另列 `history/shared-rocksdb-r3`，不并入 r4 重复。
+这条失败链只用于独立复盘：全新目录 `stage --mooncake-queue 0`，失败 gate 后执行 `diagnose`，再执行 `compose --gate batch-gate-002`、`smoke --gate batch-gate-002`；每条命令均传同一组新的 root/environment/local 参数，不要覆盖已存在的 gate。最终R7主矩阵使用自己的原始 `batch-gate-001`，无需组合。r3 的 gate/smoke 虽通过，正式首轮仍因 RPC 超时失败，随后发现双 Worker 默认共享 RocksDB 目录；完整失败原件另列 `history/shared-rocksdb-r3`，不并入后续重复。
 
 本次 composer 真实执行源码 SHA 为 `4d0bba088f8de1cc0039ada8d997af9d0528b65b37774c1e9b5a095d03721bbf`；后续 canonical 版本仅补 helper 快照归档，不能把新版哈希标为旧执行源码。诊断真实源码 SHA 为 `393b16235fd633658feaa7f10df7e91c155f893ea8f4f46124b371a2169dda3a`。收集阶段需另取这两个外部 helper 原件，和 stage 文件列表分开校验。
 
 ## 4.2 容量诊断入口
 
-`batch_queue_probe.py --root <已冻结root> --out <root/全新诊断目录>` 在同一锁和cgroup下，以独立fresh服务串行对default与queue8192做C8/B4096/1KiB更新验证。返回0表示两组均终止并清理成功，不表示default原生调用成功；native_valid逐组保存。该诊断不进入三轮性能重复，参数/环境/原始log/单调耗时/source快照全部留存。新主矩阵使用r3独立root、environment、local-output，默认gate=1；r2失败链全部放history/default-r2，不覆盖或复用其成功性能行。
+`batch_queue_probe.py --root <已冻结root> --out <root/全新诊断目录>` 在同一锁和cgroup下，以独立fresh服务串行对default与queue8192做C8/B4096/1KiB更新验证。返回0表示两组均终止并清理成功，不表示default原生调用成功；native_valid逐组保存。该诊断不进入三轮性能重复，参数/环境/原始log/单调耗时/source快照全部留存。它当时用于选择R3的容量配置，最终R7沿用同一8192值；r2失败链全部放history/default-r2，不覆盖或复用其成功性能行。
 
 ## 4.3 从固定源码构建直达pure-KV，不依赖旧性能基线
 
