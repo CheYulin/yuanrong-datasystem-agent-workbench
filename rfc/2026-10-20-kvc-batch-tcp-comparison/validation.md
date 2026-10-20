@@ -1,22 +1,23 @@
 # 6. 结果验证与最终验收
 
-状态：**In Progress**。r3 原生批量门禁、C8 smoke 和 DataSystem 批量 TCP 载荷审计通过，但随后正式尝试失败，并发现双Worker未隔离RocksDB目录。原件保留；修正目录后的新门禁、正式三重复、性能结论与公开交付均待验收。本文件不把 smoke 数值作为正式性能结果。
+状态：**In Progress**。r5正式尝试在DataSystem B16 EXIST hit失败；r6纯KV真实对照强支持GET/EXIST共享池旧deadline机制，但未直接读TLS。r6门禁在DataSystem通过后因Mooncake脚本权限失败，完整三重复与交付仍未验收。各失败、诊断与通过预检分别保留。
 
 ## 6.1 实际输入与比较边界
 
-本次主配置为 `/home/worktrees/kvc-batch-tcp-20261020-r3`；本地已采集证据根为 `/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r3`。产品复用固定源码构建：DataSystem rc44、Mooncake v0.3.13.post1、LMCache v0.5.6；不是本轮重新编译。r3 Mooncake queued/pending 均为 8192，属于容量适配 profile，不能标为默认配置。
+当前主配置为 `/home/worktrees/kvc-batch-tcp-20261020-r5`，本地证据根为 `/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r5`。协议为 `separate-read-and-fresh-put-v1`，工具阶段提交 `2483b37`；stage记录111项执行输入，最终仍须按采集原件逐SHA绑定。产品复用固定源码构建：DataSystem rc44、Mooncake v0.3.13.post1、LMCache v0.5.6；不是本轮重新编译。Mooncake queued/pending均8192，属于容量适配profile，不能标为默认配置。
 
 | 检查项 | 已确认事实与限制 |
 |---|---|
 | 每次调用的 key 数 | B=1/16/256/4096；DataSystem/Mooncake 调用原生 batch；一次公开 API 不等于一次内部 RPC |
 | 相同实际数据 | 每 key 1,024 bytes、C8；正式 harness 的相同 `run_id/client_index/phase/index` 产生相同 key，payload 由固定 SHAKE256 规则产生，不因产品或 B 改变 |
 | payload 区分度 | 性能工作集每客户端使用四种基础 payload，UPSERT 使用另一组四种 payload；不是每个性能 key 都有独一无二内容。独立 gate 另使用按 key/版本派生的独立 bytes 验证映射和顺序 |
-| 固定热工作集 | 总计 65,536 keys / 64 MiB，每客户端私有 8,192 keys，跨 B 保持同一组 key；GET、UPSERT、EXIST hit 使用该池，EXIST miss 使用独立 absent namespace |
-| fresh PUT | 正式每 B 共 262,144 新 key / 256 MiB；smoke 为 32,768 新 key / 32 MiB。不能把旧 key ACK 当首次插入，也没有隐藏 delete 循环 |
+| 固定热工作集 | 每产品/重复的read epoch仅65,536 keys / 64 MiB，每客户端私有8,192 keys；跨B读同一池，GET/UPSERT/EXIST hit使用该池，EXIST miss用独立absent namespace。read阶段不继承任何fresh PUT数据 |
+| fresh PUT | 每个支持B独立重启双服务和预置同一65,536-key池，再固定预热32,768新keys（每客户端4,096，按实际B原生批写），正式前resident=98,304 keys / 96 MiB。随后正式写262,144新keys / 256 MiB；smoke写32,768新keys / 32 MiB。不同B不累积前序PUT，LM不支持的B不做scalar padding |
 | 更新与后续读 | UPSERT 交替两组真实内容，计时后验证最后版本，并在窗口外完整恢复/读回基础工作集；GET 不应继承未知更新版本 |
 | 资源 | server/client 各 8 CPU、12 GiB，monitor 独立 2 CPU、1 GiB，swap=0；两个服务共用服务配额。原始 cgroup/配置与采样归属仍需随正式结果核验 |
 | 计量 | 吞吐包含同步起点至最晚客户端结束；API 延迟为整个 batch 完成时间，含适配器 O(B) 校验，不能除以 B 后称单 key P99 |
 | LMCache N/A | 仅 B1 支持本次等价 PUT/GET；所有 B 的 UPSERT 和 B>1 的 PUT/GET 明确 N/A。EXIST 为原生 P2P 独立 key 向量，含命中锁释放 ACK 的成本，不是零成本布尔缓存 |
+| 服务epoch | 正式设计9个read启动+27个fresh PUT启动=36个epoch；smoke为12个epoch。DS含gate1、smoke5、正式15，共21次独立集群启动/42个Worker实例；以上为设计数，尚不是已完成数 |
 
 工作负载依据冻结 `batch_benchmark.py` 与 `parameters.json`；能力依据三个 adapter 的 metadata 和 [接口设计](test-design.md)。同 key、同字节、同配额减少输入差异，但不保证各产品内部 RPC 数、锁、分配和复制相同。
 
@@ -63,7 +64,8 @@ r2 的旧 key0-prefix TCP 审计12/16与后续完整 any-key payload 审计16/16
 
 | 验收项 | 当前状态 / 待填证据 |
 |---|---|
-| 正式三重复完整身份 | r3尝试失败：8个有效操作、1个无效操作，整产品组完成数0；需修正目录后重跑。完整设计仍为9产品/重复组、180操作 JSON，其中150支持结果和30 N/A，不是已完成数量 |
+| r5资格验证 | 原生gate147.334149718s、12-epoch smoke534.366434989s通过；TCP旧parser14/16缺口保留，新同syscall相邻iov修正16/16，详见6.8 |
+| 正式三重复完整身份 | r5实际187.310265231s后失败，0完整组/epoch；设计9组、36epoch、180操作JSON（150支持/30 N/A）尚未完整执行，不是已完成数量 |
 | 各操作成功、失败、部分提交未知数 | 待正式原件重算；不将 smoke 的0失败外推至正式结果 |
 | batch/s、key/s、MiB/s与三重复中位数 | 待正式结果；无等价能力不参与排名，不填零 |
 | P50/P99合并桶与低样本提示 | 待核对每客户端 histogram、成功数和时间边界；不能平均客户端 P99 |
@@ -77,3 +79,27 @@ r2 的旧 key0-prefix TCP 审计12/16与后续完整 any-key payload 审计16/16
 正式r3尝试213.962156825秒后失败；DataSystem B16 EXIST hit的8客户端各1个deadline错误，两个Worker此前已出现同一默认RocksDB目录的文件缺失/大小不符错误。门禁和smoke的成功只对其执行步骤成立，不能认证长窗口或目录隔离。默认目录问题、启动脚本最小修复及旧单key基线的影响详见 [verification.md](verification.md) 第5.6–5.7节；旧DS值不得作为修正后batch收益的公平基准，修正后的B1需随新矩阵重测。
 
 即使后续全部通过，结论也只覆盖固定版本、CPU TCP、单节点双服务、1 KiB/key、C8、四档 B 和所披露的容量配置。未验证RDMA/UB、GPU、跨节点、故障恢复、持久化或其它对象尺寸，不据此泛化。
+
+## 6.7 r4通过的协议预检与r5更正
+
+本地r4原件确认：gate145.847667354秒、smoke277.512075568秒、DataSystem TCP审计9.914668323秒均通过；环境恢复0.217329077秒，`errors=[]`、记录服务active且四cgroup为空。r4没有`formal-batch-001`执行，是目录隔离后的正确性/协议预检，不是失败formal，也不贡献正式重复。
+
+r4的读操作仍可能继承前序PUT背景，且单批warm PUT使额外key数随B变化。r5因此将全部计时READ/UPSERT/EXIST放在仅固定池的read epoch，随后每个支持B单独fresh PUT epoch，统一32,768 warm keys。N/A不填零，也不补scalar PUT冒充原生能力；修正后的B1随同一协议矩阵重测。
+
+r4 gate/smoke/TCP原件SHA依次为 `ba8023cd5ae8f365e1db4978e43760954169c06c194e536c030d1418a73ed12c`、`449718a959c075b91c6a0a6b78a666150d89a6dc35d7753402cedbb79057022b`、`07e169794a1bc86363ed14047d81f9b9bb9fe8422ea215aa436f1a95e620e624`。它们及r3失败分别归档，不重新标注为r5结果。
+
+## 6.8 r5实际通过与新失败的独立边界
+
+本地完整采集确认gate147.334149718秒通过；smoke534.366434989秒、12个epoch齐全、50有效支持格/10 N/A、0接口失败。两个通过summary的SHA依次`99361a8baaec0bc3a208a0f2baadf82bf24ac0184744284124e9aa0e1dff7431`、`aa6d2383559fabb2d79139065990cefec2932cfcff16a364c102209749977027`。
+
+TCP首次离线审计14/16源于两个B1 GET的完整1KiB payload跨同一成功`readv`相邻iov，而旧parser只查单iov。旧失败文件保留；仅本地parser补充严格成功字节边界与截断屏障，27项fixture通过后新`-v2.json`16/16、32方向通过，耗时28.440561944秒，SHA `7f233fa749786a3d2397f26741937a3a6341b4d6ac2fb677fa403c6dc3ac5589`。不修改native或冻结测量输入，不扩展为整批每字节持续跟踪。
+
+r5正式05:16:59.135590–05:20:06.445844 UTC，187.310265231秒后在B16 EXIST hit失败：6.407281222秒中121,709成功batch、8个客户端各1个deadline异常。此时元数据目录已独立，两Worker stdout均0 bytes；不能再以R3共享RocksDB错误解释本次运行，也不能把新失败抹掉。固定rc44静态审查发现GET在共享线程池初始化deadline而未恢复，EXIST多owner任务复用该池但未传播deadline，发RPC前读到旧负预算的机制与现象吻合；TLS动态状态和因果仍需独立诊断。完整源码锚与纯内存候选见 [verification.md](verification.md) 5.10–5.12。
+
+后续用户要求关闭RocksDB和stream。候选仅增加官方flag关闭DB、stream和非必要指标/请求访问日志，保留元数据/服务发现/心跳与10,000ms请求预算；不删除GET校验、刻意选单owner或给失败补零。若新配置仍存在原生read错误，应保留完整failure/exit/SHA并继续其余独立操作，区分`execution_complete`与接口`valid`，不将真实错误场景纳入成功三重复排名。
+
+## 6.9 r6纯KV诊断已执行，整矩阵仍待验收
+
+纯KV对照实际完成：A EXIST-only13.027326933s、248/248成功且两端有TCP活动；B GET16后190成功+1异常，10.019303674s报本地line44 deadline；C GET16后等待10.1s，EXIST16在0.021342848s失败，实际窗口0条正TCP发送；D同样先GET16/等待后EXIST1在0.001553996s成功。SDK46.339531674s、外层63.659922266s、monitor0和四cgroup空。无RocksDB制品，两Worker保留普通26B eviction状态文件，四客户端close后socket快照均0。165份输入逐SHA/size、221独立本地检查通过；动态证据与未直接观测TLS的边界见 [verification.md](verification.md) 5.13。
+
+这是单客户端低速诊断，不纳入性能重复。R6后续gate39.699639772s失败仅因Mooncake launcher Permission denied，DS gate已完成，MC/LM门禁尚未完整执行。复制overlay后x位恢复和mode inventory的5项本地回归通过，必须在fresh根继续验证；原r6失败不覆盖，不以部署错误给产品填零或N/A。完整矩阵、资源覆盖、包和浏览器验收仍待实际执行。

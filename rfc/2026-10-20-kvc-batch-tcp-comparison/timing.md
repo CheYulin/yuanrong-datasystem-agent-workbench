@@ -1,6 +1,6 @@
 # 7. 操作耗时与证据边界
 
-状态：**In Progress**。下表填入已完成的真实步骤，包含r3正式尝试失败；修正目录后的完整三重复、报告生成、打包和公开验收耗时尚待产生。时间型性能操作的20秒合同不等于整个实验或交付耗时。
+状态：**In Progress**。r5正式失败与r6纯KV诊断已采集；r6门禁在DS通过后因Mooncake launcher权限失败，完整三重复和交付仍未验收。诊断、离线parser、门禁启动错误和正式接口失败分别计时，不混为性能窗口。
 
 ## 7.1 计时口径
 
@@ -69,3 +69,51 @@ gate和smoke均在结束记录中确认parent/server/client/monitor四个cgroup�
 | 最终同步和提交 | 真实命令、退出码、耗时与已产生的commit；不提前填写未来hash |
 
 资源unknown/null是观测边界，不应通过补采样修改旧SDK窗口或用计时文档掩盖。最后阶段若发生工程失败、缓存命中旧包或验收脚本契约修正，也应另记失败与重试耗时，保持性能、预检和交付三类证据的原始边界。
+
+## 7.6 r4通过的协议预检计时
+
+证据根`/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r4`，并归档至r5的`history/protocol-preflight-r4`。
+
+| 阶段 | 实际秒数 | 原件与边界 |
+|---|---:|---|
+| 原生batch gate | 145.847667354 | `batch-gate-001/summary.json`，04:44:02.190778–04:46:28.038446 UTC，valid |
+| C8 smoke | 277.512075568 | `batch-smoke-001/summary.json`，04:46:29.827898–04:51:07.339965 UTC，valid |
+| DataSystem TCP离线审计 | 9.914668323 | `datasystem-batch-tcp-verification.json`，16组合/32方向通过；解析耗时不是吞吐分母 |
+| 环境恢复 | 0.217329077 | `batch-smoke-001/environment-restored.json`，errors为空、服务active、四cgroup空；SSH外层1.986956592秒另记，不能叠加 |
+| 正式矩阵 | 未执行 | r4在formal前被新协议替代，不记失败formal，不贡献性能重复 |
+
+## 7.7 r5新协议待闭合阶段
+
+协议`separate-read-and-fresh-put-v1`，工具阶段提交`2483b37`；111项stage输入等待最终采集逐SHA绑定。每个read epoch仅65,536-key池；每个支持B的fresh PUT独立启动、同池加固定32,768 warm keys。正式前PUT resident均98,304 keys / 96 MiB，不沿用此前单批warmup随B变化的背景。正式设计36个epoch、smoke设计12个epoch；服务启动/停止、预置、完整恢复校验与清理时间全部计入driver阶段，但不加入SDK吞吐窗口。
+
+| 阶段 | 当前状态 | 待填原件 |
+|---|---|---|
+| r5原生gate | 147.334149718s，通过 | 05:02:53.766290–05:05:21.100440 UTC；summary SHA见verification5.10 |
+| r5 C8 smoke | 534.366434989s，通过 | 05:05:22.953225–05:14:17.319621 UTC，12epoch、50支持/10 N/A；不是20秒性能结果 |
+| r5首次TCP离线审计 | 16.743329653s，14/16 | 两个实际成功GET的完整payload跨同readv相邻iov；原失败JSON不覆盖，不当接口失败 |
+| 严格同syscall parser修正补验 | 内部28.440561944s / 外层29.251941008s，16/16 | `datasystem-batch-tcp-verification-v2.json`，27项fixture通过，真实trace复验；内外层不重复累加 |
+| r5正式尝试 | 187.310265231s，失败 | 05:16:59.135590–05:20:06.445844 UTC；B16 EXIST hit6.407281222s、121709成功batch后8异常；0完整组/epoch，不能补齐设计180格 |
+| r5恢复 | 0.2119152s，errors为空 | 父任务实际restore原件；采集已完成，不以恢复成功改写接口失败 |
+| 纯KV诊断/新矩阵及部署审计 | 待实际执行 | 21次DS启动/42个Worker仍是完整计划的覆盖目标，最终按actual plan推导；gate-live与其余live-unobserved分列 |
+| 报告、包、公开验收 | 待完成 | 只记录本批量报告实际执行的耗时/检查数，不借用单key页面历史验收 |
+
+pure-KV启动配置14项与独立deadline诊断8项本地fixture合计22项通过（0.389s）；pure-KV部署审计24项fixture先通过6.303s，追加实际执行依赖SHA绑定后重跑5.715s通过。它们验证工具的分支、清理与篡改防护，不是SDK实际诊断耗时。新A/B各13秒、C/D各sleep10.1秒是诊断设计上限口径，实际执行耗时以新JSON为准，不能预填46秒为已测结果。
+
+## 7.8 r6纯KV实际诊断与权限预检失败
+
+证据根`/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r6`。下列均为已产生的原件，不借用R5计时。
+
+| 阶段/SDK观察 | 实际秒数 | 真实结果 |
+|---|---:|---|
+| 诊断外层启停/监控/清理 | 63.659922266 | 完整，errors=[]，monitor0，四cgroup空；包含SDK阶段，不与下一行累加 |
+| 四个fresh SDK场景合计 | 46.339531674 | 诊断完成但并非SDK全通过，B/C原生异常保留 |
+| A EXIST-only观察 | 13.027326933 | 248次成功，双TCP端点活动 |
+| B GET→EXIST观察 | 10.019303674 | 190成功+1本地deadline失败，非20秒压测完成 |
+| C 等待后EXIST16调用 | 0.021342848 | 前置sleep10.100258905秒另记；本次EXIST窗口无正TCP发送 |
+| D 等待后EXIST1调用 | 0.001553996 | 前置sleep10.100222394秒另记；单key对照成功 |
+| 独立本地原件复核 | 0.195153440 | 165输入前后SHA/size、221检查通过；不是新增SDK测量 |
+| 纯KV门禁尝试 | 39.699639772 | DS完成；MC launcher Permission denied；LM未完成；无正式性能数据 |
+| qualification恢复 | 0.207646857 | errors=[]；两generic guard都引用同一terminal gate，不算两个实验 |
+| overlay权限回归 | 0.228 | 5/5本地fixture，真实copy2最终mode、freshroot/inputs绑定与事务回滚；未启动产品 |
+
+诊断helper实际源码、四case/trace/FD、关闭项与门禁权限错误的精确SHA和边界见 [verification.md](verification.md) 5.13–5.14。后续新根实际资格验证和正式执行耗时尚未填入，不能用该诊断替代公平矩阵。
