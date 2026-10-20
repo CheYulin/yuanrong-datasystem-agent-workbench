@@ -25,6 +25,32 @@ def digest(path):
     return checksum.hexdigest()
 
 
+def verify_tar_inputs(path, inputs):
+    seen, checked = set(), set()
+    with tarfile.open(path, "r|gz") as archive:
+        for member in archive:
+            name = member.name
+            if name in seen:
+                raise ValueError("Raw evidence contains duplicate archive paths")
+            seen.add(name)
+            if name not in inputs:
+                continue
+            expected = inputs[name]
+            if (not member.isfile() or member.size != expected["bytes"]
+                    or "mode" in expected and member.mode & 0o777 != expected["mode"]):
+                raise ValueError("Packaged deployment input has different bytes: " + name)
+            checksum = hashlib.sha256()
+            with archive.extractfile(member) as stream:
+                for block in iter(lambda: stream.read(8 << 20), b""):
+                    checksum.update(block)
+            if checksum.hexdigest() != expected["sha256"]:
+                raise ValueError("Packaged deployment input SHA256 mismatch: " + name)
+            checked.add(name)
+    if checked != set(inputs):
+        raise ValueError("Raw evidence omits deployment audit inputs")
+    return len(checked)
+
+
 def copy_file(source, out, relative):
     source = Path(source)
     if source.is_symlink() or not source.is_file():
@@ -64,7 +90,19 @@ def verify_runtime_inputs(suite, runtime_inputs, require=True):
             raise ValueError("Invalid frozen runtime inventory record: " + name)
         if source.stat().st_size != size or digest(source) != checksum:
             raise ValueError("Frozen runtime input SHA256/bytes mismatch: " + name)
-        records.append({"relative": name, "path": name, "source": str(source), "sha256": checksum, "bytes": size})
+        mode = expected.get("mode")
+        if mode is not None and (type(mode) is not int or not 0 <= mode <= 0o777 or source.stat().st_mode & 0o777 != mode):
+            raise ValueError("Frozen runtime input mode mismatch: " + name)
+        records.append({"relative": name, "path": name, "source": str(source), "sha256": checksum, "bytes": size,
+                        **({"mode": mode} if mode is not None else {})})
+    overridden = set()
+    for override in stage.get("runtime_overrides", []):
+        name = override.get("path")
+        if name in overridden or name not in stage["inputs"]:
+            raise ValueError("Unexpected or duplicate frozen runtime override")
+        overridden.add(name)
+        if any(override[key] != stage["inputs"][name].get(key) for key in ["sha256", "bytes", "mode"] if key in override):
+            raise ValueError("Frozen runtime override differs from its final input inventory: " + name)
     return stage, records
 
 
@@ -177,6 +215,36 @@ def compact_payload(analysis):
     return payload
 
 
+def report_completion(analysis):
+    summary, rows = analysis.get("summary", {}), analysis.get("rows", [])
+    failures = [row for row in rows if row.get("status") == "failed"]
+    wanted = {(repeat, product, batch, operation) for repeat in range(3)
+              for product in ["datasystem", "mooncake", "lmcache"] for batch in [1, 16, 256, 4096]
+              for operation in ["put", "upsert", "get", "exist_hit", "exist_miss"]}
+    identities = [(row.get("repeat"), row.get("product"), row.get("batch"), row.get("operation")) for row in rows]
+    row_errors = any(row.get("status") not in {"valid", "failed", "not_supported"}
+                     or (row.get("status") == "valid" and row.get("valid") is not True)
+                     or (row.get("status") == "failed" and (row.get("valid") is not False
+                         or row.get("evidence_verified") is not True or not row.get("native_errors")
+                         or row.get("operation") not in {"get", "exist_hit", "exist_miss"})) for row in rows)
+    na = [row for row in rows if row.get("status") == "not_supported"]
+    counts = {status: sum(row.get("status") == status for row in rows)
+              for status in ["valid", "failed", "not_supported", "invalid", "missing"]}
+    declared = analysis.get("counts", {})
+    terminal = (summary.get("action") == "run" and summary.get("ended") and not summary.get("failed")
+                and not summary.get("fatal") and (summary.get("execution_complete") is True or summary.get("valid") is True)
+                and summary.get("valid") is (not failures)
+                and summary.get("measurement_failures", []) == [row.get("identity") for row in failures])
+    complete = bool((analysis.get("evidence_verified") is True or analysis.get("passed") is True)
+                    and not analysis.get("issues") and analysis.get("repeats") == 3 and terminal and not row_errors
+                    and len(identities) == len(wanted) and set(identities) == wanted
+                    and counts["valid"] + counts["failed"] == 150 and counts["not_supported"] == 30
+                    and all(declared.get(key, 0) == value for key, value in counts.items())
+                    and all(row.get("product") == "lmcache" and (row.get("operation") == "upsert"
+                            or row.get("batch") != 1 and row.get("operation") in {"put", "get"}) for row in na))
+    return {"complete": complete, "native_failures": failures, "counts": counts}
+
+
 def verify_tcp_evidence(path, gate_path, scripts):
     from batch_gate import payload
     path, gate_path, scripts = Path(path), Path(gate_path).resolve(strict=True), Path(scripts)
@@ -265,12 +333,87 @@ def configuration_profile(products):
         settings.append({"key": key, "value": value, "pinned_source_default": default,
                          "origin": "explicit frozen product env" if key in env else "pinned source default"})
     adapted = settings[0]["value"] == 8192 and settings[1]["value"] == 8192 and settings[2]["value"] == 4 and settings[3]["value"] == 1000
-    return {"name": "Mooncake TCP 批量容量适配（queue / pending = 8192 / 8192）" if adapted else "冻结输入中记录的原生配置",
+    pure_kv = ({row.get("name") for row in records} == {"datasystem", "mooncake", "lmcache"}
+               and all(row.get("env", {}).get("KVC_FEATURE_PROFILE") == "pure-kv" for row in records))
+    return {"name": ("纯 KV 内存 · " if pure_kv else "") + ("Mooncake TCP 批量容量适配（queue / pending = 8192 / 8192）" if adapted else "冻结输入中记录的原生配置"),
+            "feature_profile": "pure-kv" if pure_kv else "legacy-isolated",
             "capacity_adapted": adapted, "settings": settings,
             "scope": ("Mooncake queued/pending capacities are 8192; lane count 4 and admission timeout 1000ms retain pinned source defaults."
                       if adapted else "Recorded values only; this configuration does not match the reviewed 8192/8192/4/1000 batch capacity profile."),
             "source_commit": "719735896c86b56fabec6cf3e825fb2ea640597a",
             "source_location": "mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp:301-338"}
+
+
+def deadline_diagnostic_cases(source, relative):
+    source = Path(source)
+    raw = json.loads(source.read_bytes())
+    if (raw.get("schema_version") != 1 or raw.get("action") != "deadline_lifetime_diagnostic"
+            or raw.get("benchmark_eligible") is not False or raw.get("diagnostic_complete") is not True):
+        raise ValueError("Only a completed, explicitly non-benchmark deadline diagnostic can be summarized")
+    directory = source.parent
+    artifacts = raw.get("artifacts", [])
+    seen = set()
+    for record in artifacts:
+        name = record.get("path", "")
+        path = Path(name)
+        if (not name or path.is_absolute() or ".." in path.parts or path.as_posix() != name or name in seen):
+            raise ValueError("Unsafe or duplicate diagnostic artifact path")
+        seen.add(name)
+        actual = directory / path
+        if (any(part.is_symlink() for part in [actual, *actual.parents]) or not actual.is_file()
+                or actual.stat().st_size != record.get("bytes") or digest(actual) != record.get("sha256")):
+            raise ValueError("Deadline diagnostic artifact bytes differ from its recorded execution")
+    helper = directory / "executed-helper.py"
+    if "executed-helper.py" not in seen or digest(helper) != raw.get("helper_sha256"):
+        raise ValueError("Deadline diagnostic must preserve its actual executed helper source")
+    cases = raw.get("cases", [])
+    if len(cases) != 4 or {row.get("case") for row in cases} != set("ABCD"):
+        raise ValueError("Deadline diagnostic requires four distinct original control cases")
+    result, shared = [], None
+    for row in sorted(cases, key=lambda value: value["case"]):
+        name = "case-" + row["case"] + ".json"
+        path = directory / name
+        if (name not in seen or Path(row.get("child_path", "")).name != name or digest(path) != row.get("child_sha256")
+                or row.get("returncode") != 0 or row.get("reaped") is not True or row.get("complete") is not True):
+            raise ValueError("Deadline diagnostic child receipt/result identity is incomplete")
+        child = json.loads(path.read_bytes())
+        steps = child.get("steps", [])
+        exists = [step for step in steps if step.get("name") == "exists"]
+        failed = [step for step in steps if step.get("status") == "failed"]
+        got = [step for step in steps if step.get("name") == "get-full"]
+        pairs = child.get("keys"), child.get("key_payload_sha256")
+        keys, hashes = pairs
+        if (not isinstance(keys, list) or len(keys) != 16 or any(not isinstance(key, str) or not key for key in keys)
+                or len(set(keys)) != 16 or not isinstance(hashes, dict) or set(hashes) != set(keys)
+                or any(hashes[key] != hashlib.sha256(hashlib.shake_256(("ds-deadline-v1\0" + key).encode()).digest(1024)).hexdigest() for key in keys)
+                or child.get("metadata", {}).get("source_sha") != "2ff37e2f7c5fb45f3feea7c3fb969b8f84b920d6"
+                or child.get("parameters", {}).get("value_size") != 1024
+                or child.get("parameters", {}).get("batch") != (1 if row["case"] == "D" else 16)
+                or len(got) != (0 if row["case"] == "A" else 1)):
+            raise ValueError("Deadline diagnostic case source, batch, keys or full payload identities differ")
+        if shared is None:
+            shared = pairs
+        if (pairs != shared or child.get("case") != row["case"] or child.get("benchmark_eligible") is not False
+                or child.get("complete") is not True or child.get("setup_error") or not exists
+                or child.get("all_sdk_steps_passed") is not (not failed)
+                or row.get("all_sdk_steps_passed") != child["all_sdk_steps_passed"]):
+            raise ValueError("Deadline control cases do not preserve the same keys/payloads and honest SDK outcomes")
+        for step in steps:
+            start, end = step.get("start_mono_ns"), step.get("end_mono_ns")
+            if (type(start) is not int or type(end) is not int or end < start
+                    or type(step.get("duration_s")) not in {int, float}
+                    or not abs(step["duration_s"] - (end - start) / 1e9) <= 1e-9):
+                raise ValueError("Deadline diagnostic step timing is inconsistent")
+        parameters = child["parameters"]
+        result.append({"case": row["case"], "description": child.get("description"), "batch": parameters["batch"],
+                       "sleep_s": parameters.get("sleep_s"), "exist_elapsed_s": child.get("exist_elapsed_s"),
+                       "exists_calls": len(exists), "all_sdk_steps_passed": child["all_sdk_steps_passed"],
+                       "first_failure_after_get_s": (failed[0]["end_mono_ns"] - got[0]["end_mono_ns"]) / 1e9 if failed and got else None,
+                       "errors": [{"step": step["name"], "message": step.get("error", {}).get("message")} for step in failed],
+                       "observed_tcp_send_lines": row.get("wire", {}).get("successful_send_lines"),
+                       "wire_scope": row.get("wire", {}).get("scope"),
+                       "evidence": (Path(relative).parent / name).as_posix(), "sha256": digest(path)})
+    return result
 
 
 def history_evidence(roots, out, namespace="history"):
@@ -287,9 +430,11 @@ def history_evidence(roots, out, namespace="history"):
                 continue
             raw = json.loads(source.read_text())
             action = raw.get("action", raw.get("kind", "unknown"))
+            if action == "unknown" and source.parent.name.startswith("deadline-diagnostic-") and raw.get("benchmark_eligible") is False and "diagnostic_complete" in raw and "commands" in raw:
+                action = "datasystem_deadline_orchestration"
             if action == "run" and raw.get("ended") and (raw.get("failed") or raw.get("fatal") or raw.get("valid") is False):
                 action = "failed_formal_attempt"
-            if action not in {"gate", "smoke", "composed_correctness_gate", "untraced_correctness_diagnostic", "mooncake_tcp_queue_capacity_diagnostic", "failed_formal_attempt"}:
+            if action not in {"gate", "smoke", "composed_correctness_gate", "untraced_correctness_diagnostic", "mooncake_tcp_queue_capacity_diagnostic", "failed_formal_attempt", "deadline_lifetime_diagnostic", "datasystem_deadline_orchestration"}:
                 continue
             manifest_path = next((path for path in [source.parent / "products.json", root / "products.json", root / "batch-gate-001/products.json"] if path.is_file()), None)
             recorded_profile = configuration_profile(json.loads(manifest_path.read_bytes())) if manifest_path else None
@@ -303,14 +448,19 @@ def history_evidence(roots, out, namespace="history"):
                             and {profile.get("name") for profile in profiles} == {"default", "queue8192"}
                             and all(profile.get("cleanup_ok") is True and not profile.get("errors") for profile in profiles))
                 status = "failed" if raw.get("errors") or raw.get("fatal") else "completed" if complete else "incomplete"
-            prefix = ("容量机制诊断 · " if action == "mooncake_tcp_queue_capacity_diagnostic" else "正式失败历史 · " if action == "failed_formal_attempt"
+            if action in {"deadline_lifetime_diagnostic", "datasystem_deadline_orchestration"}:
+                status = "failed" if raw.get("errors") or raw.get("fatal") else "completed" if raw.get("diagnostic_complete") is True else "incomplete"
+            controls = deadline_diagnostic_cases(source, relative) if action == "deadline_lifetime_diagnostic" and raw.get("diagnostic_complete") is True else []
+            prefix = ("DataSystem期限诊断 · " if action in {"deadline_lifetime_diagnostic", "datasystem_deadline_orchestration"} else "容量机制诊断 · " if action == "mooncake_tcp_queue_capacity_diagnostic" else "正式失败历史 · " if action == "failed_formal_attempt"
                       else "容量配置历史 · " if configuration == "capacity_adapted" else "默认配置 · " if configuration == "default" else "历史 · ")
             phases.append({"identity": relative, "action": action, "status": status,
                            "duration_s": raw.get("duration_s"), "start_wall_ns": raw.get("start_wall_ns"),
                            "end_wall_ns": raw.get("end_wall_ns"), "evidence": relative,
                            "sha256": digest(source), "label": prefix + source.parent.name,
+                           "source_collection": root.name,
                            "configuration": configuration,
                            "performance_eligible": False, "failed": raw.get("failed", raw.get("errors", [])),
+                           "diagnostic_cases": controls, "all_sdk_steps_passed": raw.get("all_sdk_steps_passed"),
                            "diagnostic_profiles": [{key: profile.get(key) for key in ["name", "native_valid", "cleanup_ok"]}
                                                    for profile in raw.get("profiles", [])]})
     return phases, records
@@ -318,29 +468,34 @@ def history_evidence(roots, out, namespace="history"):
 
 def failed_attempt_evidence(roots, out):
     phases, records = history_evidence(roots, out, namespace="failed-attempts")
-    bindings, frozen_records = [], []
+    bindings, frozen_records, selected = [], [], set()
     for root in roots:
         root = Path(root).resolve(strict=True)
         summaries = []
-        for source in root.rglob("summary.json"):
+        for source in root.glob("*/summary.json"):
             raw = json.loads(source.read_bytes())
             if raw.get("action") == "run" and raw.get("ended") and (raw.get("failed") or raw.get("fatal") or raw.get("valid") is False):
                 summaries.append(source)
         if not summaries:
             raise ValueError("Each --failed-attempts root must retain a terminal unsuccessful formal execution")
         for source in summaries:
+            selected.add("failed-attempts/" + root.name + "/" + source.relative_to(root).as_posix())
             stage, inputs = verify_runtime_inputs(source.parent, root / "runtime-inputs")
             for record in inputs:
                 relative = "failed-attempts/" + root.name + "/frozen-runtime/" + record["relative"]
                 copied = copy_file(Path(record["source"]), out, relative)
                 if any(copied[key] != record[key] for key in ["sha256", "bytes"]):
                     raise ValueError("Historical failed-attempt runtime changed during copy")
+                if "mode" in record and (out / relative).stat().st_mode & 0o777 != record["mode"]:
+                    raise ValueError("Historical frozen runtime mode changed during copy")
+                if "mode" in record:
+                    copied["mode"] = record["mode"]
                 frozen_records.append({**copied, "source": record["source"]})
             bindings.append({"name": root.name, "source_root": stage["root"], "files": len(inputs),
                              "stage_sha256": digest(source.parent / "batch-stage.json"),
                              "summary_sha256": digest(source), "performance_eligible": False,
                              "scope": "Exact original failed-attempt stage inputs, separately preserved; none are substituted into current measured runtime or performance repetitions."})
-    return [row for row in phases if row["action"] == "failed_formal_attempt"], records, bindings, frozen_records
+    return [row for row in phases if row["action"] == "failed_formal_attempt" and row["evidence"] in selected], records, bindings, frozen_records
 
 
 def verify_datasystem_isolation(gate_path):
@@ -453,6 +608,215 @@ def verify_resource_evidence(directory, suite, analysis, scripts):
             "summary_scope": "Independent read-only postprocessing of the original sample stream; no new samples, synthetic intervals or performance repetitions. Parent/monitor and host/affinity estimates retain their separate scopes."}, records
 
 
+def verify_deployment_evidence(source, suite, runtime_inputs, scripts):
+    from batch_deployment_audit import PROTOCOL, PURE_KV_FLAGS, ROCKS_ARTIFACT, one_flag, validate_plan
+    source, suite = Path(source).absolute(), Path(suite).resolve(strict=True)
+    root = suite.parent
+    if any(path.is_symlink() for path in [source, *source.parents]) or not source.is_file():
+        raise ValueError("Deployment audit must be a regular file without symlink traversal")
+    raw = json.loads(source.read_bytes())
+    helper = Path(scripts) / "batch_deployment_audit.py"
+    if (raw.get("schema_version") not in {2, 3} or raw.get("kind") != "datasystem_collected_deployment_audit"
+            or raw.get("root") != str(root) or raw.get("workload_protocol") != PROTOCOL
+            or raw.get("valid") is not True or raw.get("errors") != []
+            or raw.get("inputs_rehashed_after_audit") is not True
+            or helper.is_symlink() or not helper.is_file()
+            or raw.get("helper") != {"sha256": digest(helper), "bytes": helper.stat().st_size}):
+        raise ValueError("Deployment audit root/protocol/success/executed-source identity differs")
+    clocks = [raw.get(key) for key in ["start_wall_ns", "end_wall_ns", "start_mono_ns", "end_mono_ns"]]
+    if (any(type(value) is not int or value <= 0 for value in clocks) or clocks[3] <= clocks[2]
+            or type(raw.get("duration_s")) not in {int, float}
+            or not abs(raw["duration_s"] - (clocks[3] - clocks[2]) / 1e9) <= 1e-9):
+        raise ValueError("Deployment audit monotonic duration or original clock boundaries are incomplete")
+    stage, runtime = verify_runtime_inputs(suite, runtime_inputs)
+    pure_kv = raw["schema_version"] == 3
+    if pure_kv and (raw.get("feature_profile") != "pure-kv" or stage.get("feature_profile") != "pure-kv"):
+        raise ValueError("The pure-KV deployment audit requires the matching frozen feature profile")
+    if stage.get("feature_profile") == "pure-kv" and not pure_kv:
+        raise ValueError("A pure-KV stage requires schema3 launch and database-artifact evidence")
+    if json.loads((root / "batch-stage.json").read_bytes()) != stage:
+        raise ValueError("Deployment audit and current suite refer to different frozen stages")
+    expected = {"batch-stage.json", "runtime-inputs/scripts/datasystem/runtime.py",
+                "batch-gate-001/r0-datasystem/tcp-configuration.json"}
+    clusters, epoch_suites = [], []
+    for phase, action, repeats in [("batch-gate-001", "gate", 1), ("batch-smoke-001", "smoke", 1), ("formal-batch-001", "run", 3)]:
+        directory = root / phase
+        for name in ["batch-stage.json", "plan.json", "summary.json", "events.jsonl"]:
+            expected.add(phase + "/" + name)
+        if json.loads((directory / "batch-stage.json").read_bytes()) != stage:
+            raise ValueError("Deployment audit phase is not from the current frozen stage")
+        plan = json.loads((directory / "plan.json").read_bytes())
+        validate_plan(plan, repeats)
+        summary = json.loads((directory / "summary.json").read_bytes())
+        parameter_file = directory / "parameters.json"
+        parameters = json.loads(parameter_file.read_bytes()) if parameter_file.exists() else {}
+        if parameter_file.exists():
+            expected.add(phase + "/parameters.json")
+        continued = parameters.get("continue_readonly_errors") is True
+        events = [json.loads(line) for line in (directory / "events.jsonl").read_bytes().splitlines() if line.strip()]
+        failures = [event.get("identity") for event in events if event.get("event") == "measure_failed"]
+        measured = None
+        if pure_kv and action != "gate" and (continued or failures or summary.get("measurement_failures")):
+            expected |= {path.relative_to(root).as_posix() for path in directory.rglob("*.json")}
+            expected.add(phase + "/resources/samples.jsonl")
+            checked = analyze(directory)
+            measured = {"evidence_verified": checked.get("evidence_verified"), "counts": checked.get("counts"),
+                        "issues": checked.get("issues"),
+                        "failed_identities": [row["identity"] for row in checked["rows"] if row["status"] == "failed"]}
+            if measured["evidence_verified"] is not True or measured["issues"] or failures != measured["failed_identities"]:
+                raise ValueError("Deployment audit native failure evidence differs from independent result analysis")
+        identities, selected = [], []
+        for group in plan:
+            cell = f"r{group['repeat']}-{group['product']}"
+            epochs = [{"id": "gate"}] if action == "gate" else group["epochs"]
+            for epoch in epochs:
+                identities.append(cell + "/" + epoch["id"])
+                ledger = phase + "/" + cell + ("" if action == "gate" else "/epochs/" + epoch["id"]) + "/epoch-summary.json"
+                expected.add(ledger)
+                if group["product"] == "datasystem":
+                    selected.append(action + "-" + cell + ("" if action == "gate" else "-" + epoch["id"]))
+        if (summary.get("action") != action or summary.get("workload_protocol") != PROTOCOL
+                or summary.get("valid") is not (not failures) or summary.get("failed") != [] or summary.get("fatal")
+                or not summary.get("ended") or summary.get("epochs_expected") != identities
+                or summary.get("epochs_completed") != identities
+                or failures and (not continued or summary.get("execution_complete") is not True)
+                or continued and (summary.get("execution_complete") is not True or summary.get("measurement_failures") != failures)
+                or summary.get("completed") != [f"r{group['repeat']}-{group['product']}" for group in plan]):
+            raise ValueError("Deployment audit requires complete same-stage gate/smoke/formal epochs")
+        epoch_evidence = {"suite": phase, "action": action, "expected_epochs": identities,
+                          "epochs_completed": identities, "datasystem_clusters": selected}
+        if pure_kv:
+            epoch_evidence.update(native_measurement_failures=failures, measurement_evidence=measured,
+                                  execution_complete=summary.get("execution_complete", summary.get("valid")))
+        epoch_suites.append(epoch_evidence)
+        clusters.extend(selected)
+    if (len(clusters) != 21 or len(set(clusters)) != 21 or raw.get("expected_clusters") != clusters
+            or raw.get("epoch_suites") != epoch_suites):
+        raise ValueError("Deployment audit does not cover the actual 21 DataSystem service epochs")
+    directories = []
+    observed = []
+    rows = raw.get("clusters", [])
+    if len(rows) != len(clusters) or [row.get("name") for row in rows] != clusters:
+        raise ValueError("Deployment audit cluster identities are missing, duplicated or unexpected")
+    for row in rows:
+        name, live = row["name"], row.get("live", {})
+        prefix = "run/" + name
+        expected.add(prefix + "/processes.json")
+        workers, stdout = row.get("workers", []), row.get("stdout", [])
+        if (row.get("valid") is not True or len(workers) != 2 or len(stdout) != 2
+                or [item.get("worker_index") for item in workers] != [0, 1]
+                or [item.get("worker_index") for item in stdout] != [0, 1]):
+            raise ValueError("Deployment audit requires two verified Workers and stdout scans per epoch")
+        manifest = json.loads((root / prefix / "processes.json").read_bytes())
+        processes = [item for item in manifest.get("processes", []) if item.get("name") in {"worker0", "worker1"}]
+        if (manifest.get("run_dir") != stage["root"] + "/" + prefix or len(processes) != 2
+                or {item.get("name") for item in processes} != {"worker0", "worker1"}
+                or len({item.get("pid") for item in processes}) != 2):
+            raise ValueError("Deployment audit launch manifest cluster/Worker identities differ")
+        if pure_kv and manifest.get("runtime_profile") != "pure-kv":
+            raise ValueError("Deployment audit launch manifest is not the pure-KV runtime")
+        for worker, scan in zip(workers, stdout):
+            index = worker["worker_index"]
+            expected_path = stage["root"] + "/" + prefix + f"/w{index}/rocksdb"
+            flag_path, log_path = prefix + f"/w{index}/worker.flags", prefix + f"/worker{index}.stdout.log"
+            expected.update([flag_path, log_path])
+            if (worker.get("launch_configuration_verified") is not True or worker.get("rocksdb_store_dir") != expected_path
+                    or type(worker.get("pid")) is not int or worker["pid"] <= 0
+                    or not str(worker.get("start_ticks", "")).isdigit()
+                    or worker.get("flagfile", {}).get("path") != flag_path
+                    or scan.get("path") != log_path or type(scan.get("matched_errors")) is not int
+                    or scan["matched_errors"] != 0 or scan.get("first_match") is not None or scan.get("last_match") is not None):
+                raise ValueError("Deployment audit Worker directory/launch identity/error scan differs")
+            process = next(item for item in processes if item["name"] == f"worker{index}")
+            flags = (root / flag_path).read_text().splitlines()
+            if (process.get("pid") != worker["pid"] or process.get("start_ticks") != worker["start_ticks"]
+                    or process.get("command", [])[1:] != flags
+                    or one_flag(process.get("command"), "rocksdb_store_dir") != expected_path
+                    or one_flag(flags, "rocksdb_store_dir") != expected_path
+                    or manifest.get("rocksdb_store_dirs", {}).get(f"worker{index}") != expected_path):
+                raise ValueError("Deployment audit launch argv/flags do not bind its Worker isolation record")
+            if pure_kv:
+                switches = {**PURE_KV_FLAGS, "log_monitor": "false", "ipc_through_shared_memory": "false",
+                            "enable_rdma": "false", "enable_urma": "false", "l2_cache_type": "none", "spill_size_limit": "0"}
+                if worker.get("runtime_profile") != "pure-kv" or any(one_flag(flags, key) != value for key, value in switches.items()):
+                    raise ValueError("Deployment audit pure-KV Worker switches are absent or enabled")
+                database = root / prefix / f"w{index}/rocksdb"
+                if database.is_symlink() or not database.is_dir():
+                    raise ValueError("Missing regular collected database directory")
+                files = sorted(path for path in database.rglob("*") if path.is_file())
+                if any(path.is_symlink() for path in database.rglob("*")) or any(ROCKS_ARTIFACT.fullmatch(path.name) for path in files):
+                    raise ValueError("Collected pure-KV directory contains a symlink or RocksDB artifact")
+                inventory = worker.get("rocksdb_directory", {})
+                if (inventory.get("database_artifacts") != [] or len(inventory.get("files", [])) != len(files)
+                        or [record.get("path") for record in inventory["files"]] != [path.relative_to(root).as_posix() for path in files]):
+                    raise ValueError("Deployment audit final directory inventory does not match collected entries")
+                for record in inventory["files"]:
+                    expected.add(record["path"])
+                    if any(record.get(key) != raw.get("inputs", {}).get(record["path"], {}).get(key) for key in ["sha256", "bytes"]):
+                        raise ValueError("Deployment database directory entry does not bind its input bytes")
+            directories.append(Path(expected_path))
+        if name == "gate-r0-datasystem":
+            if live.get("observed") is not True or live.get("status") != "verified" or live.get("path") != "batch-gate-001/r0-datasystem/tcp-configuration.json":
+                raise ValueError("Deployment audit is missing the saved gate live observation")
+            observed.append(name)
+        elif live.get("observed") is not False or live.get("status") != "unobserved":
+            raise ValueError("Deployment audit must not invent live coverage for other epochs")
+    if len(set(directories)) != 42 or any(left in right.parents or right in left.parents for index, left in enumerate(directories) for right in directories[index + 1:]):
+        raise ValueError("DataSystem RocksDB directories must be 42 distinct nonoverlapping paths")
+    if raw.get("live_coverage") != {"observed_clusters": 1, "expected_clusters": 21, "required_gate_live_observed": True}:
+        raise ValueError("Deployment audit live coverage must remain one saved gate out of 21 epochs")
+    inputs = raw.get("inputs", {})
+    if not isinstance(inputs, dict) or set(inputs) != expected:
+        raise ValueError("Deployment audit input inventory does not match every actual epoch/launch/log source")
+    for name, record in inputs.items():
+        relative = Path(name)
+        if (relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name or name in {"", "."}
+                or not isinstance(record, dict) or not re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256", "")))
+                or type(record.get("bytes")) is not int or record["bytes"] < 0):
+            raise ValueError("Unsafe deployment audit input path or SHA256/bytes record")
+        path = root / relative
+        if (any(part.is_symlink() for part in [path, *path.parents]) or not path.is_file()
+                or path.stat().st_size != record["bytes"] or digest(path) != record["sha256"]):
+            raise ValueError("Deployment audit input SHA256/bytes mismatch: " + name)
+    runtime_name = "runtime-inputs/scripts/datasystem/runtime.py"
+    expected_runtime = {"path": runtime_name, **inputs[runtime_name]}
+    matched = [record for record in runtime if record["relative"] == "scripts/datasystem/runtime.py"]
+    if (raw.get("runtime_source") != expected_runtime or len(matched) != 1
+            or any(matched[0][key] != inputs[runtime_name][key] for key in ["sha256", "bytes"])):
+        raise ValueError("Deployment audit DataSystem launcher is not the measured frozen runtime")
+    for row in rows:
+        for worker, scan in zip(row["workers"], row["stdout"]):
+            if any(worker["flagfile"].get(key) != inputs[worker["flagfile"]["path"]][key] or scan.get(key) != inputs[scan["path"]][key] for key in ["sha256", "bytes"]):
+                raise ValueError("Deployment audit Worker flag/stdout records differ from bound inputs")
+    analysis_helpers = raw.get("analysis_helpers", {})
+    expected_helpers = {"batch_analyze", "benchmark", "report", "batch_epoch_verify"} if any(row.get("measurement_evidence") is not None for row in epoch_suites) else set()
+    if set(analysis_helpers) != expected_helpers:
+        raise ValueError("Deployment audit executed analysis source inventory is incomplete")
+    executed_sources = []
+    for name, expected_helper in analysis_helpers.items():
+        path = Path(scripts) / (name + ".py")
+        if (Path(expected_helper.get("path", "")).resolve() != path.resolve() or path.is_symlink() or not path.is_file()
+                or expected_helper.get("sha256") != digest(path) or expected_helper.get("bytes") != path.stat().st_size):
+            raise ValueError("Deployment audit analysis dependency differs from its executed source: " + name)
+        executed_sources.append({"source": str(path), "relative": "deployment-audit/source/" + path.name,
+                                 "sha256": digest(path), "bytes": path.stat().st_size})
+    records = [{"source": str(path), "relative": "deployment-audit/" + name,
+                "sha256": digest(path), "bytes": path.stat().st_size}
+               for path, name in [(source, "deployment-audit.json"), (helper, "source/batch_deployment_audit.py")]]
+    records.extend(executed_sources)
+    frozen_name = next((name for name in ["batch_deployment_audit.py", "scripts/batch_deployment_audit.py"] if name in stage["inputs"]), None)
+    frozen_helper = stage["inputs"].get(frozen_name)
+    return {"verified": True, "path": records[0]["relative"], "sha256": records[0]["sha256"], "bytes": records[0]["bytes"],
+            "clusters": len(clusters), "workers": len(directories), "matched_errors": 0,
+            "feature_profile": raw.get("feature_profile", "legacy-isolated"), "database_artifacts_absent": pure_kv,
+            "live_coverage": raw["live_coverage"], "input_files_revalidated": len(inputs),
+            "duration_s": raw["duration_s"], "executed_helper": {"path": records[1]["relative"], **raw["helper"]},
+            "executed_analysis_helpers": [{key: record[key] for key in ["relative", "sha256", "bytes"]} for record in executed_sources],
+            "frozen_helper": frozen_helper, "frozen_helper_path": frozen_name,
+            "executed_helper_matches_frozen": frozen_helper == raw["helper"],
+            "scope": "Rebound saved launch flags/manifests, final collected directory entries and full stdout scans for 21 DS epochs / 42 distinct RocksDB paths. Only the gate has a recorded live procfs observation (1/21); other 20 epochs remain live-unobserved. No remote inode/symlink or continuous-liveness proof is inferred. Native read failures retain their separate result validity. Executed postprocessor/dependency sources are separate from frozen stage copies."}, records
+
+
 def render(args):
     cutoff = time.time_ns()
     suite, rfc = args.suite.resolve(strict=True), args.rfc.resolve(strict=True)
@@ -463,11 +827,14 @@ def render(args):
     source_roots = [suite, rfc, scripts] + [Path(path).resolve(strict=True) for path in getattr(args, "history", [])]
     source_roots += [Path(path).resolve(strict=True) for path in getattr(args, "failed_attempts", [])]
     source_roots += [Path(path).resolve(strict=True) for path in [getattr(args, key, None) for key in ["gate", "smoke", "builds", "environment", "runtime_inputs", "resource_audit"]] if path]
+    if getattr(args, "deployment_audit", None):
+        source_roots.append(Path(args.deployment_audit).resolve(strict=True))
     if any(out == source or source in out.parents or out in source.parents for source in source_roots):
         raise ValueError("Report output must be separate from the measured suite")
     analysis = analyze(suite, args.device)
-    if not args.allow_partial and not analysis["passed"]:
-        raise RuntimeError("A completed successful independently recomputed suite is required; use --allow-partial only for an explicitly partial preview")
+    completion = report_completion(analysis)
+    if not args.allow_partial and not completion["complete"]:
+        raise RuntimeError("A complete independently verified matrix is required; native read-only failures need their original outcome evidence, while missing/invalid/fatal executions remain partial")
     if not args.allow_partial and analysis["summary"].get("action") != "run":
         raise ValueError("Only the formal run may be rendered as a completed report")
     stage, runtime_records = verify_runtime_inputs(suite, getattr(args, "runtime_inputs", None), require=not args.allow_partial)
@@ -495,6 +862,10 @@ def render(args):
         copied = copy_file(Path(record["source"]), out, "measured-runtime/" + record["relative"])
         if any(copied[key] != record[key] for key in ["sha256", "bytes"]):
             raise ValueError("Frozen runtime input changed during copy: " + record["relative"])
+        if "mode" in record and (out / copied["path"]).stat().st_mode & 0o777 != record["mode"]:
+            raise ValueError("Frozen runtime input mode changed during copy: " + record["relative"])
+        if "mode" in record:
+            copied["mode"] = record["mode"]
         provenance.append(copied)
     for name in ["parameters.json", "plan.json", "summary.json", "status.json", "products.json", "batch-stage.json", "events.jsonl"]:
         if (suite / name).exists():
@@ -588,10 +959,24 @@ def render(args):
             provenance.append(copied)
     elif not args.allow_partial:
         raise ValueError("A completed independent --resource-audit directory is required")
+    deployment_audit, deployment_records = None, []
+    if getattr(args, "deployment_audit", None):
+        deployment_audit, deployment_records = verify_deployment_evidence(args.deployment_audit, suite, args.runtime_inputs, scripts)
+        for record in deployment_records:
+            copied = copy_file(Path(record["source"]), out, record["relative"])
+            if any(copied[key] != record[key] for key in ["sha256", "bytes"]):
+                raise ValueError("Independent deployment audit/executed-source changed during copy")
+            provenance.append(copied)
+    elif not args.allow_partial:
+        raise ValueError("A completed same-stage --deployment-audit JSON is required")
     for row in analysis["rows"]:
         source = suite / (row["identity"] + ".json")
         if source.exists():
             copy_file(source, out, row["evidence"])
+        if row["status"] == "failed" and row.get("evidence_verified") is True:
+            relative = Path(row["identity"].split("/")[0]) / "case-outcomes" / (source.stem + ".json")
+            row["outcome_evidence"] = "results/" + relative.as_posix()
+            copy_file(suite / relative, out, row["outcome_evidence"])
     for epoch in analysis.get("epochs", []):
         relative = Path(epoch["evidence"])
         if relative.is_absolute() or ".." in relative.parts or relative.parts[0] != "results":
@@ -601,16 +986,19 @@ def render(args):
     profile = configuration_profile(json.loads((suite / "products.json").read_text()))
     if not args.allow_partial and not profile["capacity_adapted"]:
         raise ValueError("This final report requires the reviewed frozen 8192/8192/4/1000 Mooncake batch capacity profile")
+    if stage and stage.get("feature_profile") == "pure-kv" and profile["feature_profile"] != "pure-kv":
+        raise ValueError("All three frozen product environments must declare the same pure-KV feature profile")
     if not args.allow_partial and profile["capacity_adapted"] and not {"gate", "smoke"} <= {row["action"] for row in history_phases if row["status"] == "failed"}:
         raise ValueError("The capacity-adapted matrix must retain the original default gate and default C8 smoke failures via --history")
     payload.update(builds=builds, gate=gate, gate_verification=gate_verification, provenance=provenance,
                    configuration_profile=profile, history_phases=history_phases, smoke=smoke,
                    tcp_verification=tcp_verification,
                    datasystem_isolation=datasystem_isolation, failed_attempts=failed_bindings,
-                   resource_audit=resource_audit,
-                   publication_eligible=not args.allow_partial and analysis["passed"] and analysis["summary"].get("action") == "run",
+                   resource_audit=resource_audit, deployment_audit=deployment_audit,
+                   publication_eligible=not args.allow_partial and completion["complete"],
+                   completion_scope="A complete evidence matrix may contain verified native read-only failures. Passed remains false for those runs; failed rates and partial windows do not enter successful performance aggregates.",
                    runtime_binding={"verified": bool(runtime_records), "files": len(runtime_records),
-                                    "scope": "Only exact stage.inputs files are archived under measured-runtime; current report/analysis tools are separate."},
+                                    "scope": "Only exact stage.inputs files are archived under measured-runtime; current report/analysis tools are separate. Optional frozen modes describe collected runtime files and are retained in ZIP/raw members; ordinary public mirrors are normalized to 0644."},
                    report_scope="Independent native batch TCP matrix; the prior single-key reports and measurements are unchanged.")
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     (out / "data.json").write_text(encoded)
@@ -624,17 +1012,47 @@ def render(args):
         if not analysis["summary"].get("ended"):
             raise RuntimeError("Raw evidence packaging requires a stopped suite")
         with tarfile.open(out / "raw-evidence.tar.gz", "w:gz", compresslevel=6) as archive:
-            for root, name in [(suite, suite.name)] + ([(args.gate, args.gate.name)] if args.gate else []) + ([(smoke_path, smoke_path.name)] if smoke else []) + [(root, root.name) for root in history_roots] + [(root, "history/" + root.name) for root in history_roots_explicit] + [(root, "failed-attempts/" + root.name) for root in failed_roots]:
+            roots_seen = set()
+            for root, name in [(suite, suite.name)] + ([(args.gate, args.gate.name)] if args.gate else []) + ([(smoke_path, smoke_path.name)] if smoke else []) + [(root, root.name) for root in history_roots] + [(root, "history/" + root.name) for root in history_roots_explicit] + [(root, "failed-attempts/" + root.name) for root in failed_roots] + ([(suite.parent / "run", "run")] if runtime_records else []):
+                identity = (root.resolve(strict=True), name)
+                if identity in roots_seen:
+                    continue
+                roots_seen.add(identity)
                 for source in sorted(root.rglob("*")):
                     if source.is_symlink():
                         raise RuntimeError("Raw evidence must not follow symlinks")
-                    if source.is_file():
+                    if source.is_file() or source.is_dir():
                         archive.add(source, arcname=(Path(name) / source.relative_to(root)).as_posix(), recursive=False)
-            for record in tcp_records + resource_records:
+            if runtime_records:
+                archive.add(suite.parent / "batch-stage.json", arcname="batch-stage.json", recursive=False)
+                for record in runtime_records:
+                    archive.add(record["source"], arcname="runtime-inputs/" + record["relative"], recursive=False)
+            for record in tcp_records + resource_records + deployment_records:
                 archive.add(record["source"], arcname="audits/" + record["relative"], recursive=False)
+        if runtime_records or tcp_records or resource_records or deployment_records:
+            archive_inputs = {}
+            def bind(name, expected):
+                value = {key: expected[key] for key in ["sha256", "bytes", "mode"] if key in expected}
+                if name in archive_inputs and any(archive_inputs[name][key] != value[key] for key in archive_inputs[name].keys() & value.keys()):
+                    raise ValueError("Audits disagree on the same raw input: " + name)
+                archive_inputs[name] = {**archive_inputs.get(name, {}), **value}
+            if deployment_audit:
+                for name, record in json.loads((out / "deployment-audit/deployment-audit.json").read_bytes())["inputs"].items():
+                    bind(name, record)
+            for record in runtime_records:
+                bind("runtime-inputs/" + record["relative"], record)
+            for record in tcp_records + resource_records + deployment_records:
+                bind("audits/" + record["relative"], record)
+            if tcp_verification:
+                for name, record in json.loads((out / "datasystem-batch-tcp-verification.json").read_bytes())["inputs"].items():
+                    bind(args.gate.name + "/" + name, record)
+            if resource_audit:
+                for record in json.loads((out / "resource-audit/resource-audit.json").read_bytes())["inputs"]:
+                    bind(suite.name + "/" + record["path"], record)
+            verify_tar_inputs(out / "raw-evidence.tar.gz", archive_inputs)
     template = (scripts / "batch-report.html").read_text()
     count = analysis["counts"]
-    status = ("部分预览 · " + str(analysis["summary"].get("action", "unknown")) + " · " + ("源阶段重算通过" if analysis["passed"] else "有未完成或无效证据")) if args.allow_partial else "矩阵完成 · 重算通过"
+    status = ("部分预览 · " + str(analysis["summary"].get("action", "unknown")) + " · " + ("源阶段重算通过" if analysis["passed"] else "有未完成或原生失败证据")) if args.allow_partial else ("证据矩阵完整 · 含原生接口失败" if completion["native_failures"] else "矩阵完成 · 重算通过")
     build_rows = []
     for build in builds:
         cells = [build.get(key, "未提供") for key in ["product", "tag", "sha", "python"]]
@@ -644,15 +1062,20 @@ def render(args):
     if not builds:
         build_rows.append('<tr><td colspan="6">未提供构建复用记录；不据此声称重新构建或核验。</td></tr>')
     gate_text = ('<a href="gate/summary.json">' + ("组合批量正确性证据" if gate.get("action") == "composed_correctness_gate" else "本配置完整批量正确性门禁") + ' ↗</a>（' + ("通过" if gate.get("valid") is True else "未通过") + ("；组合本身不是重新执行）" if gate.get("action") == "composed_correctness_gate" else "；十个真实客户端 / 写模式执行）")) if gate else "尚未提供批量门禁记录。"
+    pure_kv = profile["feature_profile"] == "pure-kv"
+    directory_label = "状态目录（rocksdb_store_dir）" if pure_kv else "RocksDB 目录"
+    feature_note = ('<div class="notice small"><b>本矩阵冻结的精简配置。</b>DataSystem 关闭 RocksDB 数据写入、Stream Cache sockets、spill、性能跟踪与采样；独立状态目录仍可保存 eviction-policy/worker-state.pb。Mooncake 关闭 store/TE metrics、master snapshot/restore、disk eviction、offload 与 KV events；LMCache 使用 noop eviction，关闭 observability、metrics、logging、KV event log 与 coordinator reporting。必要内存元数据、心跳与校验保留；Mooncake 无关闭旗标的 admin listener 与后台循环仍存在。配置和源码边界见文档，未测量这些开关各自的性能收益。</div>' if pure_kv else '')
     now = datetime.datetime.now(datetime.timezone.utc)
     replacements = {
-        "{{STATUS}}": status, "{{COUNTS}}": f"{count.get('valid', 0)} 有效 · {count.get('not_supported', 0)} N/A · {count.get('invalid', 0)} 无效 · {count.get('missing', 0)} 缺失",
+        "{{STATUS}}": status, "{{COUNTS}}": f"{count.get('valid', 0)} 有效 · {count.get('failed', 0)} 原生失败 · {count.get('not_supported', 0)} N/A · {count.get('invalid', 0)} 无效 · {count.get('missing', 0)} 缺失",
         "{{REPEATS}}": str(analysis["repeats"]), "{{BUILD_ROWS}}": "".join(build_rows), "{{GATE}}": gate_text,
         "{{GATE_HISTORY}}": f"主矩阵无效 {count.get('invalid', 0)} 行 · 正式尝试历史失败 {sum(row['action'] == 'failed_formal_attempt' for row in history_phases)} 轮 · 历史 gate / C8 smoke 失败 {sum(row['status'] == 'failed' and row['action'] in {'gate', 'smoke'} for row in history_phases)} 轮",
         "{{PROFILE_NAME}}": html.escape(profile["name"]),
+        "{{FEATURE_PROFILE}}": feature_note,
         "{{TCP_PROOF}}": ('<a href="datasystem-batch-tcp-verification.json">DataSystem 批量 TCP 完整审计 ↗</a>：16 组合 / 32 方向，逐方向成功 TCP 字节 ≥ B × 1024（含 RPC 开销），并捕获同批某 key 的完整 1 KiB 样本；不等于逐字节证明整批载荷或持续跟踪正式测量。' if tcp_verification else '尚未提供本批量门禁的 TCP payload 审计；不以旧单 key 证明替代。'),
-        "{{DS_ISOLATION}}": ('<b>本配置已核对两个 Worker 的独立 RocksDB 目录。</b>' + ''.join('<p class="small">Worker ' + str(row["worker_index"]) + '：<a href="' + row["evidence"] + '">原始旗标 ↗</a> <span class="path">' + html.escape(row["rocksdb_store_dir"]) + '</span></p>' for row in datasystem_isolation["workers"])) if datasystem_isolation and datasystem_isolation.get("verified") else '尚无两个 Worker 独立 RocksDB 目录的完整门禁证明；预览不具备公平部署结论。',
+        "{{DS_ISOLATION}}": (('<b>本配置已核对两个 Worker 的独立' + directory_label + '。</b>' + ''.join('<p class="small">Worker ' + str(row["worker_index"]) + '：<a href="' + row["evidence"] + '">原始旗标 ↗</a> <span class="path">' + html.escape(row["rocksdb_store_dir"]) + '</span></p>' for row in datasystem_isolation["workers"])) if datasystem_isolation and datasystem_isolation.get("verified") else '尚无两个 Worker 独立' + directory_label + '的完整门禁证明；预览不具备公平部署结论。') + ('<p class="small"><a href="deployment-audit/deployment-audit.json">全部服务期部署审计 ↗</a>：21 集群 / 42 个独立' + directory_label + '，完整 stdout 扫描匹配存储文件错误 0 条。仅 gate 1/21 有已保存 live procfs 观测，其余 20 个服务期只核启动记录与日志；不推断持续存活或远端 inode 隔离。</p>' if deployment_audit else '<p class="small">尚未提供全部服务期部署审计。</p>'),
         "{{RESOURCE_AUDIT}}": ('<a href="resource-audit/resource-audit.md">独立资源审计 ↗</a> · <a href="resource-audit/resource-audit.json">完整 JSON ↗</a>：核对原始采样与 SDK 窗口，保留 CPU throttle、内存事件、swap、parent/monitor 和外部负载估计的独立口径，不新增采样或性能重复。' if resource_audit else '尚未提供独立资源审计。'),
+        "{{NATIVE_FAILURES}}": ('<div class="notice failure"><b>' + str(count.get("failed", 0)) + ' 个原生只读用例返回错误。</b>失败结果与全部客户端原始记录和实际错误单独保留。它们不是 N/A 或零吞吐；发生错误的实际窗口中成功批次速率不进入性能柱、散点或三轮聚合。完整执行与证据核验不代表全部 API 成功。<a href="#native-failures">查看全部失败原件 ↗</a></div>' if count.get("failed", 0) else ''),
         "{{CONFIG_ROWS}}": "".join('<tr><td>' + html.escape(row["key"]) + '</td><td>' + str(row["pinned_source_default"]) + '</td><td>' + str(row["value"]) + '</td><td>' + html.escape(row["origin"]) + '</td></tr>' for row in profile["settings"]),
         "{{CREATED}}": "生成 " + now.astimezone(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M"),
         "{{GENERATED}}": html.escape(now.isoformat()),
@@ -666,24 +1089,29 @@ def render(args):
         raise RuntimeError("Unresolved report template placeholder")
     archive = reproduction_archive(scripts, rfc, out)
     with zipfile.ZipFile(archive, "a", zipfile.ZIP_DEFLATED) as zipped:
-        for directory in ["builds", "provenance", "gate", "smoke", "gate-history", "history", "failed-attempts", "environment", "measured-runtime", "tcp-proof-sources", "resource-audit", "results"]:
+        for directory in ["builds", "provenance", "gate", "smoke", "gate-history", "history", "failed-attempts", "environment", "measured-runtime", "tcp-proof-sources", "resource-audit", "deployment-audit", "results"]:
             for source in sorted((out / directory).rglob("*")) if (out / directory).exists() else []:
                 if source.is_file():
                     zipped.write(source, "kvc-fair/" + source.relative_to(out).as_posix())
         if tcp_verification:
             zipped.write(out / "datasystem-batch-tcp-verification.json", "kvc-fair/datasystem-batch-tcp-verification.json")
-        for record in tcp_records + resource_records:
+        for record in tcp_records + resource_records + deployment_records:
             packaged = zipped.read("kvc-fair/" + record["relative"])
             if len(packaged) != record["bytes"] or hashlib.sha256(packaged).hexdigest() != record["sha256"]:
                 raise ValueError("Packaged batch TCP proof/source bytes changed")
         for record in runtime_records:
-            packaged = zipped.read("kvc-fair/measured-runtime/" + record["relative"])
+            name = "kvc-fair/measured-runtime/" + record["relative"]
+            packaged = zipped.read(name)
             if len(packaged) != record["bytes"] or hashlib.sha256(packaged).hexdigest() != record["sha256"]:
                 raise ValueError("Packaged measured runtime changed: " + record["relative"])
+            if "mode" in record and zipped.getinfo(name).external_attr >> 16 & 0o777 != record["mode"]:
+                raise ValueError("Packaged measured runtime mode differs from frozen stage: " + record["relative"])
         for record in failed_runtime:
             packaged = zipped.read("kvc-fair/" + record["path"])
             if len(packaged) != record["bytes"] or hashlib.sha256(packaged).hexdigest() != record["sha256"]:
                 raise ValueError("Packaged historical failed-attempt stage input changed")
+            if "mode" in record and zipped.getinfo("kvc-fair/" + record["path"]).external_attr >> 16 & 0o777 != record["mode"]:
+                raise ValueError("Packaged historical frozen runtime mode changed")
         if zipped.testzip() is not None or len(zipped.namelist()) != len(set(zipped.namelist())):
             raise RuntimeError("Invalid or duplicate reproduction ZIP entries")
     (out / "index.html").write_bytes(version_zip_href(template, digest(archive)).encode("utf-8"))
@@ -705,6 +1133,7 @@ def main():
     parser.add_argument("--smoke", type=Path)
     parser.add_argument("--tcp-verification", type=Path)
     parser.add_argument("--resource-audit", type=Path)
+    parser.add_argument("--deployment-audit", type=Path)
     parser.add_argument("--environment", type=Path)
     parser.add_argument("--runtime-inputs", type=Path)
     parser.add_argument("--history", type=Path, action="append", default=[])

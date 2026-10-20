@@ -8,17 +8,27 @@
 
 吞吐由全部完成 batch 数除以八客户端完整单调时钟窗口重算，keys/s 再乘 B。P50/P95/P99 从合并直方图重算，保留桶界；延迟属于整批 API，不除以 B。中位数、范围与 CV 只在三个计划轮次完整有效时生成。LMCache 不支持的原生 API 写为 N/A；未完成、失败和资源未知分别保留。
 
+后续 `continue_readonly_errors=true` 协议只允许证据完整的原生 GET/EXIST 错误继续：客户端身份、预热、后验验证、正常关闭与进程退出仍须通过，写入错误、内容校验错误与编排 fatal 仍停止执行。失败行是 `status=failed, valid=false, evidence_verified=true`，原始 JSON 不改；独立 case-outcome、命令退出码、事件及 epoch/suite 失败身份相互绑定。完整 180 槽位可以含原生失败，`analysis.passed` 仍为 false；只有全网格证据核验完成才具有发布资格，不能以“完整执行”冒充“全部成功”。失败窗口的实际成功批次和提前停止速率另表保留，不进入性能柱、散点、三轮聚合或 B1 倍率；N/A 与零值不能替代失败。
+
 资源只取 SDK 窗口内真实样本。服务端与客户端是互斥 cgroup，CPU 与所选设备 I/O 使用窗口内首末计数器差分除以真实样本跨度；少于两个样本、计数重置或缺失返回 null，不向窗口两端外推。计费内存展示样本观测最大值，匿名内存加 SHM 另列，不重复加 file。每个结果保留样本数、覆盖率和真实间隔统计。
 
 ## 1.2 门禁、历史和源码来源分层
 
-`batch_report.py` 在最终模式要求正式矩阵重算通过、同 stage/products 的十个真实门禁组件与 C8 smoke 分别成功，以及原始构建记录完整。`measured-runtime/` 只归档 `batch-stage.json` 已列出的输入，逐文件核对字节数与 SHA256，并在复制后和实际 ZIP 成员中再次核验。当前报告工具另存原 ZIP 的工具路径，不冒充原测量源码。
+`batch_report.py` 在最终模式要求正式 150 个支持操作与 30 个 N/A 的完整网格独立核验、同 stage/products 的十个真实门禁组件与 C8 smoke 分别成功，以及原始构建记录完整。原生只读失败不等于编排证据缺失，后者不能发布完整结论。`measured-runtime/` 只归档 `batch-stage.json` 已列出的输入，逐文件核对字节数与 SHA256，并在复制后和实际 ZIP 成员中再次核验。当前报告工具另存原 ZIP 的工具路径，不冒充原测量源码。
+
+冻结清单若包含 `mode`，按整数 `st_mode & 0o777` 核对实际采集文件，并要求 `runtime_overrides` 与最终 `inputs` 一致。原远端执行权限保存在 measured-runtime 的 ZIP external_attr 和 raw tar member 中；普通公开文件仍统一 0644，不能把 canonical 工具的本地权限冒充远端测量权限。
 
 `batch_resource_audit.py` 通过独立后处理命令产生 JSON/Markdown，再由报告的 `--resource-audit` 接收。报告核对同一 suite、全部原始 sample/result 输入 SHA/字节数、SDK 窗口身份与单调边界、JSON/Markdown 一致性及实际 helper 源 SHA；不拼装新采样、不重跑负载。完整输出和 helper 源单独保存在 `resource-audit/`，页面只引用小摘要。throttle、memory.events 与 swap 的历史值和窗口增量分开；parent/monitor 不与 server+client 再相加，外部进程 CPU 只是采集器 leader-affinity 估计。
+
+最终报告还要求 `--deployment-audit`：`batch_deployment_audit.py` 对完整本地采集根目录执行独立后处理，报告重新核对其全部输入 SHA/字节数、同一 stage、DataSystem runtime 源和三个阶段的实际 epoch 计划。pure-kv 使用 schema3，额外核对实际关闭 flags、各实例收集目录的文件清单及 RocksDB 数据库制品缺失，不能仅凭一个名为 rocksdb 的目录断言数据库已运行。21 个 DataSystem 服务期对应 42 个互不重叠的实例路径；完整 stdout 扫描匹配存储文件错误必须为零。完整、已核验的原生只读失败不改写为部署失败，结果有效性单独保留。live procfs 仅覆盖 gate 的 1/21，其余 20 个服务期只依据启动记录和日志，不推断远端 inode、符号链接或持续存活。完整 JSON、真正执行的 helper 和动态加载的分析源码保存在 `deployment-audit/`；阶段冻结输入中的 helper 草稿单独记录 SHA，不冒充执行源码。部分预览可不提供，显式提供的错误证据仍会拒绝。
+
+raw tar 保留当前 `run/`、根 `batch-stage.json` 和逐项冻结的 `runtime-inputs/`，不直接打包整个本地采集根目录。打包后用单次流式解压核对三个独立审计的全部输入、实际 helper 与冻结源码的归档 SHA/字节数，拒绝重复成员；不把大量日志嵌入页面数据或 ZIP。smoke 部分预览中源 suite 与 smoke 自身相同，只归档一次。
 
 `--tcp-verification` 指向本批量门禁产生的 DataSystem 完整 TCP 审计。报告重新核对输入文件和解析器源码 SHA、十六个唯一组合及三十二个 PUT/GET 方向的结构、字节下限与同批 key 派生样本身份。完整审计 JSON 保持原字节外链；页面只含约束范围内的小摘要和文件 SHA/字节数，不内嵌大量 anchors，也不重新解析系统调用。每方向完整 1 KiB 样本与含 RPC 开销的 TCP 字节下限，不等于整批每个字节都被证明，更不代表正式性能窗口持续跟踪。
 
 默认 r2 的失败门禁、无跟踪独立诊断、证据组合、失败 C8 smoke 与 default/8192 机制诊断分别通过 `--history` 保留。历史 JSON 和执行 helper 原件进入 ZIP，完整日志进入 raw tar。默认失败不算适配后主矩阵无效行，诊断与证据组合也不增加正式性能重复。队列原因尚未以明确 reason counter 确认。
+
+`--history` 也接收纯KV预检和 `deadline-diagnostic-001` 四对照。报告逐项核对其原始 artifacts、真正执行的 helper、四份 child SHA、同一组16个 key/payload、完整返回状态与单调时钟边界，再生成小表。实际 R6 观察为：A 仅 EXIST，13.027326933 秒通过；B GET 后连续 EXIST，10.019303674 秒出现 deadline；C GET 后等10.1秒，首个B16 EXIST用0.021342848秒返回错误；D 同等待后的B1 EXIST用0.001553996秒通过。SDK诊断46.339531674秒嵌套于外层63.659922266秒，不能相加。四个新SDK进程的低频诊断不进入主性能重复；捕获的TCP发送记录不能当作protobuf方法解码，也不单凭这些观测证明TLS内存内容。R6 Mooncake启动的权限错误属于部署预检失败，没有正式矩阵，不重分类为产品API失败。
 
 `--failed-attempts` 可重复指定独立失败正式尝试的完整本地采集目录。目录须保留终止失败的正式 summary、同目录 stage、原 `runtime-inputs/` 和 run 日志。原件与逐项核验的历史冻结输入分别归档；历史八个成功行和后续失败行不会计入新主矩阵的重复。当前 R3 DataSystem 失败属于双 Worker 共用默认 RocksDB 目录的部署隔离遗漏，不据此判产品 API 缺陷。最终门禁还会核对两份原始 Worker 旗标、捕获的 live argv、PID/start-ticks 与独立实例内的非重叠 RocksDB 路径。
 
@@ -42,12 +52,15 @@ python3 batch_report.py \
   --failed-attempts "$batch_local/history/shared-rocksdb-r3" \
   --tcp-verification "$batch_local/datasystem-batch-tcp-verification.json" \
   --resource-audit "$batch_local/resource-audit" \
+  --deployment-audit "$batch_local/deployment-audit.json" \
   --operation-log "$batch_local/operation-timings.jsonl" --raw-evidence
 ```
 
 示例从脚本目录运行；`--runtime-inputs` 应使用采集命令实际生成的目录名，不创建或替代冻结证据。输出必须是与输入分开的新空目录。上述命令是复现入口，不表示尚未执行阶段已经成功。
 
 报告前单独运行 `python3 batch_resource_audit.py --suite "$batch_local/formal-batch-001" --out "$batch_local/resource-audit"`；输出目录必须是新的独立目录。若后处理 helper 源发生变化，原审计和源版本保留，使用新目录产生新审计，不能用事后源码冒充旧执行。
+
+部署审计在 gate、smoke、正式矩阵和当前 `run/` 日志全部采集后运行：`python3 batch_deployment_audit.py --root "$batch_local" --out "$batch_local/deployment-audit.json"`。它不连接目标节点，不启动或探测服务；输出须使用新文件。
 
 ## 1.4 验收后文档刷新
 

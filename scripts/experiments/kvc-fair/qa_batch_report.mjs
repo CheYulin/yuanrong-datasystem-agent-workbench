@@ -26,9 +26,17 @@ try {
     await page.waitForFunction(()=>window.KVC_BATCH_DATA&&Object.keys(window.KVC_BATCH_CHARTS||{}).length===9);
     const data=await page.evaluate(()=>window.KVC_BATCH_DATA);
     state.rows=data.rows.length;
-    check(`${width}: full observed matrix`,data.rows.length===180&&data.rows.filter(r=>r.valid).length===150&&data.rows.filter(r=>r.status==='not_supported').length===30&&data.passed===true,{counts:data.counts,passed:data.passed});
+    const failedRows=data.rows.filter(r=>r.status==='failed'),validRows=data.rows.filter(r=>r.valid);
+    check(`${width}: full observed matrix`,data.rows.length===180&&validRows.length+failedRows.length===150&&data.rows.filter(r=>r.status==='not_supported').length===30&&data.evidence_verified===true&&data.passed===(failedRows.length===0)&&data.rows.every(r=>['valid','failed','not_supported'].includes(r.status)),{counts:data.counts,passed:data.passed,evidence_verified:data.evidence_verified});
+    check(`${width}: native failures remain explicit`,failedRows.every(r=>r.valid===false&&r.evidence_verified===true&&r.failures>0&&r.native_errors.length>0&&['get','exist_hit','exist_miss'].includes(r.operation))&&JSON.stringify(data.summary.measurement_failures||[])===JSON.stringify(failedRows.map(r=>r.identity)));
     const identities=data.rows.map(r=>r.identity);
     check(`${width}: unique identities`,new Set(identities).size===180);
+    const epochs=data.epochs||[],epochIds=epochs.map(e=>e.identity);
+    check(`${width}: all 36 isolated service lifetimes completed`,data.workload_protocol==='separate-read-and-fresh-put-v1'&&epochs.length===36&&new Set(epochIds).size===36&&new Set(epochs.map(e=>e.run_dir)).size===36&&epochs.every(e=>{const failed=failedRows.filter(r=>r.identity.startsWith(e.identity.split('/')[0]+'/')&&r.epoch===e.identity.split('/')[1]).map(r=>r.identity);return e.valid===(failed.length===0)&&(e.execution_complete===true||e.valid===true)&&JSON.stringify(e.measurement_failures||[])===JSON.stringify(failed);})&&JSON.stringify(data.summary.epochs_completed)===JSON.stringify(epochIds));
+    const phaseOption=await page.evaluate(()=>window.KVC_BATCH_CHARTS.phases.getOption()),phaseEpochs=phaseOption.series[0].data.filter(p=>p.value[2]===4),phaseErrors=[];
+    if(phaseEpochs.length!==epochs.length)phaseErrors.push('service lifetime point count');
+    for(const point of phaseEpochs){const epoch=epochs.find(e=>point.row.name==='服务 epoch · '+e.identity);if(!epoch||!near(point.value[0],epoch.start_wall_ns/1e6)||!near(point.value[1],epoch.end_wall_ns/1e6)||!near(point.row.duration,epoch.duration_s))phaseErrors.push('service lifetime point');}
+    check(`${width}: service lifetime timeline equals original epoch boundaries`,phaseErrors.length===0,{errors:phaseErrors});
     const dimensions=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth,headings:[...document.querySelectorAll('main h2')].map(e=>e.textContent),captions:[...document.querySelectorAll('figure')].map(f=>{const a=f.querySelector('figcaption'),b=f.querySelector('.chart'),x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return{align:getComputedStyle(a).textAlign,below:x.top>=y.bottom-1,center:Math.abs(x.left+x.width/2-y.left-y.width/2),text:a.textContent};}),charts:Object.entries(window.KVC_BATCH_CHARTS).map(([id,c])=>({id,width:c.getWidth(),dom:c.getDom().getBoundingClientRect().width}))}));
     state.dimensions=dimensions;
     check(`${width}: no horizontal page overflow`,dimensions.scroll<=width+1,dimensions);

@@ -35,11 +35,87 @@ def failed_result(operation="exist_hit", batch=16):
     return sync_failure(raw)
 
 
+def zero_success_result(operation="exist_hit", batch=16):
+    raw = failed_result(operation, batch)
+    for client in raw["clients"]:
+        client.update(success=0, histogram={}, latency_sum_ns=0, latency_max_ns=0,
+                      per_second={}, validated_keys=0)
+    for post in raw["post_validation"]:
+        post.update(post_validated_keys=0, restored_verified_keys=0)
+    raw.update(mean_us=None, max_us=0.0)
+    return sync_failure(raw)
+
+
 def measured(raw, context=None):
     row = {"identity": f"r0-datasystem/b{raw['parameters']['batch']}-{raw['parameters']['op']}",
            "product": "datasystem", "repeat": 0, "batch": raw["parameters"]["batch"],
            "operation": raw["parameters"]["op"], "supported": True}
     return subject.measured_row(raw, row, [], [], context or {"continue_readonly_errors": True, "isolated_epochs": True})
+
+
+class ZeroSuccessReadFailureTests(unittest.TestCase):
+    def test_eight_native_errors_with_no_success_preserve_complete_failed_evidence(self):
+        for operation in ["get", "exist_hit", "exist_miss"]:
+            with self.subTest(operation=operation):
+                raw = zero_success_result(operation)
+                self.assertEqual(raw["histogram"], {})
+                self.assertEqual([raw[name] for name in ["p50", "p95", "p99"]], [None] * 3)
+                self.assertEqual(raw["process_exit_codes"], [0] * 8)
+                self.assertEqual(len(raw["closed"]), 8)
+                row = measured(raw)
+                self.assertEqual(row["issues"], [])
+                self.assertEqual(row["status"], "failed")
+                self.assertFalse(row["valid"])
+                self.assertTrue(row["evidence_verified"])
+                self.assertEqual((row["success"], row["success_keys"], row["failures"]), (0, 0, 8))
+                self.assertEqual(len(row["native_errors"]), 8)
+                self.assertEqual(row["duration_s"], 6.4)
+                self.assertTrue(row["short_window"])
+                self.assertEqual([row[name + "_us"] for name in ["p50", "p95", "p99"]], [None] * 3)
+
+    def test_zero_success_is_invalid_without_authorization_or_complete_native_error_evidence(self):
+        for mode in ["unauthorized", "no_error", "fatal", "bad_exit", "missing_ack", "bad_warm", "count_mismatch"]:
+            with self.subTest(mode=mode):
+                raw = zero_success_result()
+                context = {"continue_readonly_errors": mode != "unauthorized", "isolated_epochs": True}
+                if mode == "no_error":
+                    raw["clients"][0]["errors"] = []
+                elif mode == "fatal":
+                    raw["fatal"] = "synthetic fatal"
+                elif mode == "bad_exit":
+                    raw["process_exit_codes"][0] = 1
+                elif mode == "missing_ack":
+                    raw["closed"].pop()
+                elif mode == "bad_warm":
+                    raw["warmup"][0]["warm"] = False
+                elif mode == "count_mismatch":
+                    raw["failures"] = 7
+                row = measured(raw, context)
+                self.assertEqual(row["status"], "invalid")
+                self.assertFalse(row["evidence_verified"])
+        for operation in ["put", "upsert"]:
+            with self.subTest(operation=operation):
+                self.assertEqual(measured(zero_success_result(operation))["status"], "invalid")
+
+    def test_zero_success_cannot_invent_a_latency_percentile(self):
+        raw = zero_success_result()
+        raw["p99"] = {"lower_us": 1, "upper_us": 2}
+        row = measured(raw)
+        self.assertEqual(row["status"], "invalid")
+        self.assertIn("p99 merged bucket mismatch", row["issues"])
+
+    def test_zero_success_failed_repetition_never_becomes_zero_on_main_chart(self):
+        rows = []
+        for repeat in range(3):
+            row = measured(zero_success_result() if repeat == 1 else raw_result("exist_hit", 16),
+                           {"continue_readonly_errors": True})
+            row["repeat"] = repeat
+            rows.append(row)
+        result = subject.aggregate(rows, 3)[0]
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["valid_repeats"], 2)
+        self.assertTrue(all(metric[key] is None for metric in result["metrics"].values()
+                            for key in ["median", "min", "max", "cv_percent"]))
 
 
 class ReadFailureTests(unittest.TestCase):

@@ -128,6 +128,90 @@ class IsolationNoticeTests(unittest.TestCase):
                 self.run_notice(args)
             self.assertEqual(snapshot(args.report_dir), before)
 
+    def publication_receipt(self, args):
+        content = b'{"published":true,"report":"historical fixture"}\n'
+        (args.report_dir / "publication.json").write_bytes(content)
+        (args.report_dir / "publication.json").chmod(0o644)
+        args.publication_receipt_sha256 = hashlib.sha256(content).hexdigest()
+        return content
+
+    def test_exact_publication_receipt_dryrun_preserves_all_bytes_and_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.fixture(Path(directory)); content = self.publication_receipt(args)
+            before = snapshot(args.report_dir)
+            result = self.run_notice(args)
+            self.assertEqual(snapshot(args.report_dir), before)
+            self.assertEqual(result["publication_receipt"]["sha256"], hashlib.sha256(content).hexdigest())
+            self.assertTrue(result["publication_receipt"]["added_to_manifest"])
+            self.assertTrue(result["original_output_unchanged"])
+
+    def test_publication_receipt_apply_preserves_it_and_zip_and_covers_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.fixture(Path(directory)); content = self.publication_receipt(args)
+            before = snapshot(args.report_dir); args.apply = True
+            result = self.run_notice(args); after = snapshot(args.report_dir)
+            self.assertEqual(after["publication.json"], before["publication.json"])
+            self.assertEqual(after["reproduce.zip"], before["reproduce.zip"])
+            self.assertIn(hashlib.sha256(content).hexdigest() + "  publication.json\n", after["SHA256SUMS"][0].decode())
+            verified = subject.verify_manifest(args.report_dir)
+            self.assertEqual(verified["publication.json"]["sha256"], args.publication_receipt_sha256)
+            evidence = json.loads(after["isolation-erratum.json"][0])
+            self.assertEqual(evidence["publication_receipt"], result["publication_receipt"])
+            self.assertIn("publication.json", evidence["immutable_inventory"])
+
+    def test_publication_receipt_wrong_sha_missing_unreviewed_or_extra_alias_refused(self):
+        for mode in ["wrong_sha", "malformed_sha", "missing", "no_argument", "alias", "already_listed", "tampered_listed"]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                args = self.fixture(Path(directory)); self.publication_receipt(args); args.apply = True
+                if mode == "wrong_sha":
+                    args.publication_receipt_sha256 = "0" * 64
+                elif mode == "malformed_sha":
+                    args.publication_receipt_sha256 = "bad"
+                elif mode == "missing":
+                    (args.report_dir / "publication.json").unlink()
+                elif mode == "no_argument":
+                    del args.publication_receipt_sha256
+                elif mode == "alias":
+                    (args.report_dir / "publication-alias.json").write_bytes(b"extra")
+                elif mode == "already_listed":
+                    with (args.report_dir / "SHA256SUMS").open("a") as stream:
+                        stream.write(args.publication_receipt_sha256 + "  publication.json\n")
+                    args.expected_manifest_sha256 = subject.digest(args.report_dir / "SHA256SUMS")
+                elif mode == "tampered_listed":
+                    (args.report_dir / "data.json").write_bytes(b"tampered")
+                before = snapshot(args.report_dir)
+                with self.assertRaises((ValueError, RuntimeError)):
+                    self.run_notice(args)
+                self.assertEqual(snapshot(args.report_dir), before)
+
+    def test_reviewed_publication_receipt_still_requires_original_public_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.fixture(Path(directory)); self.publication_receipt(args)
+            (args.report_dir / "publication.json").chmod(0o600); args.apply = True
+            before = snapshot(args.report_dir)
+            with self.assertRaisesRegex(ValueError, "0644"):
+                self.run_notice(args)
+            self.assertEqual(snapshot(args.report_dir), before)
+
+    def test_reviewed_receipt_mid_commit_failure_rolls_back_without_losing_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.fixture(Path(directory)); self.publication_receipt(args)
+            args.apply = True; before = snapshot(args.report_dir)
+            original = os.replace; calls = []
+
+            def fail(source, target):
+                if args.report_dir in Path(target).parents:
+                    calls.append(str(target))
+                    if len(calls) == 5:
+                        raise OSError("synthetic receipt commit interruption")
+                return original(source, target)
+
+            with patch.object(subject.os, "replace", side_effect=fail), self.assertRaises(OSError):
+                self.run_notice(args)
+            self.assertGreaterEqual(len(calls), 5)
+            self.assertEqual(snapshot(args.report_dir), before)
+            self.assertFalse((args.report_dir / "history").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

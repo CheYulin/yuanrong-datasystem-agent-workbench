@@ -186,7 +186,7 @@ def measured_row(raw, row, samples, times, context=None):
         errors.append("Batch/key success or failure accounting mismatch")
     if raw.get("failed_keys_upper_bound") != failed * row["batch"] or raw.get("partial_success_keys_unknown") is not bool(failed):
         errors.append("Unknown partial-success accounting mismatch")
-    if (failed and not observed_failure) or count <= 0:
+    if (failed or count <= 0) and not observed_failure:
         errors.append("Measurement has failed or zero completed batches")
     if row["operation"] == "put" and any(client.get("success") != expected_target for client in clients):
         errors.append("Fresh PUT did not finish its fixed volume")

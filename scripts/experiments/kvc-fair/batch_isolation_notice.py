@@ -14,7 +14,7 @@ import shutil
 import tempfile
 from urllib.parse import urlsplit
 
-from refresh_delivery import digest, verify_manifest
+from refresh_delivery import digest, inventory, verify_manifest
 
 
 ALLOWED_REPORTS = {
@@ -31,6 +31,36 @@ ZIP_SCOPE = "现有 reproduce.zip 保持原始历史字节、未修订，不能�
 
 def checksum(content):
     return hashlib.sha256(content).hexdigest()
+
+
+def verify_notice_manifest(out, publication_receipt_sha256=None):
+    if publication_receipt_sha256 is None:
+        return verify_manifest(out)
+    if not re.fullmatch(r"[0-9a-f]{64}", publication_receipt_sha256):
+        raise ValueError("An explicit lowercase publication.json SHA256 is required")
+    observed = inventory(out)
+    if "SHA256SUMS" not in observed:
+        raise RuntimeError("An existing regular SHA256SUMS is required")
+    expected = {}
+    for line in (out / "SHA256SUMS").read_text().splitlines():
+        if not line.strip():
+            continue
+        value, separator, name = line.partition("  ")
+        relative = Path(name)
+        if (not separator or not re.fullmatch(r"[0-9a-f]{64}", value)
+                or relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name
+                or name in expected or name == "SHA256SUMS"):
+            raise RuntimeError("Invalid or duplicate SHA256SUMS entry: " + line)
+        expected[name] = value
+    if (set(observed) - set(expected) - {"SHA256SUMS"} != {"publication.json"}
+            or set(expected) - set(observed)):
+        raise RuntimeError("Only the explicitly reviewed extra publication.json is allowed")
+    for name, value in expected.items():
+        if observed[name]["sha256"] != value:
+            raise RuntimeError("Original artifact checksum mismatch: " + name)
+    if observed["publication.json"]["sha256"] != publication_receipt_sha256:
+        raise RuntimeError("publication.json SHA256 mismatch")
+    return observed
 
 
 def validate_url(value):
@@ -84,7 +114,8 @@ def refresh(args):
 def refresh_locked(args, out, new_url):
     if digest(out / "SHA256SUMS") != args.expected_manifest_sha256:
         raise ValueError("SHA256SUMS CAS mismatch; review the current exact report first")
-    before = verify_manifest(out)
+    receipt_sha256 = getattr(args, "publication_receipt_sha256", None)
+    before = verify_notice_manifest(out, receipt_sha256)
     if not {"index.html", "index.html.gz", "reproduce.zip"} <= before.keys():
         raise ValueError("Historical HTML, its gzip and original reproduction ZIP are required")
     if any(record["mode"] != 0o644 for record in before.values()):
@@ -111,6 +142,9 @@ def refresh_locked(args, out, new_url):
                 "immutable_inventory": frozen,
                 "allowed_changes": ["index.html: single visible erratum inserted immediately inside the unique main.content-area, before hero", "index.html.gz: mtime=0 gzip of that HTML", "new isolation-erratum.md/json and gzip companions", "new content-addressed copies of original HTML/gzip/SHA256SUMS", "SHA256SUMS"],
                 "measurement_changed": False, "original_data_plots_raw_scripts_binaries_zip_unchanged": True,
+                "publication_receipt": ({"path": "publication.json", **before["publication.json"],
+                                         "bytes": (out / "publication.json").stat().st_size,
+                                         "added_to_manifest": True} if receipt_sha256 is not None else None),
                 "helper_sha256": digest(Path(__file__)),
                 "scope": "Corrects applicability only; no recomputation, source/product change, rerun, publication or modification of old raw data, plots or ZIP. The linked independent report has its own evidence and status."}
     history_lines = ["- [" + Path(name).name + "](" + name + "): `" + checksum(content) + "`" for name, content in sorted(history.items())]
@@ -131,6 +165,7 @@ def refresh_locked(args, out, new_url):
     report = {"apply": bool(args.apply), "report_dir": str(out), "report_id": ALLOWED_REPORTS[str(out)],
               "original_manifest_sha256": checksum(original_manifest), "proposed_manifest_sha256": checksum(replacements["SHA256SUMS"]),
               "original_zip_sha256": before["reproduce.zip"]["sha256"], "zip_rewritten": False,
+              "publication_receipt": evidence["publication_receipt"],
               "immutable_file_count": len(frozen), "updates": sorted(replacements),
               "new_report_url": new_url, "scope": evidence["scope"]}
     with tempfile.TemporaryDirectory(prefix="." + out.name + ".isolation-erratum-", dir=out.parent) as temporary:
@@ -145,7 +180,7 @@ def refresh_locked(args, out, new_url):
         staged = {path.relative_to(stage).as_posix(): path for path in stage.rglob("*") if path.is_file()}
         if set(staged) != set(replacements) or any(path.read_bytes() != replacements[name] or path.stat().st_mode & 0o777 != 0o644 for name, path in staged.items()):
             raise RuntimeError("Staged notice transaction differs from its exact controlled bytes")
-        if verify_manifest(out) != before or digest(out / "SHA256SUMS") != args.expected_manifest_sha256:
+        if verify_notice_manifest(out, receipt_sha256) != before or digest(out / "SHA256SUMS") != args.expected_manifest_sha256:
             raise RuntimeError("Historical report changed during staging; no notice applied")
         if not args.apply:
             report.update(original_output_unchanged=True, immutable_files_unchanged=True)
@@ -182,6 +217,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-dir", type=Path, required=True)
     parser.add_argument("--expected-manifest-sha256", required=True)
+    parser.add_argument("--publication-receipt-sha256", help="Accept only the extra publication.json with this exact SHA256; preserve it and include it in the new manifest")
     parser.add_argument("--new-report-url", required=True)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
