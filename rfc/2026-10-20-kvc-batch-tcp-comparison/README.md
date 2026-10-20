@@ -17,7 +17,7 @@ DataSystem `mset/get/exist`、Mooncake `put_batch/get_batch/batch_is_exist` 均�
 
 首次 PUT 只使用新 key，以固定总 262144 keys / 256 MiB 完成时间计速。Mooncake `put_batch` 对已有 key 返回成功而不更新，因此**重复调用 put_batch 不能用于更新吞吐**。另设 `upsert` 图：DataSystem `mset` 对照 Mooncake `upsert_batch`，每次更新后检查真实新字节，不把该结果混入首次 PUT。
 
-LMCache CPU MP 的 store/retrieve 以单个 IPCCacheServerKey 为参数，多 token chunk 的 rolling prefix 不等于任意独立 key 批量。当前正在核对 P2P 元数据模块的原生独立 ObjectKey 批量 EXIST。未验证的路径不进入主图；无原生等价接口标记 N/A，不隐藏逐 key 网络循环。
+LMCache CPU MP 的 store/retrieve 以单个 IPCCacheServerKey 为参数，多 token chunk 的 rolling prefix 不等于任意独立 key 批量。P2P 元数据模块的原生独立 ObjectKey 批量 EXIST 已通过两端点、四档批量、命中/未命中/混合集合门禁，以及 C8 冒烟验证；测量包含 lookup、轮询和命中项 unlock 协议成本。PUT / GET 仅 B=1，UPSERT 与更大的 PUT / GET 标记 N/A，不隐藏逐 key 网络循环。
 
 ## 1.3 实现和验收
 

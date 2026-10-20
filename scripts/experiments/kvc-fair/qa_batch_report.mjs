@@ -17,9 +17,10 @@ const products=['datasystem','mooncake','lmcache'],batches=[1,16,256,4096],opera
 try {
   for(const width of [1440,900,390]){
     const context=await browser.newContext({viewport:{width,height:width===390?844:1000}});
-    const page=await context.newPage(),state={width,pageErrors:[],networkErrors:[]};report.viewports.push(state);
+    const page=await context.newPage(),state={width,pageErrors:[],networkErrors:[],httpErrors:[]};report.viewports.push(state);
     page.on('pageerror',e=>state.pageErrors.push(String(e)));
     page.on('requestfailed',r=>state.networkErrors.push({url:r.url(),error:r.failure()?.errorText}));
+    page.on('response',r=>{if(r.status()>=400)state.httpErrors.push({url:r.url(),status:r.status()});});
     await page.goto(base,{waitUntil:'networkidle'});
     await page.waitForFunction(()=>window.KVC_BATCH_DATA&&Object.keys(window.KVC_BATCH_CHARTS||{}).length===9);
     const data=await page.evaluate(()=>window.KVC_BATCH_DATA);
@@ -64,6 +65,21 @@ try {
         }
         check(`${width}: ${operation}/${quantile} whole-batch latency`,errors.length===0,{errors});
       }
+      for(const metric of ['total_cpu_cores','peak_charged_memory_gib','peak_anon_shmem_gib','total_write_mib_s','total_read_mib_s']){
+        await page.selectOption('#resource-metric',metric);
+        const options=await page.evaluate(()=>({bars:window.KVC_BATCH_CHARTS['resource-summary'].getOption(),cost:window.KVC_BATCH_CHARTS.cost.getOption()})),errors=[];
+        for(let p=0;p<products.length;p++){
+          const product=products[p],rows=data.rows.filter(r=>r.product===product&&r.operation===operation&&r.valid&&Number.isFinite(r[metric]));
+          for(let j=0;j<batches.length;j++){
+            const values=rows.filter(r=>r.batch===batches[j]).map(r=>r[metric]),expected=values.length===3?median(values):null;
+            if(!near(options.bars.series[p*2].data[j],expected))errors.push({product,batch:batches[j],expected});
+          }
+          const scatter=options.cost.series[p];
+          if(scatter.type!=='scatter'||scatter.data.length!==rows.length)errors.push('resource scatter count/type');
+          for(const point of scatter.data){const row=rows.find(r=>r.identity===point.row.identity);if(!row||!near(point.value[0],row.keys_s)||!near(point.value[1],row[metric])||!near(point.symbolSize,8+Math.log2(row.batch)*1.2))errors.push('resource scatter value');}
+        }
+        check(`${width}: ${operation}/${metric} preserves observed resources and nulls`,errors.length===0,{errors});
+      }
     }
     await page.selectOption('#operation','exist_hit');
     const row=data.rows.find(r=>r.valid&&r.batch===4096&&r.product==='lmcache'&&r.operation==='exist_hit');
@@ -98,6 +114,8 @@ try {
       const links=await page.locator('a[href]').evaluateAll(links=>links.map(a=>a.getAttribute('href')).filter(h=>h&&!h.startsWith('#')&&!h.startsWith('http')&&!h.startsWith('../')));
       for(const href of new Set(links)){const url=new URL(href,base),r=await page.request.head(url.href);check('relative artifact '+href,r.ok(),{status:r.status()});}
     }
+    const optionalFailure=item=>{const url=new URL(item.url);return url.pathname==='/favicon.ico'||url.pathname==='/site-api/admin/pages'&&item.status===401;};
+    check(`${width}: required requests succeeded`,state.networkErrors.every(optionalFailure)&&state.httpErrors.every(optionalFailure),{networkErrors:state.networkErrors,httpErrors:state.httpErrors});
     await context.close();
   }
 }catch(error){report.errors.push(String(error.stack||error));}
