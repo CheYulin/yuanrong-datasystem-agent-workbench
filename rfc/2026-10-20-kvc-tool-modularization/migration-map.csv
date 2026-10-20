@@ -33,7 +33,7 @@ scripts/experiments/kvc-fair/batch_workflow.py,cli,kvcbench/cli.py | kvcbench/pi
 scripts/experiments/kvc-fair/benchmark.py,run,kvcbench/run/workers/scalar.py | kvcbench/core/statistics.py,split,P1-P3,先保持 scalar/batch 各自循环边界；只提取已有统计原语
 scripts/experiments/kvc-fair/build_metadata.py,build,kvcbench/build/metadata.py | configs/versions/kvc_20261020.json,split,P2,分离固定版本声明与产物来源核验
 scripts/experiments/kvc-fair/capture_evidence.py,collect,kvcbench/collect/snapshot.py,move,P1-P4,先用显式 manifest 覆盖新目录；完成后持锁快照
-scripts/experiments/kvc-fair/cgroup.py,platform,kvcbench/platform/cgroup.py,move,P1,保留配额、验证与归属语义
+scripts/experiments/kvc-fair/cgroup.py,run,kvcbench/run/isolation.py | kvcbench/platform/cgroup.py,split,P1-P3,运行配额和exec属run；通用成员排空与placement属platform；旧入口保留兼容
 scripts/experiments/kvc-fair/collect_timings.py,collect,kvcbench/collect/timings.py,move,P4,离线时间归约与原始事件写入分开
 scripts/experiments/kvc-fair/commit_publication.py,delivery,kvcbench/delivery/registration.py,move,P5,站点主干与 remote 审计独立于实验
 scripts/experiments/kvc-fair/datasystem/README.md,docs,docs/build/datasystem.md,move,P2,产品构建和运行入口文档，链接指向正式模块
@@ -46,7 +46,7 @@ scripts/experiments/kvc-fair/datasystem/smoke.py,tests,tests/live/datasystem/smo
 scripts/experiments/kvc-fair/datasystem/smoke.sh,tests,tests/live/datasystem/smoke.sh,move,P3,显式真实产品 smoke；默认单元测试不执行
 scripts/experiments/kvc-fair/datasystem/test_runtime_safety.py,tests,tests/integration/datasystem_runtime_safety.py,move,P1-P3,独立 CLI 需 --out；不导入为 unittest；受控进程不需要真实产品节点
 scripts/experiments/kvc-fair/echarts.min.js,report,kvcbench/report/assets/vendor/echarts.min.js,move,P5,保留版本/来源/hash/许可证声明
-scripts/experiments/kvc-fair/finish_environment.py,run,kvcbench/run/environment.py | kvcbench/platform/environment.py | kvcbench/platform/locks.py | kvcbench/platform/process.py,split,P1-P3,原环境变更范围不扩张；保留账本与恢复保护
+scripts/experiments/kvc-fair/finish_environment.py,run,kvcbench/run/environment_restore.py | kvcbench/run/environment.py | kvcbench/platform/locks.py,split,P1-P3,历史协议逐字迁移并保留兼容入口；新实验使用明确变更账本和独立恢复结果
 scripts/experiments/kvc-fair/identify_interference.py,observe,kvcbench/observe/interference.py,move,P3,外部进程只观测；不得 signal
 scripts/experiments/kvc-fair/light_monitor.py,observe,kvcbench/observe/light.py,move,P3,仅诊断轻量观测，不混入正式 profile
 scripts/experiments/kvc-fair/lmcache/adapter_lmcache.py,run,kvcbench/run/products/lmcache/adapter_lmcache.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束

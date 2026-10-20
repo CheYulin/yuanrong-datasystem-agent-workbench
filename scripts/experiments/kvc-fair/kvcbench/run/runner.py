@@ -16,6 +16,7 @@ from kvcbench.platform.files import atomic_json
 from kvcbench.platform.command import stop_owned as stop_process
 from kvcbench.platform.files import digest
 from kvcbench.platform.cgroup import drain
+from kvcbench.platform.locks import open_path
 from kvcbench.core.timing import utc
 
 CGROUP = Path("/sys/fs/cgroup/kvcfair20261020")
@@ -296,8 +297,18 @@ def main(argv=None, *, observer_factory=None):
         p.error("Read-only native failures may only be collected in the formal run")
     if args.repeats < 1:
         p.error("positive repeats required")
-    with (args.root / "suite.lock").open("a") as lock:
+    with open_path(args.root / "suite.lock") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        stage = json.loads((args.root / "batch-stage.json").read_text())
+        observed = os.fstat(lock.fileno())
+        if (stage.get("shared_suite_lock_inode") != observed.st_ino
+                or stage.get("shared_suite_lock_device", observed.st_dev) != observed.st_dev):
+            raise ValueError("Runtime lock differs from the accepted deployment")
+        if stage.get("resource_lock_path"):
+            with open_path(Path(stage["resource_lock_path"])) as shared:
+                current = os.fstat(shared.fileno())
+                if (current.st_dev, current.st_ino) != (observed.st_dev, observed.st_ino):
+                    raise ValueError("Runtime resource lock was replaced")
         drain(CGROUP)
         raise SystemExit(Runner(args, observer_factory=observer_factory).run())
 

@@ -64,3 +64,28 @@ python3 -m kvcbench report --inputs /absolute/derived/report-inputs.json --out /
 诊断预览显式增加 --diagnostic，保持 publication_eligible=false。原生失败证据完整与 API 成功分别呈现；失败聚合保留 null。report 不执行新的产品请求。
 
 ZIP 包含 report/index.html、ECharts、Mermaid、文档网页与原件、原始输入副本和源码包，支持离线打开。重新生成时按包内 REPRODUCE-REPORT.md 执行 report.relocate，它仅生成新的文件位置映射，校验原件 SHA/size/mode，原始 audit/analysis 不改写。使用保留 Unix 权限的解压工具。新报告保持不可变，legacy refresh 对带 render-record.json 的新报告拒绝原地写入；文档刷新生成新的报告 attempt。
+
+## 7. 明确选择构建目录、运行资源锁和环境账本
+
+```bash
+python3 -m kvcbench.build.revalidate --root /absolute/native-root \
+  --out /absolute/native-root/revalidation/new-attempt
+python3 -m kvcbench stage --native-root /absolute/native-root \
+  --catalog /absolute/native-root/revalidation/new-attempt/build-catalog.json \
+  --bundle /absolute/frozen-source-payload \
+  --resource-lock /absolute/shared-runtime/suite.lock \
+  --cgroup /sys/fs/cgroup/kvcfair20261020 --out /absolute/new-runtime
+python3 -m kvcbench environment-prepare \
+  --cgroup /sys/fs/cgroup/kvcfair20261020 \
+  --resource-lock /absolute/new-runtime/suite.lock \
+  --out /absolute/new-runtime/environment-preparation
+python3 -m kvcbench environment-restore \
+  --cgroup /sys/fs/cgroup/kvcfair20261020 \
+  --resource-lock /absolute/new-runtime/suite.lock \
+  --preparation /absolute/new-runtime/environment-preparation \
+  --out /absolute/new-runtime/environment-restoration
+```
+
+重验不执行编译，比较原生输出与原构建记录的 hash/size，输出新目录；旧失败记录保留。stage 重新验证明确选择的 catalog，不自动选择最近一次记录。完整代码包必需包含当前新增模块。
+
+同一运行资源域使用同一把已有锁，新运行目录硬链接该锁；构建域锁可以不同。环境准备和恢复分别持资源锁，使用新输出目录，只变更记录的配置差异和明确的服务，不清理历史 tmpfs 目录。实际资格、采样、正式测量与交付仍须各自验收，不由这些命令自动宣称完成。

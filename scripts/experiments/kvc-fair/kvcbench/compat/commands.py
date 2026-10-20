@@ -25,6 +25,7 @@ def stage_main(argv=None, executor=run_stage):
     p.add_argument("--feature-profile", choices=["baseline", "pure-kv"], default="pure-kv")
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))
+    p.add_argument("--resource-lock", type=Path, help="Existing shared lock for this runtime resource domain")
     args = p.parse_args(argv)
     if not 0 <= args.mooncake_queue <= 65535:
         p.error("queue capacity must be 0 (native default) or at most 65535")
@@ -41,6 +42,7 @@ def bootstrap_main(argv=None, executor=run_stage):
     parser.add_argument("--mooncake-queue", type=int, default=8192)
     parser.add_argument("--feature-profile", choices=["pure-kv"], default="pure-kv")
     parser.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))
+    parser.add_argument("--resource-lock", type=Path, help="Existing shared lock for this runtime resource domain")
     args = parser.parse_args(argv)
     if not 0 <= args.mooncake_queue <= 65535:
         parser.error("queue capacity must be 0 (native default) or at most 65535")

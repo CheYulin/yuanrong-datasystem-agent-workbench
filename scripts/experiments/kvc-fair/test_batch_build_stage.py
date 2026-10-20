@@ -1,5 +1,6 @@
 """Local Git/build-identity fixtures; no actual product build, service or target access."""
 import contextlib
+import fcntl
 import copy
 import hashlib
 import io
@@ -388,6 +389,20 @@ class BuildStageTests(unittest.TestCase):
         os.mkfifo(lock)
         with self.assertRaises(ValueError):
             self.stage()
+
+    def test_distinct_runtime_resource_lock_is_shared_and_blocks_staging(self):
+        resource = self.parent / "runtime-resource.lock"
+        resource.write_text("")
+        self.args.resource_lock = resource
+        with resource.open("a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(BlockingIOError):
+                self.stage()
+            self.assertFalse(self.target.exists())
+        record = self.stage()
+        self.assertEqual(record["resource_lock_path"], str(resource))
+        self.assertEqual((self.target / "suite.lock").stat().st_ino, resource.stat().st_ino)
+        self.assertNotEqual(resource.stat().st_ino, (self.native / "suite.lock").stat().st_ino)
 
     def test_fresh_output_replay_and_native_root_symlink_are_refused(self):
         self.stage()

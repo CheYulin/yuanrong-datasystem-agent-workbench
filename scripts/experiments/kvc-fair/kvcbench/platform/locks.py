@@ -3,9 +3,11 @@ import os
 import stat
 
 
-def open_lock(base):
-    path = base / "suite.lock"
-    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+def open_path(path, *, create=False):
+    if any(parent.is_symlink() for parent in path.parents):
+        raise ValueError("Lock ancestors cannot be symlinks")
+    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+    descriptor = os.open(path, flags | (os.O_CREAT if create else 0), 0o600)
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise ValueError("suite.lock must be a regular file")
@@ -14,3 +16,7 @@ def open_lock(base):
         os.close(descriptor)
         raise
     return stream
+
+
+def open_lock(base):
+    return open_path(base / "suite.lock", create=True)

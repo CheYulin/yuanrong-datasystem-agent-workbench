@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | P0 | 已完成设计 | 五个主模块、142 项基线迁移表、W01–W18 中间结果和独立验收契约 |
 | P1 | 已验收 | core/platform/build 包、回执与只读复核、显式源码包；部署/源码快照/ZIP 接入嵌套模块；完整回归与干净包通过 |
-| P2 | 进行中 | metadata/catalog/stage、配方与 source-build 已接入；第四次三产品构建命令退出 0，DS 缓存来源校验需独立重验；完整实验计划和 stage/workflow 准入待接入 |
-| P3 | 进行中 | 运行/资格/epoch/worker/batch adapter 与 observe 已分离，目标机观测 smoke 通过；产品 runtime/环境恢复/业务回执及真实产品 smoke 待完成 |
+| P2 | 进行中 | source-build 与独立重验目录通过，新部署消费明确构建 catalog；完整实验计划和 stage/workflow 准入待接入 |
+| P3 | 进行中 | 运行/资格/epoch/worker/batch adapter 与 observe 已分离，共同运行锁、环境账本及新部署三产品 gate 通过；产品 runtime 归整、业务回执及正式矩阵待完成 |
 | P4 | 进行中 | 原件 snapshot/index、analysis/audits 与来源复核已迁移，历史原件重算一致；完整 W12–W14 准入与实际新实验审计待完成 |
 | P5 | 进行中 | 新 report 消费者、ECharts/文档/离线包已实现且浏览器/干净包验证通过；上游 report-inputs 自动生成与 W16–W18 仍待接入 |
 | P6 | 待实施 | 旧入口退出、引用迁移、干净包验收与完整新实验及最终报告刷新 |
@@ -155,3 +155,28 @@ Mermaid vendor 从已使用的本地阅读器逐字节保留，vendor.json 记�
 验证命令：在工具目录执行 `python3 -m unittest test_batch_build_stage test_batch_stage_overrides tests.contract.test_build_service tests.contract.test_toolchain`，**38 项通过，7.074 秒**。新增验证覆盖原件保持、重复输出目录拒绝、完整产品选择、安全路径、已保存 catalog 与原生产物篡改，以及包含非 UTF-8 字节的缓存。这里仅验收构建重用来源，不声称接口资格、正式性能或 W01–W18 全链已通过。
 
 本次修改不触及 SDK 测量热路径、产品源码、运行共享状态或持久化数据。并发约束为构建域独占锁；重验失败输出保留，重做使用新目录。下一步仍须解决跨运行根目录的共同资源锁，之后才进入新部署和资格验证。
+
+## 14. 共同运行锁、环境账本及真实新部署资格验证
+
+运行部署现在显式接受共同资源锁，持构建域锁和资源锁后才核对 cgroup、复验构建及写入新根目录；新根目录硬链接该资源锁。运行入口复核部署绑定的设备号/inode和实际共同锁。`run/isolation.py` 与 `run/environment_restore.py` 分别逐字节迁移旧 cgroup 和历史恢复实现，根入口保留兼容转发；新 `run/environment.py` 持运行锁执行有账本的准备/恢复，不进行历史 tmpfs 目录清理。详见 [runtime-design.md](runtime-design.md)。
+
+新增明确 CLI：`stage`、`environment-prepare`、`environment-restore`。准备保存 before/intent/after/result，先记意图再操作；恢复仅作用于账本中的差异；失败留结果、同名输出拒绝覆盖。局部准备失败后可以显式恢复，不自动重放测量。
+
+实际新运行根目录：`tiantiyun-80c128g:/home/worktrees/kvc-batch-modular-20261021-001`。冻结代码包 `p3-runtime-bundle-002` 含 252 项，manifest SHA `cc9ddb5ad8d4ce927c519036c9aaff95fc26f28494e9ddb85f1332c99ebe5d2e`，ZIP SHA `0c312725b075d25f570bfa3b525eb5f2e4ab0f58f21e5811d6e8135037549e3a`。该快照早于本节后续 CLI/失败记录增强，未原地刷新。新部署核对了 9 个原生产物和 245 个冻结输入；运行锁与旧 R7 的锁同为 device 64770 / inode 953499872，独立于 native004 的构建锁 inode 966002198。
+
+| 实际操作 | 中间结果 | 实际耗时与结论 |
+| --- | --- | --- |
+| 环境基线 | `environment-before-full.json`、外部 `runtime-control001/preflight-command.json` | 已采集，独立命令记录保留 |
+| 环境准备 | `environment-preparation/{before,intent,after,result}.json` | 0.157651041 秒；配置差异 0；仅临时停止已记录的 setroubleshootd.service |
+| DataSystem deadline 诊断 | `deadline-diagnostic-001/summary.json`、原生步骤/日志、外部 command 记录 | 完整外部命令 64.154084430 秒；diagnostic_complete=true，all_sdk_steps_passed=false；失败原件保留 |
+| 三产品资格验证 | `batch-gate-001/summary.json`、两端点/原生 batch/strace/配置证据 | suite 158.845983258 秒，外部命令 159.044490914 秒；三产品全部完成且 valid=true |
+| 环境恢复 | `environment-restoration/result.json` | 0.101867403 秒；accepted=true；再次观察全部实验 cgroup.procs 为空 |
+| 离线 DataSystem TCP 审计 | 本地 `runtime001/tcp-audit-001.json`，引用已收集资格原件 | 16 项 case 验证通过，9.107633543 秒；不启动或联系产品服务 |
+
+资格通过与独立 deadline 诊断失败均按原结论保留，不能互相改写，更不能由此推导正式大 batch EXIST 性能通过。新运行目录尚未进行正式三轮性能矩阵，也尚未取得完整窗口资源审计或公开报告验收。
+
+本地全量 `python3 -m unittest discover -s . -p 'test_*.py'`：先因漏列新增测试文件失败，补齐显式代码包清单后 **529 项通过，52.404 秒**，日志 `p3-runtime-all-002.log`。随后增加服务停止失败恢复、缺必需工具前置拒绝两项覆盖，运行 `python3 -m unittest tests.contract.test_runtime_environment` **3 项通过，0.237 秒**；不是声称这两项已包含在先前全量计数内。全量有旧 `tcp_protocol_gate.py` 测试路径的未关闭锁文件 ResourceWarning，本次新运行入口使用上下文管理器；该历史路径尚待 P6 归整。产品仓没有修改。
+
+最后修改环境配置写入保留换行，使空 cpuset 原值也能正确恢复到 cgroup 接口。`python3 -m unittest tests.contract.test_runtime_environment tests.contract.test_bundle` **13 项通过，1.552 秒**，日志 `p3-runtime-final-targeted-003.log`。本地资格/诊断/环境收集为 686 MiB 原件，放在仓库外的 `runtime001/`；不把原件或大型 strace 提交到 Git。
+
+W01–W18 的完整语义回执接入、P6 旧入口/测试归整及新的正式测量仍未完成。本节是 P3 的实际推进，不能据此将整个目标标为完成。

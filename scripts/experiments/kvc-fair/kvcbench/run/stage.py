@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Make fresh batch inputs, reusing verified pinned builds through read-only links."""
 import fcntl
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ from kvcbench.platform.files import digest
 from kvcbench.platform.cgroup import drain
 from kvcbench.platform.files import regular, identity, real_directory
 from kvcbench.core.spec import PRODUCT_NAMES
-from kvcbench.platform.locks import open_lock
+from kvcbench.platform.locks import open_lock, open_path
 
 
 NATIVE_TEMPLATE_ROOT = "/home/worktrees/kvc-fair-20261020"
@@ -67,8 +68,14 @@ def stage(args, *, verify_builds=None, snapshot_builds=None, install_inputs=None
         lock_stream = open_lock(base)
     else:
         lock_stream = (base / "suite.lock").open("a")
-    with lock_stream as lock:
+    with ExitStack() as stack:
+        lock = stack.enter_context(lock_stream)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        resource_path = Path(getattr(args, "resource_lock", None) or base / "suite.lock").absolute()
+        resource_lock = stack.enter_context(open_path(resource_path))
+        resource_stat, build_stat = os.fstat(resource_lock.fileno()), os.fstat(lock.fileno())
+        if (resource_stat.st_dev, resource_stat.st_ino) != (build_stat.st_dev, build_stat.st_ino):
+            fcntl.flock(resource_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         drain_cgroups(args.cgroup)
         if builds_only:
             records, artifacts, provenance = verify_builds(builds_only)
@@ -117,8 +124,10 @@ def stage(args, *, verify_builds=None, snapshot_builds=None, install_inputs=None
                                       "scope": "Explicit source-pinned pure-memory feature profile; native build unchanged."})
             for name in ["datasystem", "mooncake/source", "mooncake/deps", "mooncake/venv", "mooncake/wheels", "lmcache/source", "lmcache/venv311"]:
                 (temporary / name).symlink_to((base / name).resolve(strict=True), target_is_directory=True)
-            os.link(base / "suite.lock", temporary / "suite.lock")
-            if (temporary / "suite.lock").stat().st_ino != os.fstat(lock.fileno()).st_ino:
+            os.link(resource_path, temporary / "suite.lock", follow_symlinks=False)
+            linked = (temporary / "suite.lock").stat()
+            held = os.fstat(resource_lock.fileno())
+            if (linked.st_dev, linked.st_ino) != (held.st_dev, held.st_ino):
                 raise RuntimeError("The shared suite lock changed while staging")
             (temporary / "configs").mkdir(exist_ok=True)
             if builds_only:
@@ -167,7 +176,8 @@ def stage(args, *, verify_builds=None, snapshot_builds=None, install_inputs=None
                       and p.name != "suite.lock"}
             record = {"profile": "native-batch-tcp", "created_wall_ns": time.time_ns(), "root": str(root),
                       "base": str(base), "builds_reused": True, "build_artifacts": artifacts,
-                      "shared_suite_lock_inode": (base / "suite.lock").stat().st_ino,
+                      "shared_suite_lock_inode": held.st_ino, "shared_suite_lock_device": held.st_dev,
+                      "resource_lock_path": str(resource_path), "cgroup": str(args.cgroup),
                       "mooncake_queue_capacity": getattr(args, "mooncake_queue", 0),
                       "datasystem_runtime_override": deployment_runtime,
                       "feature_profile": feature_profile, "runtime_overrides": overrides,

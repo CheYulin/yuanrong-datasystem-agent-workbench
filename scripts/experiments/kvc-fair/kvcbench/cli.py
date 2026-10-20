@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import sys
 import uuid
+from types import SimpleNamespace
 
 from kvcbench.build import bundle
 from kvcbench.core import steps, timing
@@ -18,6 +19,21 @@ from kvcbench.platform.receipts import Workflow, file_reference, verify_commit
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    command = commands.add_parser("stage", help="Fresh pure-KV runtime from an explicitly verified native catalog")
+    command.add_argument("--native-root", type=Path, required=True)
+    command.add_argument("--catalog", type=Path, required=True)
+    command.add_argument("--bundle", type=Path, required=True)
+    command.add_argument("--resource-lock", type=Path, required=True)
+    command.add_argument("--cgroup", type=Path, required=True)
+    command.add_argument("--out", type=Path, required=True)
+    command.add_argument("--mooncake-queue", type=int, default=8192)
+    for action in ("prepare", "restore"):
+        command = commands.add_parser("environment-" + action, help="Journaled runtime isolation " + action)
+        command.add_argument("--cgroup", type=Path, required=True)
+        command.add_argument("--resource-lock", type=Path, required=True)
+        command.add_argument("--out", type=Path, required=True)
+        if action == "restore":
+            command.add_argument("--preparation", type=Path, required=True)
     command = commands.add_parser("report", help="Render accepted offline analysis/audit inputs without rerunning products")
     command.add_argument("--inputs", type=Path, required=True)
     command.add_argument("--out", type=Path, required=True)
@@ -42,6 +58,25 @@ def parser():
 
 
 def run(args):
+    if args.command == "stage":
+        from kvcbench.build import catalog
+        from kvcbench.run.stage import stage
+        if not 0 <= args.mooncake_queue <= 65535:
+            raise ValueError("Mooncake queue must be between 0 and 65535")
+        supplied = SimpleNamespace(base=args.native_root, builds_only_native_root=args.native_root,
+            root=args.out, bundle=args.bundle, resource_lock=args.resource_lock, cgroup=args.cgroup,
+            feature_profile="pure-kv", mooncake_queue=args.mooncake_queue)
+        result = stage(supplied, verify_builds=lambda root: catalog.validate_saved_catalog(args.catalog, root),
+                       snapshot_builds=catalog.install_provenance, install_inputs=bundle.install_package)
+        return {"root": result["root"], "stage_inputs": len(result["inputs"]),
+                "native_artifacts": len(result["build_artifacts"])}, 0
+    if args.command in {"environment-prepare", "environment-restore"}:
+        from kvcbench.run import environment
+        if args.command == "environment-prepare":
+            result = environment.prepare(args.cgroup, args.out, resource_lock=args.resource_lock)
+        else:
+            result = environment.restore(args.cgroup, args.preparation, args.out, resource_lock=args.resource_lock)
+        return result, 0
     roots = {}
     for item in getattr(args, "map_root", []):
         if "=" not in item:
