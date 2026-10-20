@@ -1,6 +1,6 @@
 # 6. 结果验证与最终验收
 
-状态：**In Progress**。r5正式尝试在DataSystem B16 EXIST hit失败；r6纯KV真实对照强支持GET/EXIST共享池旧deadline机制，但未直接读TLS。r6门禁在DataSystem通过后因Mooncake脚本权限失败，完整三重复与交付仍未验收。各失败、诊断与通过预检分别保留。
+状态：**In Progress**。r7实际gate、C8 smoke及TCP审计已通过，正式三重复运行中，终态与交付尚未验收。r5原生失败、r6纯KV deadline对照与启动权限失败原样保留，不由新短窗口成功抹去。
 
 ## 6.1 实际输入与比较边界
 
@@ -103,3 +103,17 @@ r5正式05:16:59.135590–05:20:06.445844 UTC，187.310265231秒后在B16 EXIST 
 纯KV对照实际完成：A EXIST-only13.027326933s、248/248成功且两端有TCP活动；B GET16后190成功+1异常，10.019303674s报本地line44 deadline；C GET16后等待10.1s，EXIST16在0.021342848s失败，实际窗口0条正TCP发送；D同样先GET16/等待后EXIST1在0.001553996s成功。SDK46.339531674s、外层63.659922266s、monitor0和四cgroup空。无RocksDB制品，两Worker保留普通26B eviction状态文件，四客户端close后socket快照均0。165份输入逐SHA/size、221独立本地检查通过；动态证据与未直接观测TLS的边界见 [verification.md](verification.md) 5.13。
 
 这是单客户端低速诊断，不纳入性能重复。R6后续gate39.699639772s失败仅因Mooncake launcher Permission denied，DS gate已完成，MC/LM门禁尚未完整执行。复制overlay后x位恢复和mode inventory的5项本地回归通过，必须在fresh根继续验证；原r6失败不覆盖，不以部署错误给产品填零或N/A。完整矩阵、资源覆盖、包和浏览器验收仍待实际执行。
+
+## 6.10 r7通过资格，正式结果仍待终态
+
+本地原件gate137.246847605s、smoke437.495450633s、TCP13.311996920s均valid；smoke12epoch齐全，独立重算50有效/10 N/A/0issues，TCP16case/32方向限定证明。精确summary和stage SHA见 [verification.md](verification.md) 5.15。它们不证明20秒EXIST已修复，也不替代正式三重复；运行期目标节点不作额外采集。
+
+新增构建直达分支是后续复现能力，当前只通过20项本地fixture；r7仍使用既有核验构建物。新分支不伪造旧smoke或formal，不因缺少默认参数失败历史就编造容量配置收益；严格核验builds_provenance后，SDK正确性仍必须由其自身fresh batch gate/smoke/TCP证明。
+
+## 6.11 正式运行期间的本地交付工具复核
+
+控制机执行 `python3 -m unittest discover -s . -p 'test_batch*.py'`：348项通过，unittest报告42.182秒；这是工具fixture的框架耗时，未记录该命令外层起点，不倒推起止时间。另执行 `python3 -m unittest test_lmcache_profile test_mooncake_pure_kv_launcher`：7项通过、框架0.319秒；两份JS的 `node --check` 与 `git diff --check` 通过。最初误用子目录discover返回NO TESTS RAN/退出5，原操作记录保留，纠正为实际模块后才得到7项结果。
+
+本次检查的是构建输入准入、失败分类、资源/部署审计、报告和交付工具，没有修改DataSystem/Mooncake/LMCache的原生代码，也未把本地工具测试写成产品UT/ST、恢复或性能证据。R7执行输入仍以其冻结清单为准；后增加的复现分支、失败回执链接和浏览器断言是交付工具修订，不能追认成目标机已执行源码。共享suite锁、PID/start-ticks所有权、事务回滚和目录隔离由相关fixture覆盖；没有产品持久化/并发协议或模块结构变化，`.repo_context`无需更新。正式性能结论、公开页面和ZIP验收仍待实际终态。
+
+补充fixture后再次执行同一discover命令，355项通过（框架34.148秒）；7项profile测试通过（0.560秒），此次由`workflow.run`保存实际外层起止与耗时。4项新增回执/DOM片段测试覆盖0成功原生失败、CSV链接、错误/状态/回执篡改及HTML转义；它们是synthetic矩阵，不充当正式运行数据。

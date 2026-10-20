@@ -18,6 +18,8 @@
 
 冻结清单若包含 `mode`，按整数 `st_mode & 0o777` 核对实际采集文件，并要求 `runtime_overrides` 与最终 `inputs` 一致。原远端执行权限保存在 measured-runtime 的 ZIP external_attr 和 raw tar member 中；普通公开文件仍统一 0644，不能把 canonical 工具的本地权限冒充远端测量权限。
 
+后续重放可用 `batch_build_stage.py --builds-only-native-root` 从已识别的固定源码构建物直接进入批量协议，无须先运行旧单 key suite。报告仅在 `source_build_mode=builds-only-native-root`、`legacy_suites_required=false` 与 `builds_provenance` 的验证文件及九项原始 metadata/recipe/构建记录全部绑定 SHA、字节数和权限后，解除两类旧失败历史的前置要求；三产品源码 pin、clean policy、配方、Python 3.11 与原生制品清单仍须一致，本 stage 的新批量 gate、smoke、TCP、部署审计及完整矩阵仍然必需。旧 `smoke_exit=null` 保留为未记录，不改写为成功。该分支不测默认容量配置，8192/8192 固定选择沿用已公开实验，不能据此声称默认到适配的收益。目前只完成离线构建身份/暂存/报告 fixture 验证，未额外实跑从零构建至正式报告的整条链路；R7 实际仍复用原三份 build smoke=0 记录，不能用未来分支改写本轮事实。源码包按现有脚本 glob 收入新 bootstrap 入口。
+
 `batch_resource_audit.py` 通过独立后处理命令产生 JSON/Markdown，再由报告的 `--resource-audit` 接收。报告核对同一 suite、全部原始 sample/result 输入 SHA/字节数、SDK 窗口身份与单调边界、JSON/Markdown 一致性及实际 helper 源 SHA；不拼装新采样、不重跑负载。完整输出和 helper 源单独保存在 `resource-audit/`，页面只引用小摘要。throttle、memory.events 与 swap 的历史值和窗口增量分开；parent/monitor 不与 server+client 再相加，外部进程 CPU 只是采集器 leader-affinity 估计。
 
 最终报告还要求 `--deployment-audit`：`batch_deployment_audit.py` 对完整本地采集根目录执行独立后处理，报告重新核对其全部输入 SHA/字节数、同一 stage、DataSystem runtime 源和三个阶段的实际 epoch 计划。pure-kv 使用 schema3，额外核对实际关闭 flags、各实例收集目录的文件清单及 RocksDB 数据库制品缺失，不能仅凭一个名为 rocksdb 的目录断言数据库已运行。21 个 DataSystem 服务期对应 42 个互不重叠的实例路径；完整 stdout 扫描匹配存储文件错误必须为零。完整、已核验的原生只读失败不改写为部署失败，结果有效性单独保留。live procfs 仅覆盖 gate 的 1/21，其余 20 个服务期只依据启动记录和日志，不推断远端 inode、符号链接或持续存活。完整 JSON、真正执行的 helper 和动态加载的分析源码保存在 `deployment-audit/`；阶段冻结输入中的 helper 草稿单独记录 SHA，不冒充执行源码。部分预览可不提供，显式提供的错误证据仍会拒绝。

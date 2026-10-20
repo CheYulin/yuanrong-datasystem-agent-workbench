@@ -13,6 +13,7 @@ import batch_deployment_audit as audit
 import batch_report as report
 from test_batch_deployment_audit import fixture
 import test_batch_failures as failure_fixtures
+import test_batch_build_stage as build_fixtures
 
 
 class DeploymentReportTests(unittest.TestCase):
@@ -355,6 +356,126 @@ class NestedFailureHistoryTests(unittest.TestCase):
             preserved = out / "failed-attempts/latest-failed/history/older-failed/runtime-inputs/runtime.py"
             self.assertEqual(preserved.read_bytes(), b"different old executed runtime")
             self.assertEqual((out / "failed-attempts/latest-failed/frozen-runtime/runtime.py").read_bytes(), b"latest executed runtime")
+
+
+
+
+class SourceBuildProvenanceReportTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = build_fixtures.BuildStageTests()
+        self.fixture.setUp()
+        self.stage = self.fixture.stage()
+        self.runtime = self.fixture.target
+        self.suite = self.runtime / 'formal-fixture'
+        self.suite.mkdir()
+        self.validation_path = self.runtime / self.stage['builds_provenance']['path']
+        self.reseal()
+
+    def tearDown(self):
+        self.fixture.tearDown()
+
+    def reseal(self):
+        validation = json.loads(self.validation_path.read_bytes())
+        for relative in validation['inputs']:
+            validation['inputs'][relative] = build_fixtures.bootstrap.identity(self.runtime / 'builds-provenance/inputs' / relative)
+        self.validation_path.write_text(json.dumps(validation) + '\n')
+        for relative in self.stage['inputs']:
+            self.stage['inputs'][relative] = build_fixtures.bootstrap.identity(self.runtime / relative)
+        proof = self.stage['builds_provenance']
+        proof.update(build_fixtures.bootstrap.identity(self.validation_path))
+        proof['inputs'] = {relative: self.stage['inputs'][relative] for relative in proof['inputs']}
+        (self.suite / 'batch-stage.json').write_text(json.dumps(self.stage))
+        _, self.records = report.verify_runtime_inputs(self.suite, self.runtime)
+        self.builds = [json.loads((self.runtime / 'builds' / (name + '.json')).read_bytes())
+                       for name in self.fixture.specs]
+
+    def verify(self):
+        return report.verify_source_build_provenance(self.stage, self.records, self.builds)
+
+    def test_null_legacy_smoke_does_not_require_old_suites_or_synthesize_success(self):
+        result = self.verify()
+        self.assertTrue(result['verified'])
+        self.assertFalse(result['legacy_suites_required'])
+        self.assertEqual(result['legacy_smoke_exit'], dict.fromkeys(self.fixture.specs))
+        self.assertEqual(result['native_artifacts'], 8)
+        self.assertIn('no independent compiler execution attestation', result['scope'])
+        self.assertFalse(any(self.runtime.glob('formal-tcp*')))
+
+    def test_legacy_mode_does_not_gain_an_unverified_waiver(self):
+        self.assertIsNone(report.verify_source_build_provenance({}, [], []))
+        self.assertIsNone(report.verify_source_build_provenance(None, [], []))
+        original = copy.deepcopy(self.stage)
+        for field, value in [('source_build_mode', 'unknown'), ('legacy_suites_required', True),
+                             ('builds_provenance', {})]:
+            with self.subTest(field=field):
+                self.stage = copy.deepcopy(original)
+                self.stage[field] = value
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_proof_pointer_inventory_metadata_and_artifact_tamper_are_rejected(self):
+        original = copy.deepcopy(self.stage)
+        for case in ['sha', 'path', 'missing-inventory', 'artifact-size', 'public-metadata']:
+            with self.subTest(case=case):
+                self.stage = copy.deepcopy(original)
+                builds = copy.deepcopy(self.builds)
+                if case == 'sha':
+                    self.stage['builds_provenance']['sha256'] = '0' * 64
+                elif case == 'path':
+                    self.stage['builds_provenance']['path'] = '../validation.json'
+                elif case == 'missing-inventory':
+                    self.stage['builds_provenance']['inputs'].pop('builds/mooncake.json')
+                elif case == 'artifact-size':
+                    self.stage['build_artifacts'][next(iter(self.stage['build_artifacts']))]['bytes'] += 1
+                else:
+                    builds[0]['smoke_exit'] = 0
+                with self.assertRaises(ValueError):
+                    report.verify_source_build_provenance(self.stage, self.records, builds)
+
+    def test_resealed_wrong_source_pin_or_recipe_is_still_rejected(self):
+        for field, value in [('pinned_sha', '0' * 40), ('identity_valid', False),
+                             ('build_recipe_sha256', '0' * 64), ('source_status_porcelain', ' M tracked.cpp')]:
+            with self.subTest(field=field):
+                path = self.runtime / 'builds/mooncake.json'
+                original = path.read_bytes()
+                metadata = json.loads(original)
+                metadata[field] = value
+                encoded = json.dumps(metadata).encode()
+                path.write_bytes(encoded)
+                snapshot = self.runtime / 'builds-provenance/inputs/build-metadata/mooncake.json'
+                snapshot.write_bytes(encoded)
+                self.reseal()
+                with self.assertRaises(ValueError):
+                    self.verify()
+                path.write_bytes(original)
+                snapshot.write_bytes(original)
+                self.reseal()
+
+    def test_actual_frozen_metadata_and_recipe_bytes_cannot_change_after_validation(self):
+        source = self.runtime / 'builds-provenance/inputs/mooncake/build.sh'
+        source.write_bytes(source.read_bytes() + b'changed')
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_older_explicitly_clean_metadata_matches_official_loader_policy(self):
+        path = self.runtime / 'builds/mooncake.json'
+        metadata = json.loads(path.read_bytes())
+        metadata.pop('source_tracked_status_porcelain')
+        encoded = json.dumps(metadata).encode()
+        path.write_bytes(encoded)
+        (self.runtime / 'builds-provenance/inputs/build-metadata/mooncake.json').write_bytes(encoded)
+        self.reseal()
+        self.assertTrue(self.verify()['verified'])
+
+    def test_reproduction_archive_includes_new_bootstrap_entrypoint_exactly(self):
+        import zipfile
+        docs = self.fixture.parent / 'docs'
+        docs.mkdir()
+        (docs / 'fixture.md').write_text('Offline packaging fixture; no native build executed.\n')
+        archive = report.reproduction_archive(Path(report.__file__).resolve().parent, docs, self.fixture.parent)
+        with zipfile.ZipFile(archive) as zipped:
+            self.assertEqual(zipped.read('kvc-fair/batch_build_stage.py'),
+                             (Path(report.__file__).resolve().parent / 'batch_build_stage.py').read_bytes())
 
 
 if __name__ == "__main__":

@@ -13,15 +13,42 @@ python3 scripts/experiments/kvc-fair/batch_workflow.py run
 python3 scripts/experiments/kvc-fair/batch_workflow.py restore
 python3 scripts/experiments/kvc-fair/batch_workflow.py collect
 python3 scripts/experiments/kvc-fair/batch_workflow.py resource-audit
+python3 scripts/experiments/kvc-fair/batch_workflow.py deployment-audit
 python3 scripts/experiments/kvc-fair/batch_workflow.py report
 python3 scripts/experiments/kvc-fair/batch_workflow.py publish
 ```
 
-重跑须显式设置新的 `--root`、`--environment-root`、`--local-output`、`--report-path`，新输出目录拒绝覆盖；本入口默认目录为本次执行的固定命名，不等于可以覆盖重放。源码构建目录由只读链接复用；如需从零构建，先按旧 build.md 生成相同版本、记录构建产物，再传新的 `--base`。
+`qualify` 是 prepare、pure-kv 下的 deadline-diagnostic、gate、smoke、collect-checks、tcp-audit 的串行脚本入口，逐个子命令携带显式 root/local/environment 参数，失败立即停止；它不自动把预检当作正式性能重复。正式执行前只采集终止的门禁和smoke，正式窗口内不做SSH扫描、rsync或制品哈希。新的服务周期协议为 `separate-read-and-fresh-put-v1`：
+
+```mermaid
+sequenceDiagram
+    participant O as 串行调度器
+    participant S as 同产品双服务
+    participant C as 8个私有客户端
+    O->>S: 新read实例目录启动
+    C->>S: 预置65536 keys / 64MiB
+    loop 四档B，read内无fresh PUT
+        C->>S: UPSERT→还原→GET→EXIST hit/miss
+        C-->>O: 原始SDK窗口与直方图
+    end
+    O->>S: 停止并确认server/client cgroup排空
+    loop 每个支持原生PUT的B
+        O->>S: 全新put-bN实例目录启动
+        C->>S: 同65536池 + 固定32768新warm keys完整读回
+        C->>S: 同步计时插入262144个新key
+        C-->>O: 固定量完成时间、后验字节校验
+        O->>S: 停止并确认排空
+    end
+```
+
+每个服务周期写独立 `epochs/<id>/epoch-summary.json`，主summary保留有序 `epochs_expected/epochs_completed`，独立重算验证全部36周期、各周期目录不复用、真实排空、SDK窗口归属和每个首操作的预置标志。PUT固定量预热不受3秒参数代替；其每客户端4096个key和完整读回ACK在原结果单列。
+
+重跑须显式设置新的 `--root`、`--environment-root`、`--local-output`、`--report-path`，新输出目录拒绝覆盖；本入口默认目录为本次执行的固定命名，不等于可以覆盖重放。`--base`只适用于已有完整TCP终态和构建记录的复用路径；仅构建产品后不能直接把该根传作`--base`。新源码构建直达入口使用`--builds-only-native-root`，见4.3，不要求补跑旧native/TCP性能基线。
 
 | 脚本 | 职责 |
 |---|---|
 | batch_stage.py | 持共享锁、验证原构建 SHA、复制新脚本、创建独立 namespace 和不可变输入清单 |
+| batch_build_stage.py | 可选源码构建直达分支：复核三产品HEAD/tag/clean、真实build-metadata/配方/制品，保留旧smoke空值，共用pure-KV stage与新门禁，不伪造旧formal |
 | batch_*adapter 三方文件 | 同步原生 batch 合同，严格字节/向量检查，不重试，不隐藏网络循环 |
 | batch_gate.py | 两端点四档真实正确性、独立 key 顺序及 insert/upsert 语义；每步耗时 |
 | batch_runner.py | 全程 flock；按轮换顺序串行启停三产品；显式 N/A；拒绝 gate 未通过的正式执行 |
@@ -32,6 +59,8 @@ python3 scripts/experiments/kvc-fair/batch_workflow.py publish
 | batch_tcp_verify.py | 离线解析门禁 syscall 跟踪，校验每个方向的正返回 TCP 字节与同用例完整1024-byte已知payload样本；不把样本证明扩大到全部字节 |
 | qa_batch_report.mjs | 在1440/900/390宽度验证实际矩阵、图表数据绑定、空资源、导航、caption、下载包HTTP字节SHA与相对资产 |
 | batch_refresh_delivery.py | 补充验收文档与交付工具快照时保留全部原运行输入、proof、history和ZIP源文件字节；只替换唯一ZIP链接版本和对应HTML gzip |
+| batch_resource_audit.py | 只读原采样，分窗口核对CPU限流、memory事件增量、swap与外部进程leader-affinity估计；parent/monitor不与server/client叠加 |
+| batch_deployment_audit.py | 从实际epoch计划推出21次DataSystem启动，核对42个独立DB目录与启动/排空证据，流式扫描RocksDB文件错误并绑定原日志SHA；仅gate有procfs live快照，其余20次明确为启动记录 |
 
 共享状态：每客户端私有 key，无共享 key 写竞争。服务端两服务合计同一固定配额；每轮后由旧版 PID/start-ticks/cmdline 保护的 lifecycle 只停止本任务进程，并确认所有实验 cgroup 排空。异常中止整个组并保留原始失败文件，恢复环境需先确认 cgroup 排空。没有产品源代码改动，没有持久化/故障恢复行为修改；不宣称这些性能用例证明容灾或崩溃一致性。
 
@@ -48,3 +77,41 @@ python3 scripts/experiments/kvc-fair/batch_workflow.py publish
 ## 4.2 容量诊断入口
 
 `batch_queue_probe.py --root <已冻结root> --out <root/全新诊断目录>` 在同一锁和cgroup下，以独立fresh服务串行对default与queue8192做C8/B4096/1KiB更新验证。返回0表示两组均终止并清理成功，不表示default原生调用成功；native_valid逐组保存。该诊断不进入三轮性能重复，参数/环境/原始log/单调耗时/source快照全部留存。新主矩阵使用r3独立root、environment、local-output，默认gate=1；r2失败链全部放history/default-r2，不覆盖或复用其成功性能行。
+
+## 4.3 从固定源码构建直达pure-KV，不依赖旧性能基线
+
+**实际R7与新增复现分支分开。** R7复用了既有8份固定构建物，使用原`--base`路径，已实际通过其gate、smoke和TCP审计；本次没有重新编译原生产品。以下是新增的可选重放入口，只在本地小Git库/假制品fixture验证过，没有在R7目标环境执行或替换冻结脚本，不能把它写成此次真实构建耗时。
+
+原入口存在真实依赖：`build_metadata.copy`要求旧全产品smoke；`tcp_stage`要求`formal-001`成功；`batch_stage --base`要求`formal-tcp-001`完整81格成功。因此“只从旧build.md构建再传--base”缺少可执行环节。新分支直接从`workflow.py stage/build`产生的`build-metadata`接入，不造任何旧summary、smoke通过或性能历史。
+
+在具备原构建配方所需Linux/RPM依赖、编译器、网络和ETCD二进制的重放节点上，先选择全新`NATIVE`、`REPLAY`、`ENV`及`LOCAL`目录。`workflow.py build`仍按Mooncake→DataSystem→LMCache依次真实构建并调用`build_metadata record`，不启动旧性能suite；构建记录的墙钟包含依赖下载/安装及编译，不是独立编译器时间。ETCD/OS/Python/PyTorch可为二进制依赖，不能将本入口描述为任意裸系统的一键源码构建。
+
+```sh
+# 在控制机执行；替换为包内脚本目录和全新目录名。
+SCRIPTS=/path/to/reproduction/scripts
+NATIVE=/home/worktrees/kvc-source-builds-replay
+REPLAY=/home/worktrees/kvc-purekv-replay
+ENV=/home/cache/kvc-purekv-replay-environment
+LOCAL=/path/to/new-local-evidence
+python3 "$SCRIPTS/workflow.py" stage --remote-root "$NATIVE" --local-output "$LOCAL/build"
+python3 "$SCRIPTS/workflow.py" build --remote-root "$NATIVE" --local-output "$LOCAL/build"
+python3 "$SCRIPTS/batch_workflow.py" stage --builds-only-native-root "$NATIVE" \
+  --root "$REPLAY" --local-output "$LOCAL" --environment-root "$ENV" --feature-profile pure-kv
+python3 "$SCRIPTS/batch_workflow.py" qualify --root "$REPLAY" --local-output "$LOCAL" \
+  --environment-root "$ENV" --feature-profile pure-kv
+python3 "$SCRIPTS/batch_workflow.py" run --root "$REPLAY" --local-output "$LOCAL" \
+  --environment-root "$ENV" --feature-profile pure-kv
+# 后续按同一组显式参数执行restore/collect、审计、report及公开验收。
+```
+
+最底层stage命令是在构建节点执行`python3 BUNDLE/batch_build_stage.py --builds-only-native-root NATIVE --root FRESH_REPLAY --bundle BUNDLE --feature-profile pure-kv --mooncake-queue 8192`。该命令只核验并stage，不构建、不启动服务；新native-root尚无`suite.lock`时以O_CREAT/O_NOFOLLOW创建regular私有锁，拒绝symlink/FIFO，持flock并为replay硬链接同inode。已有根或嵌套根拒绝重放，事务失败不留半成品。
+
+准入重新读取三源码实际HEAD、tag解析与完整/跟踪status，固定SHA使用`build_metadata.PRODUCTS`；DataSystem只允许配方自建`.venv/`这一未跟踪例外。构建metadata须真实成功、identity_valid、Python3.11布局、原记录tag/SHA、正常起止时间、配方SHA及完整非空native输出SHA/size；所有metadata/recipe/记录制品均须在构建根的实际regular路径，拒绝越界和symlink。xxHash安装生成的`.so→.so.0→.so.0.8.3`安全别名与`build_metadata.record`一样不计为新增artifact，另存`artifact_aliases`的link_text及最终目标，且只允许指向本产品已记录的根内regular制品；悬空/循环/越界/未知目标拒绝。生成完成前再次复核源状态与metadata/recipe/artifact/alias，检测中途变化后回滚。仅有这些记录仍不独立证明编译过程，实际构建日志与新gate/smoke的角色不互相替代。
+
+运行脚本和manifest取本次bundle，不继承旧native Unix传输；DataSystem显式TCP、LM使用TCP adapter/server、Mooncake关闭memcpy/local hot cache，并应用同一pure-KV overlay及mode防护。构建物以链接复用，运行目录和结果目录全新；无`formal-001`、`formal-tcp-001`或`tcp-stage.json`被伪造。`builds/*.json`按原字节复制，`smoke_exit=null`继续保留，后续三方原生batch门禁、C8 smoke及TCP证明提供SDK正确性证据。新分支不强制复制本次历史失败材料，也不据缺少默认配置重测就声称8192改善的因果结论。
+
+`batch-stage.json`新增`source_build_mode="builds-only-native-root"`与`legacy_suites_required=false`。`builds_provenance`固定schema1：validation相对path及SHA/bytes/mode，另有9项相对输入inventory（3份builds metadata、3份原metadata快照、3份真实配方快照）；validation内容绑定3产品当前source state与完整native artifact inventory，全部还须与stage.inputs一致。报告只在严格核验该证明后接受无旧baseline历史；R7原路径仍保持自己的旧构建/失败历史合同。
+
+本地20项测试通过（3.673s）：15项直达分支与5项overlay回归，使用真实临时Git仓库和明确的fixture pins/假制品，没有调用产品构建或服务。覆盖null旧smoke、未产生假formal、真实HEAD/tag/dirty/untracked拒绝、metadata/配方/native字节与越界/symlink篡改、实际xxHash别名链、缺锁创建/FIFO拒绝、同inode、权限inventory、freshroot和中途变更事务回滚；正式节点端到端重建该新增分支尚未运行。
+
+直达入口随后增加第9个合法`mooncake_master`制品的stage→report集成fixture（制品数按记录动态确定）、拒绝零字节/bool/float大小，以及复制后目标SHA/size/mode复核。该组与overlay共23项通过、5.692秒。报告绑定alias的validation原件SHA，未独立逐alias重验路径语义；不能把生产者的准入检查写成消费者额外完成了一次远端符号链接复验。

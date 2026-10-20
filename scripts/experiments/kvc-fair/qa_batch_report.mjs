@@ -29,6 +29,8 @@ try {
     const failedRows=data.rows.filter(r=>r.status==='failed'),validRows=data.rows.filter(r=>r.valid);
     check(`${width}: full observed matrix`,data.rows.length===180&&validRows.length+failedRows.length===150&&data.rows.filter(r=>r.status==='not_supported').length===30&&data.evidence_verified===true&&data.passed===(failedRows.length===0)&&data.rows.every(r=>['valid','failed','not_supported'].includes(r.status)),{counts:data.counts,passed:data.passed,evidence_verified:data.evidence_verified});
     check(`${width}: native failures remain explicit`,failedRows.every(r=>r.valid===false&&r.evidence_verified===true&&r.failures>0&&r.native_errors.length>0&&['get','exist_hit','exist_miss'].includes(r.operation))&&JSON.stringify(data.summary.measurement_failures||[])===JSON.stringify(failedRows.map(r=>r.identity)));
+    const failureTable=await page.evaluate(()=>({hidden:document.querySelector('#native-failures').hidden,rows:[...document.querySelectorAll('#failure-results tr')].map(tr=>({links:[...tr.querySelectorAll('a')].map(a=>a.getAttribute('href')),errors:tr.querySelector('pre')?.textContent}))}));
+    check(`${width}: failure table retains exact errors and receipts`,failureTable.hidden===(failedRows.length===0)&&failureTable.rows.length===failedRows.length&&failureTable.rows.every((item,i)=>item.links.includes(failedRows[i].evidence)&&item.links.includes(failedRows[i].outcome_evidence)&&item.links.includes(failedRows[i].epoch_evidence)&&JSON.stringify(JSON.parse(item.errors))===JSON.stringify(failedRows[i].native_errors)));
     const identities=data.rows.map(r=>r.identity);
     check(`${width}: unique identities`,new Set(identities).size===180);
     const epochs=data.epochs||[],epochIds=epochs.map(e=>e.identity);
@@ -45,6 +47,9 @@ try {
     await page.screenshot({path:path.join(output,`${width}-initial.png`),fullPage:false});
     for(const operation of operations){
       await page.selectOption('#operation',operation);
+      const table=await page.evaluate(()=>[...document.querySelectorAll('#results tr')].map(tr=>({status:tr.querySelector('.status-valid,.status-failed,.status-not_supported,.status-missing,.status-invalid')?.textContent,links:[...tr.querySelectorAll('a')].map(a=>a.getAttribute('href')),text:tr.textContent})));
+      const operationRows=data.rows.filter(r=>r.operation===operation);
+      check(`${width}: ${operation} table distinguishes every original status`,table.length===operationRows.length&&table.every((item,i)=>{const row=operationRows[i];return item.status===(row.status==='not_supported'?'N/A':row.status==='failed'?'原生失败':'有效')&&item.links.includes(row.evidence)&&(row.status!=='failed'||item.text.includes('不计性能'));}));
       for(const metric of operation.startsWith('exist')?['keys_s','batch_qps']:['keys_s','batch_qps','throughput_mib_s']){
         await page.selectOption('#metric',metric);
         const option=await page.evaluate(()=>window.KVC_BATCH_CHARTS.throughput.getOption());

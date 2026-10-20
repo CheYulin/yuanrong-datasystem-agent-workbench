@@ -27,13 +27,13 @@ PUT / UPSERT 在 staging 分配与拷贝后，各调用一次 `Client::BatchPut`
 
 默认 r2 的带跟踪 B4096 门禁出现过 GET 空结果和 `TRANSFER_FAIL`；之后独立无跟踪 C1 诊断通过，仍未证明 C8 稳定性。默认 C8 smoke 随后又在 B4096 UPSERT 预热出现 `-800 / TRANSFER_FAIL`。这些失败、诊断和命令原始边界单独保留，不能删除失败后把独立诊断写成原门禁成功，也不能归入正式性能重复。
 
-从 r3 引入的容量配置将 `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER` 和 `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER` 设为 8192。最终 r5 沿用它，并显式固定 lanes=4、admission timeout=1000ms 为锁定源码默认数值，所有 B 与重复一致；CPU、内存、原生制品与 API 实现保持同一边界。它是容量适配配置，不能当作默认参数性能。r3失败与r4旧协议预检均不属于最终矩阵；r5独立门禁和C8 smoke通过后才进入正式测量。
+从 r3 引入的容量配置将 `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER` 和 `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER` 设为 8192。r5 沿用它，并显式固定 lanes=4、admission timeout=1000ms 为锁定源码默认数值，所有 B 与重复一致；CPU、内存、原生制品与 API 实现保持同一边界。它是容量适配配置，不能当作默认参数性能。r3失败与r4旧协议预检均不属于最终矩阵；r5独立门禁和C8 smoke通过后才进入当轮正式测量，后续失败原件仍单独保留。当前 R7 的已执行资格状态见末节。
 
 独立 default / queue8192 机制诊断的成功率差异只说明这两个已执行配置的观测结果。尚未捕获明确 queue-full / rejection reason counter，因此报告不能宣称已确认 `QUEUE_FULL` 根因，也不能把诊断耗时或吞吐增加为第四轮正式性能结果。历史执行的 helper 原件与当前报告工具分别归档，原始 JSON、错误和日志保留于 raw evidence。
 
 ## 纯 KV 内存 TCP 配置审查
 
-用户要求关闭非必要能力后，按同一固定 SHA 审查原生配置；以下为下一独立 `pure-kv` profile 的建议与启动脚本实现，尚不表示该 profile 已执行或具有最优吞吐。R5 冻结运行不会被修改。审查从官方固定提交取得源码，逐文件以 Git tree 的 blob SHA1 校验，另保留 SHA256 清单；不访问目标节点。
+以下表格记录 R5 结束后、R6/R7 执行前的历史配置审查：用户要求关闭非必要能力后，按同一固定 SHA 提出独立 `pure-kv` profile 并实现启动脚本；当时尚未执行该 profile，不能据源码审查推断最优吞吐。R5 冻结输入没有被追改。审查从官方固定提交取得源码，逐文件以 Git tree 的 blob SHA1 校验，另保留 SHA256 清单；该审查没有访问目标节点。随后 R7 的实际配置与资格执行证据单列于末节，不能把历史建议状态当作当前执行状态。
 
 | 项目 | R5 实际配置 / 默认行为 | `pure-kv` 显式配置与边界 |
 |---|---|---|
@@ -55,3 +55,16 @@ PUT / UPSERT 在 staging 分配与拷贝后，各调用一次 `Client::BatchPut`
 `mooncake/launch_master.sh` 仅在 `KVC_FEATURE_PROFILE=pure-kv` 时附加以上 Master 参数；默认基线 argv 不变。启动前将实际完整 argv 原子写入当前服务期 `RUNTIME_DIR/master-argv.json`；记录失败会使启动失败，不隐藏 helper 错误。三个本地 fake-master 验证覆盖默认 argv、pure-kv argv与保存原件一致，以及 helper返回23时不启动Master；它们不代表真实服务资格门禁。
 
 端点值已另行核对：`eviction_ratio=0` 被[gflags validator](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master.cpp#L172-L178)允许；`eviction_ratio=0` 与 `eviction_high_watermark_ratio=1` 也都通过[MasterService 构造的闭区间校验](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master_service.cpp#L295-L305)。[builder setter](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/include/master_config.h#L877-L886)没有附加更严格下限，无需用 epsilon 伪装关闭。控制面另以 `MC_RPC_PROTOCOL=tcp` 显式固定，避免继承环境选择 RDMA；必要 TCP RPC 保留。R6 pure-kv 预检的 Mooncake 启动失败来自 stage overlay 丢失 launcher 可执行位，尚未执行 Moon API，不归因于原生参数或产品缺陷；由新 stage 修正权限后重新验证，旧失败原件保留。
+
+## R7 已执行的 pure-kv 资格状态
+
+本节只核对已采集到本地的 R7 stage、门禁与 smoke，证据截止 smoke 结束时间 `2026-10-20T06:00:05.021960+00:00`。不填写仍在进行的正式矩阵终态，也不把资格测试当作三轮性能结果。
+
+| 已执行阶段 | 实际状态 | 原始证据 |
+|---|---|---|
+| R7 冻结配置 | `feature_profile=pure-kv`；三产品环境均显式声明该 profile。Mooncake 仍使用同一固定源码构建物，未在 R7 重新编译；queue/pending=8192/8192、lanes=4、admission timeout=1000ms | `provenance/batch-stage.json`；`measured-runtime/products.json` |
+| 三产品批量门禁 | `valid=true`，三产品均完成、failed为空；全阶段实际时长137.246847605秒。Mooncake 两客户端的 insert/upsert 均完成四档 B 的正确性检查 | `gate/summary.json`；`gate/r0-mooncake/client-{0,1}-{insert,upsert}.json` |
+| 三产品 C8 smoke | `valid=true`，三产品均完成、failed为空；全阶段实际时长437.495450633秒。它是短资格窗口，不证明20秒正式窗口或全部运行期稳定性 | `smoke/summary.json`；`smoke/r0-mooncake/` 原始结果 |
+| 精简启动参数 | 已采集 gate 与五个 smoke 服务期的6份 `master-argv.json`，均记录上述 Master 关闭参数；冻结产品环境同时记录 client/TE metrics=0、MEMCPY/hotcache=0、RPC协议TCP | raw `run/gate-r0-mooncake/` 与 `run/smoke-r0-mooncake-*/`；`measured-runtime/mooncake/launch_master.sh` |
+
+这些是实际启动意图、接口门禁与短 smoke 证据，不是所有后台成本消失的证明。Master admin listener、必要清理循环与控制面仍按固定源码存在；没有进行开关逐项消融或穷举调优，不能宣称全局最优或把容量参数与精简配置的收益混为一谈。未来 `builds-only-native-root` 重放入口与本次 R7 的原构建复用路径分别留证，工具 fixture 不能冒充从零构建至正式报告的已执行整链。

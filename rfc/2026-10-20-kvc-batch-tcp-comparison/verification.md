@@ -1,6 +1,6 @@
 # 5. 阶段验证记录
 
-当前为In-Progress：r5正式尝试失败；r6纯KV独立诊断已真实完成，动态结果强支持GET/EXIST共享池旧deadline机制。r6门禁仅DataSystem完成，随后Mooncake启动脚本Permission denied，整体未通过；完整三重复未验收。所有原始失败与新启动权限修复分别保留。
+当前为In-Progress：r7新根已实际通过完整gate、C8 smoke和16/16 TCP审计，正式三重复正在执行，尚未验收。此前r5正式失败、r6 deadline动态对照及Mooncake启动权限失败均原样保留，不把新短窗口通过当作旧问题已修复。
 
 ## 5.1 运行前自检
 
@@ -146,3 +146,9 @@ r6门禁39.699639772s后失败，completed仅`r0-datasystem`及其gate epoch；M
 修正只用于全新根：所有shell overlay复制后再按实际mode增加`0o111`，最终inputs和runtime_overrides记录整数mode，运行/诊断/采集检查权限变化；原r6输入、失败日志和诊断证据不改。独立`test_batch_stage_overrides.py`用临时完整baseline验证0644→0755、0640→0751且源权限/字节不变、最终mode/SHA/size绑定、freshroot/alias拒绝、缺失/symlink覆盖事务回滚及native制品变更拒绝，5/5通过0.228s；没有执行目标服务。
 
 r6恢复原件记录0.207646857s、`errors=[]`（SHA `510835caea13499d1f75cc41692d327452d06a8860ce8a4114fa3fe60acbf7c6`）。qualification restore的两项generic guard引用同一terminal gate，不得写成两个独立已完成实验；新根门禁和正式结果仍以其实际原件另行验收。
+
+## 5.15 r7实际资格结果与构建直达分支的界限
+
+从本地已采集原件确认r7 gate137.246847605秒、3个gate epoch通过；C8 smoke437.495450633秒、12个epoch通过；独立重算50有效支持结果、10 N/A、0issues。TCP审计13.311996920秒、16组合/32方向通过。summary SHA依次`00d0fbf0568a304140a1f95d26b4595ea76d9eb880040f8a1d85084047ff295b`、`9ca51eee53225b6077d41999fa20dbc4cc48bf3855ce8cdf4c4b40ca9a3db203`，TCP证明SHA `4f8aff3a0b517cff731aed16e3f6817eb9933b7cf4050a0734ca216eafa8781d`；stage SHA `991692d50b4fc05ae1150671da3f47d17dd53919ac24cfda2f51649b08b059eb`。
+
+正式运行已启动，其完整身份、原生失败与资源覆盖尚待终态采集，不提前补150有效/30 N/A。运行期间不SSH、rsync、扫描源码或哈希目标制品。r7真实复用既有固定构建物，没有走新增from-source bootstrap或重新编译；新可选`--builds-only-native-root`仅完成本地20项机制测试，目的是让后续重放不被无关旧native/TCP formal阻断，不能冒称r7实际执行入口。完整命令与构建元数据/配方/现态/制品绑定合同见 [script-design.md](script-design.md) 4.3。

@@ -19,27 +19,39 @@ def copy_datasystem_runtime(bundle, temporary):
     target = temporary / "scripts/datasystem/runtime.py"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    return {"path": "scripts/datasystem/runtime.py", "sha256": digest(target),
+    return {"path": "scripts/datasystem/runtime.py", "sha256": digest(target), "mode": target.stat().st_mode & 0o777,
             "scope": "Deployment script replacement only; native build bytes unchanged. Each worker must use its own fresh RocksDB path."}
 
 
 def stage(args):
-    base, root, bundle = args.base.resolve(), args.root.resolve(strict=False), args.bundle.resolve()
+    builds_only = getattr(args, "builds_only_native_root", None)
+    base, root, bundle = (builds_only or args.base).resolve(), args.root.resolve(strict=False), args.bundle.resolve()
     if root.exists() or args.root.is_symlink() or base in root.parents or root in base.parents:
         raise ValueError("Use a fresh sibling batch root")
-    with (base / "suite.lock").open("a") as lock:
+    if builds_only:
+        from batch_build_stage import build_root, open_lock, validate_builds
+        if getattr(args, "feature_profile", None) != "pure-kv":
+            raise ValueError("The builds-only branch requires the explicit pure-kv profile")
+        build_root(builds_only)
+        lock_stream = open_lock(base)
+    else:
+        lock_stream = (base / "suite.lock").open("a")
+    with lock_stream as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         drain(args.cgroup)
-        summary = json.loads((base / "formal-tcp-001/summary.json").read_text())
-        old_plan = json.loads((base / "formal-tcp-001/plan.json").read_text())
-        expected = {f"r{row['repeat']}-{row['product']}-s{row['size']}-c{row['concurrency']}" for row in old_plan}
-        completed = summary.get("completed", [])
-        if (not summary.get("ended") or summary.get("fatal") or summary.get("failed")
-                or summary.get("valid") is False or len(expected) != 81 or len(old_plan) != 81
-                or len(completed) != 81 or set(completed) != expected):
-            raise RuntimeError("Pinned single-key TCP baseline must be terminal and successful")
-        prior = json.loads((base / "tcp-stage.json").read_text())
-        artifacts = prior["native_artifacts_revalidated"]
+        if builds_only:
+            records, artifacts, provenance = validate_builds(builds_only)
+        else:
+            summary = json.loads((base / "formal-tcp-001/summary.json").read_text())
+            old_plan = json.loads((base / "formal-tcp-001/plan.json").read_text())
+            expected = {f"r{row['repeat']}-{row['product']}-s{row['size']}-c{row['concurrency']}" for row in old_plan}
+            completed = summary.get("completed", [])
+            if (not summary.get("ended") or summary.get("fatal") or summary.get("failed")
+                    or summary.get("valid") is False or len(expected) != 81 or len(old_plan) != 81
+                    or len(completed) != 81 or set(completed) != expected):
+                raise RuntimeError("Pinned single-key TCP baseline must be terminal and successful")
+            prior = json.loads((base / "tcp-stage.json").read_text())
+            artifacts = prior["native_artifacts_revalidated"]
         for path, record in artifacts.items():
             if digest(Path(path)) != record["sha256"]:
                 raise RuntimeError("Pinned build artifact changed: " + path)
@@ -50,7 +62,7 @@ def stage(args):
             for product, destination in [("datasystem", "scripts/datasystem"), ("mooncake", "mooncake"), ("lmcache", "lmcache")]:
                 target = temporary / destination
                 target.mkdir(parents=True)
-                for path in (base / destination).iterdir():
+                for path in (bundle / product if builds_only else base / destination).iterdir():
                     if path.is_file() and not path.is_symlink() and path.suffix in {".py", ".sh", ".json", ".lock", ".md"}:
                         shutil.copy2(path, target / path.name)
                         if path.suffix == ".sh":
@@ -71,8 +83,14 @@ def stage(args):
             for name in ["datasystem", "mooncake/source", "mooncake/deps", "mooncake/venv", "mooncake/wheels", "lmcache/source", "lmcache/venv311"]:
                 (temporary / name).symlink_to((base / name).resolve(strict=True), target_is_directory=True)
             os.link(base / "suite.lock", temporary / "suite.lock")
+            if (temporary / "suite.lock").stat().st_ino != os.fstat(lock.fileno()).st_ino:
+                raise RuntimeError("The shared suite lock changed while staging")
             (temporary / "configs").mkdir()
-            manifest = json.loads((base / "products.json").read_text().replace(str(base), str(root)))
+            if builds_only:
+                from batch_build_stage import tcp_manifest
+                manifest, manifest_template = tcp_manifest(bundle, root)
+            else:
+                manifest = json.loads((base / "products.json").read_text().replace(str(base), str(root)))
             for product in manifest["products"]:
                 if feature_profile == "pure-kv":
                     product["env"]["KVC_FEATURE_PROFILE"] = feature_profile
@@ -85,7 +103,14 @@ def stage(args):
                                               MC_RPC_PROTOCOL="tcp")
                     else:
                         product["env"]["LMCACHE_COORDINATOR_EVENT_REPORTING"] = "false"
-                config = json.loads((base / "configs" / (product["name"] + ".json")).read_text())
+                if builds_only:
+                    config = {"transport": "tcp"}
+                    if product["name"] == "datasystem":
+                        config["endpoints"] = ["127.0.0.1:31531", "127.0.0.1:31532"]
+                    elif product["name"] == "lmcache":
+                        config["endpoints"] = ["tcp://127.0.0.1:15550", "tcp://127.0.0.1:15551"]
+                else:
+                    config = json.loads((base / "configs" / (product["name"] + ".json")).read_text())
                 config.update(scalar_adapter=product["adapter"], value_size=1024,
                               preload_batch=1 if product["name"] == "lmcache" else 256,
                               get_check_batch=1 if product["name"] == "lmcache" else 4096)
@@ -98,7 +123,11 @@ def stage(args):
                     product["env"]["MC_TCP_ADMISSION_TIMEOUT_MS"] = "1000"
                 (temporary / "configs" / (product["name"] + ".json")).write_text(json.dumps(config, indent=2) + "\n")
             (temporary / "products.json").write_text(json.dumps(manifest, indent=2) + "\n")
-            shutil.copytree(base / "formal-tcp-001/builds", temporary / "builds")
+            if builds_only:
+                from batch_build_stage import install_provenance
+                builds_provenance = install_provenance(base, temporary, records, provenance)
+            else:
+                shutil.copytree(base / "formal-tcp-001/builds", temporary / "builds")
             inputs = {str(p.relative_to(temporary)): {"sha256": digest(p), "bytes": p.stat().st_size, "mode": p.stat().st_mode & 0o777}
                       for p in temporary.rglob("*") if p.is_file() and not p.is_symlink()
                       and not any(parent.is_symlink() for parent in p.parents if parent != temporary.parent)
@@ -112,6 +141,10 @@ def stage(args):
                       "baseline_performance_reused": False,
                       "baseline_isolation_limitation": "Earlier DataSystem deployments used a shared default RocksDB directory; reuse is limited to verified native build artifacts, not performance baselines.",
                       "inputs": inputs, "old_experiment_inputs_modified": False}
+            if builds_only:
+                record.update(source_build_mode="builds-only-native-root", legacy_suites_required=False,
+                              builds_provenance=builds_provenance, manifest_template=manifest_template,
+                              baseline_isolation_limitation="Legacy performance suites were not required or synthesized. Only identified fixed source build artifacts are reused; this stage still requires its own native batch gate, smoke and TCP verification.")
             (temporary / "batch-stage.json").write_text(json.dumps(record, indent=2) + "\n")
             temporary.rename(root)
             return record

@@ -334,6 +334,8 @@ def analyze(suite, device="253:2"):
                                 or not near(failed_events[0].get("duration_s"), row["duration_s"])):
                             row["issues"].append("Observed native failure lacks matching exit/event/result-hash evidence")
                             row.update(status="invalid", evidence_verified=False)
+                        else:
+                            row["outcome_evidence"] = "results/" + outcome_path.relative_to(suite).as_posix()
         if row["issues"]:
             issues.append({"identity": name, "errors": row["issues"]})
         rows.append(row)
@@ -397,7 +399,7 @@ def export(analysis, out):
     public["samples_source"] = "Original suite resources/samples.jsonl; raw evidence archive retains every native sample. Samples are not duplicated in this JSON."
     (out / "analysis.json").write_text(json.dumps(public, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     fields = ["identity", "product", "repeat", "batch", "operation", "status", "size", "concurrency", "success", "success_keys", "failures", "duration_s", *METRICS,
-              "p50_lower_us", "p95_lower_us", "p99_lower_us", "low_sample_p99", "short_window", "resource_samples", "resource_span_s", "resource_coverage", "resource_interval_p50_ms", "resource_interval_p95_ms", "resource_max_gap_ms", "evidence"]
+              "p50_lower_us", "p95_lower_us", "p99_lower_us", "low_sample_p99", "short_window", "resource_samples", "resource_span_s", "resource_coverage", "resource_interval_p50_ms", "resource_interval_p95_ms", "resource_max_gap_ms", "evidence", "outcome_evidence"]
     with (out / "summary.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fields, extrasaction="ignore")
         writer.writeheader()

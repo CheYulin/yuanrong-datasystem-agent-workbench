@@ -1,6 +1,6 @@
 # 7. 操作耗时与证据边界
 
-状态：**In Progress**。r5正式失败与r6纯KV诊断已采集；r6门禁在DS通过后因Mooncake launcher权限失败，完整三重复和交付仍未验收。诊断、离线parser、门禁启动错误和正式接口失败分别计时，不混为性能窗口。
+状态：**In Progress**。r7资格门禁、C8 smoke和TCP审计已通过，正式三重复正在执行，终态与交付仍未验收。r5失败、r6诊断/启动权限错误与后续成功分阶段计时，不混为性能窗口。
 
 ## 7.1 计时口径
 
@@ -117,3 +117,15 @@ pure-KV启动配置14项与独立deadline诊断8项本地fixture合计22项通�
 | overlay权限回归 | 0.228 | 5/5本地fixture，真实copy2最终mode、freshroot/inputs绑定与事务回滚；未启动产品 |
 
 诊断helper实际源码、四case/trace/FD、关闭项与门禁权限错误的精确SHA和边界见 [verification.md](verification.md) 5.13–5.14。后续新根实际资格验证和正式执行耗时尚未填入，不能用该诊断替代公平矩阵。
+
+## 7.9 r7已完成资格与新增重放工具的本地验证
+
+| 阶段 | 实际秒数 | 真实状态 |
+|---|---:|---|
+| r7原生batch gate | 137.246847605 | 05:50:28.542874–05:52:45.789722 UTC；3gate epoch通过 |
+| r7 C8 smoke | 437.495450633 | 05:52:47.526525–06:00:05.021960 UTC；12epoch、50有效支持/10 N/A，独立重算0issues |
+| r7 DataSystem TCP离线审计 | 13.311996920 | 16case/32方向通过；解析耗时不加入SDK吞吐分母 |
+| r7正式三重复 | 运行中 | 不提前填duration或成功/失败计数，终态采集前不增加目标访问 |
+| 可选from-source stage回归 | 3.673 | 20项本地fixture；没有编译产品/启动服务，不是r7构建或测量阶段 |
+
+r7使用原固定构建物；新增直达分支保留原build command墙钟、metadata及配方/制品SHA，不把未来bootstrap工具时间当成本轮编译耗时。源码到pure-KV的新链及未执行端到端重建的边界见 [script-design.md](script-design.md) 4.3。

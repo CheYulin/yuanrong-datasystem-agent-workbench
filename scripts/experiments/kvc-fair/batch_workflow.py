@@ -19,6 +19,7 @@ def main():
     p.add_argument("--publication-host", default="xqyun-32c32g")
     p.add_argument("--root", default="/home/worktrees/kvc-batch-tcp-20261020-r7")
     p.add_argument("--base", default="/home/worktrees/kvc-fair-tcp-20261020")
+    p.add_argument("--builds-only-native-root")
     p.add_argument("--gate", default="batch-gate-001")
     p.add_argument("--mooncake-queue", type=int, default=8192)
     p.add_argument("--feature-profile", choices=["baseline", "pure-kv"], default="pure-kv")
@@ -47,7 +48,11 @@ def main():
         bundle = "/home/cache/kvc-fair-20261020/batch-script-bundle"
         ssh(["mkdir", "-p", bundle])
         run(["rsync", "-a", "--exclude", "__pycache__", str(HERE) + "/", args.target + ":" + bundle + "/"])
-        ssh(["python3", bundle + "/batch_stage.py", "--base", args.base, "--root", root, "--bundle", bundle, "--mooncake-queue", args.mooncake_queue, "--feature-profile", args.feature_profile])
+        if args.builds_only_native_root:
+            ssh(["python3", bundle + "/batch_build_stage.py", "--builds-only-native-root", args.builds_only_native_root,
+                 "--root", root, "--bundle", bundle, "--mooncake-queue", args.mooncake_queue, "--feature-profile", args.feature_profile])
+        else:
+            ssh(["python3", bundle + "/batch_stage.py", "--base", args.base, "--root", root, "--bundle", bundle, "--mooncake-queue", args.mooncake_queue, "--feature-profile", args.feature_profile])
     elif args.action == "prepare":
         ssh(["python3", root + "/batch_environment.py", "--out", root + "/environment-before-full.json"])
         ssh(["python3", root + "/tcp_stage.py", "--root", root, "--prepare-environment", args.environment_root])
@@ -136,6 +141,9 @@ def main():
         for path in sorted((args.local_output / "history").glob("pure-kv-preflight-*")):
             if path.is_dir():
                 command += ["--history", path]
+        deadline = args.local_output / "deadline-diagnostic-001"
+        if deadline.is_dir():
+            command += ["--history", deadline]
         tcp_history = args.local_output / "history/tcp-proof-attempts"
         if tcp_history.is_dir():
             command += ["--history", tcp_history]

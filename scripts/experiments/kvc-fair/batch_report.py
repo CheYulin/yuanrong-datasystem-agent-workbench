@@ -106,6 +106,101 @@ def verify_runtime_inputs(suite, runtime_inputs, require=True):
     return stage, records
 
 
+def verify_source_build_provenance(stage, runtime_records, builds):
+    if not stage or "source_build_mode" not in stage:
+        return None
+    from build_metadata import PRODUCTS, source_state
+    if stage.get("source_build_mode") != "builds-only-native-root" or stage.get("legacy_suites_required") is not False:
+        raise ValueError("Unknown or incomplete source-build stage mode")
+    frozen = {row["relative"]: row for row in runtime_records}
+    proof = stage.get("builds_provenance", {})
+    name = "builds-provenance/validation.json"
+    if (not isinstance(proof, dict) or proof.get("schema_version") != 1 or proof.get("path") != name or name not in frozen
+            or any(proof.get(key) != frozen[name].get(key) for key in ["sha256", "bytes", "mode"])):
+        raise ValueError("Source-build provenance must bind its exact frozen validation file")
+
+    def read(relative):
+        record = frozen.get(relative, {})
+        path = Path(record.get("source", ""))
+        if (not path.is_file() or path.is_symlink() or path.stat().st_size != record.get("bytes")
+                or digest(path) != record.get("sha256")):
+            raise ValueError("Missing or changed frozen source-build evidence: " + relative)
+        return path.read_bytes()
+
+    validation = json.loads(read(name))
+    native_root = Path(stage.get("base", ""))
+    if (not native_root.is_absolute() or ".." in native_root.parts or validation.get("native_root") != str(native_root)
+            or set(validation.get("products", {})) != set(PRODUCTS)
+            or not isinstance(validation.get("native_artifacts"), dict)
+            or validation.get("native_artifacts") != stage.get("build_artifacts")):
+        raise ValueError("Source-build validation root, products or native artifacts differ from the stage")
+    expected_inputs = {f"builds/{product}.json" for product in PRODUCTS}
+    native_inputs, expected_artifacts = set(), {}
+    for product, spec in PRODUCTS.items():
+        metadata_name = f"build-metadata/{product}.json"
+        recipe_name = spec["script"]
+        native_inputs.update([metadata_name, recipe_name])
+        copies = ["builds-provenance/inputs/" + relative for relative in [metadata_name, recipe_name]]
+        expected_inputs.update(copies)
+        content = read(f"builds/{product}.json")
+        if content != read(copies[0]):
+            raise ValueError("Source-build metadata and its original snapshot differ")
+        metadata = json.loads(content)
+        tracked = metadata.get("source_tracked_status_porcelain", "" if metadata.get("source_worktree_clean") is True else None)
+        state = source_state(product, metadata.get("source_status_porcelain"), tracked)
+        current = validation["products"][product]
+        current_state = source_state(product, current.get("source_status_porcelain"), current.get("source_tracked_status_porcelain"))
+        if (metadata.get("product") != product or metadata.get("tag") != spec["tag"]
+                or any(metadata.get(key) != spec["sha"] for key in ["sha", "pinned_sha", "tag_sha"])
+                or metadata.get("official_source") != spec["official_source"] or metadata.get("build_exit") != 0
+                or metadata.get("identity_valid") is not True or metadata.get("validation_errors") != []
+                or not state["source_worktree_policy_valid"] or not current_state["source_worktree_policy_valid"]
+                or any(current.get(key) != value for key, value in current_state.items())
+                or current.get("tag") != spec["tag"] or current.get("head") != spec["sha"] or current.get("tag_sha") != spec["sha"]
+                or current.get("metadata") != metadata_name or current.get("recipe") != recipe_name
+                or current.get("legacy_suites_required") is not False or current.get("smoke_exit") != metadata.get("smoke_exit")
+                or metadata.get("source_directory") != str(native_root / spec["source"])
+                or metadata.get("python_executable") != str(native_root / spec["python"])
+                or not str(metadata.get("python", "")).startswith("Python 3.11.")
+                or metadata.get("build_recipe") != recipe_name
+                or hashlib.sha256(read(copies[1])).hexdigest() != metadata.get("build_recipe_sha256")):
+            raise ValueError("Source-build metadata, pin, clean policy, recipe or Python identity is incomplete")
+        started, finished = metadata.get("build_started_wall_ns"), metadata.get("build_finished_wall_ns")
+        if type(started) is not int or type(finished) is not int or not 0 <= started <= finished:
+            raise ValueError("Source-build command timestamps are missing or reversed")
+        matches = [row for row in builds if row.get("product") == product]
+        if len(matches) != 1 or {key: value for key, value in matches[0].items() if key != "evidence"} != metadata:
+            raise ValueError("Public build record differs from its frozen source-build metadata")
+        hashes, sizes = metadata.get("artifact_hashes", {}), metadata.get("artifact_sizes", {})
+        if not hashes or set(hashes) != set(sizes) or any(not any(token in Path(path).name for path in hashes) for token in spec["native_required"]):
+            raise ValueError("Source-build native artifact set is incomplete")
+        for relative, checksum in hashes.items():
+            path = Path(relative)
+            actual = validation["native_artifacts"].get(str(native_root / path), {})
+            if (path.is_absolute() or ".." in path.parts or path.as_posix() != relative or not path.parts or path.parts[0] != product
+                    or not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+                    or type(sizes[relative]) is not int or sizes[relative] <= 0
+                    or actual.get("sha256") != checksum or actual.get("bytes") != sizes[relative]
+                    or type(actual.get("mode")) is not int or not 0 <= actual["mode"] <= 0o777):
+                raise ValueError("Source-build artifact identity differs from the freshly staged validation inventory")
+            expected_artifacts[str(native_root / path)] = actual
+    if (len(builds) != 3 or set(validation.get("inputs", {})) != native_inputs
+            or validation["native_artifacts"] != expected_artifacts or set(proof.get("inputs", {})) != expected_inputs):
+        raise ValueError("Source-build provenance must contain exactly three metadata/recipe pairs and their build records")
+    for relative in expected_inputs:
+        if (relative not in frozen or any(proof["inputs"][relative].get(key) != frozen[relative].get(key) for key in ["sha256", "bytes", "mode"])):
+            raise ValueError("Source-build provenance inventory differs from the frozen inputs")
+    for relative in native_inputs:
+        frozen_copy = frozen["builds-provenance/inputs/" + relative]
+        if any(validation["inputs"][relative].get(key) != frozen_copy.get(key) for key in ["sha256", "bytes", "mode"]):
+            raise ValueError("Source-build original metadata/recipe validation differs from its preserved snapshot")
+    return {"verified": True, "mode": stage["source_build_mode"], "legacy_suites_required": False,
+            "evidence": "measured-runtime/" + name, "sha256": proof["sha256"], "bytes": proof["bytes"],
+            "products": 3, "native_artifacts": len(expected_artifacts),
+            "legacy_smoke_exit": {row["product"]: row.get("smoke_exit") for row in builds},
+            "scope": "Archived stage-time HEAD/tag/clean-policy, recipe and native artifact validation; no independent compiler execution attestation. Same-stage batch gate, smoke, TCP proof and full matrix remain required. Legacy baseline suites and default-capacity improvement are not inferred."}
+
+
 def verify_gate_evidence(gate_path, stage, products):
     from batch_compose_gate import component
     gate_path = Path(gate_path).resolve(strict=True)
@@ -880,8 +975,6 @@ def render(args):
     failed_phases, failed_records, failed_bindings, failed_runtime = failed_attempt_evidence(failed_roots, out)
     history_phases.extend(failed_phases)
     provenance.extend(failed_records)
-    if not args.allow_partial and not failed_bindings:
-        raise ValueError("Retain the original shared-RocksDB failed formal attempt with --failed-attempts")
     builds_path = args.builds or (suite / "builds" if (suite / "builds").is_dir() else suite.parent / "builds")
     builds = []
     if builds_path.is_dir():
@@ -892,6 +985,9 @@ def render(args):
                 raise ValueError("Build record differs from the frozen stage: " + source.name)
     if not args.allow_partial and (len(builds) != 3 or any(build.get("build_exit") != 0 for build in builds)):
         raise ValueError("The three successful original build records are required")
+    source_builds = verify_source_build_provenance(stage, runtime_records, builds)
+    if not args.allow_partial and not source_builds and not failed_bindings:
+        raise ValueError("Retain the original shared-RocksDB failed formal attempt with --failed-attempts")
     gate = None
     gate_verification = None
     datasystem_isolation = None
@@ -988,10 +1084,10 @@ def render(args):
         raise ValueError("This final report requires the reviewed frozen 8192/8192/4/1000 Mooncake batch capacity profile")
     if stage and stage.get("feature_profile") == "pure-kv" and profile["feature_profile"] != "pure-kv":
         raise ValueError("All three frozen product environments must declare the same pure-KV feature profile")
-    if not args.allow_partial and profile["capacity_adapted"] and not {"gate", "smoke"} <= {row["action"] for row in history_phases if row["status"] == "failed"}:
+    if not args.allow_partial and not source_builds and profile["capacity_adapted"] and not {"gate", "smoke"} <= {row["action"] for row in history_phases if row["status"] == "failed"}:
         raise ValueError("The capacity-adapted matrix must retain the original default gate and default C8 smoke failures via --history")
     payload.update(builds=builds, gate=gate, gate_verification=gate_verification, provenance=provenance,
-                   configuration_profile=profile, history_phases=history_phases, smoke=smoke,
+                   configuration_profile=profile, history_phases=history_phases, smoke=smoke, source_build_provenance=source_builds,
                    tcp_verification=tcp_verification,
                    datasystem_isolation=datasystem_isolation, failed_attempts=failed_bindings,
                    resource_audit=resource_audit, deployment_audit=deployment_audit,
@@ -1056,7 +1152,8 @@ def render(args):
     build_rows = []
     for build in builds:
         cells = [build.get(key, "未提供") for key in ["product", "tag", "sha", "python"]]
-        cells.append(str(build.get("build_exit", "未提供")) + " / " + str(build.get("smoke_exit", "未提供")))
+        old_smoke = "未记录（null）" if "smoke_exit" in build and build["smoke_exit"] is None else str(build.get("smoke_exit", "未提供"))
+        cells.append(str(build.get("build_exit", "未提供")) + " / " + old_smoke)
         build_rows.append("<tr>" + "".join("<td>" + html.escape(str(value)) + "</td>" for value in cells)
                           + '<td><a href="' + html.escape(build["evidence"], quote=True) + '">原始记录 ↗</a></td></tr>')
     if not builds:
@@ -1064,7 +1161,7 @@ def render(args):
     gate_text = ('<a href="gate/summary.json">' + ("组合批量正确性证据" if gate.get("action") == "composed_correctness_gate" else "本配置完整批量正确性门禁") + ' ↗</a>（' + ("通过" if gate.get("valid") is True else "未通过") + ("；组合本身不是重新执行）" if gate.get("action") == "composed_correctness_gate" else "；十个真实客户端 / 写模式执行）")) if gate else "尚未提供批量门禁记录。"
     pure_kv = profile["feature_profile"] == "pure-kv"
     directory_label = "状态目录（rocksdb_store_dir）" if pure_kv else "RocksDB 目录"
-    feature_note = ('<div class="notice small"><b>本矩阵冻结的精简配置。</b>DataSystem 关闭 RocksDB 数据写入、Stream Cache sockets、spill、性能跟踪与采样；独立状态目录仍可保存 eviction-policy/worker-state.pb。Mooncake 关闭 store/TE metrics、master snapshot/restore、disk eviction、offload 与 KV events；LMCache 使用 noop eviction，关闭 observability、metrics、logging、KV event log 与 coordinator reporting。必要内存元数据、心跳与校验保留；Mooncake 无关闭旗标的 admin listener 与后台循环仍存在。配置和源码边界见文档，未测量这些开关各自的性能收益。</div>' if pure_kv else '')
+    feature_note = ('<div class="notice small"><b>本矩阵冻结的精简配置：关闭 RocksDB 数据写入和 Stream Cache sockets。</b><details><summary>三产品关闭项与必要后台成本</summary>DataSystem 关闭 RocksDB 数据写入、Stream Cache sockets、spill、性能跟踪与采样；独立状态目录仍可保存 eviction-policy/worker-state.pb。Mooncake 关闭 store/TE metrics、master snapshot/restore、disk eviction、offload 与 KV events；LMCache 使用 noop eviction，关闭 observability、metrics、logging、KV event log 与 coordinator reporting。必要内存元数据、心跳与校验保留；Mooncake 无关闭旗标的 admin listener 与后台循环仍存在。配置和源码边界见文档，未测量这些开关各自的性能收益。</details></div>' if pure_kv else '')
     now = datetime.datetime.now(datetime.timezone.utc)
     replacements = {
         "{{STATUS}}": status, "{{COUNTS}}": f"{count.get('valid', 0)} 有效 · {count.get('failed', 0)} 原生失败 · {count.get('not_supported', 0)} N/A · {count.get('invalid', 0)} 无效 · {count.get('missing', 0)} 缺失",
@@ -1072,6 +1169,7 @@ def render(args):
         "{{GATE_HISTORY}}": f"主矩阵无效 {count.get('invalid', 0)} 行 · 正式尝试历史失败 {sum(row['action'] == 'failed_formal_attempt' for row in history_phases)} 轮 · 历史 gate / C8 smoke 失败 {sum(row['status'] == 'failed' and row['action'] in {'gate', 'smoke'} for row in history_phases)} 轮",
         "{{PROFILE_NAME}}": html.escape(profile["name"]),
         "{{FEATURE_PROFILE}}": feature_note,
+        "{{HISTORY_SCOPE}}": ('本页从已识别的源码构建物直接进入纯 KV 批量协议；旧单 key suite 和旧 smoke 不作为前置条件，旧 smoke_exit 按原值保留，null 不改写为成功。本轮默认容量配置未实测；8192/8192 是依据已公开实验选择的固定参数，本页不据此推断默认到适配后的收益。构建记录不替代本 stage 的批量门禁、C8 smoke 与 TCP 证明。<a href="' + source_builds["evidence"] + '">构建输入来源核验 ↗</a>' if source_builds else '默认 Mooncake 曾在 B=4096 的带跟踪门禁与无跟踪 C8 smoke 中出现 TRANSFER_FAIL；队列溢出仅为未确认的源码候选解释。r3 正式尝试的 DataSystem 两 Worker 共用了默认 RocksDB 目录，伴随 SST 缺失/大小错误和 RPC 超时，属于实验部署隔离遗漏，不能作为产品 API 缺陷结论。所有原始失败单独保留，主矩阵使用新的独立目录与门禁。'),
         "{{TCP_PROOF}}": ('<a href="datasystem-batch-tcp-verification.json">DataSystem 批量 TCP 完整审计 ↗</a>：16 组合 / 32 方向，逐方向成功 TCP 字节 ≥ B × 1024（含 RPC 开销），并捕获同批某 key 的完整 1 KiB 样本；不等于逐字节证明整批载荷或持续跟踪正式测量。' if tcp_verification else '尚未提供本批量门禁的 TCP payload 审计；不以旧单 key 证明替代。'),
         "{{DS_ISOLATION}}": (('<b>本配置已核对两个 Worker 的独立' + directory_label + '。</b>' + ''.join('<p class="small">Worker ' + str(row["worker_index"]) + '：<a href="' + row["evidence"] + '">原始旗标 ↗</a> <span class="path">' + html.escape(row["rocksdb_store_dir"]) + '</span></p>' for row in datasystem_isolation["workers"])) if datasystem_isolation and datasystem_isolation.get("verified") else '尚无两个 Worker 独立' + directory_label + '的完整门禁证明；预览不具备公平部署结论。') + ('<p class="small"><a href="deployment-audit/deployment-audit.json">全部服务期部署审计 ↗</a>：21 集群 / 42 个独立' + directory_label + '，完整 stdout 扫描匹配存储文件错误 0 条。仅 gate 1/21 有已保存 live procfs 观测，其余 20 个服务期只核启动记录与日志；不推断持续存活或远端 inode 隔离。</p>' if deployment_audit else '<p class="small">尚未提供全部服务期部署审计。</p>'),
         "{{RESOURCE_AUDIT}}": ('<a href="resource-audit/resource-audit.md">独立资源审计 ↗</a> · <a href="resource-audit/resource-audit.json">完整 JSON ↗</a>：核对原始采样与 SDK 窗口，保留 CPU throttle、内存事件、swap、parent/monitor 和外部负载估计的独立口径，不新增采样或性能重复。' if resource_audit else '尚未提供独立资源审计。'),
