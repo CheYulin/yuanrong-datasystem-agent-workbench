@@ -124,7 +124,7 @@ class ReportInputsTests(unittest.TestCase):
             self.assertTrue((root / 'report/docs/_reader/mermaid.min.js').exists())
 
     def test_complete_native_failure_evidence_can_render_without_becoming_native_success(self):
-        from test_batch_failures import CompleteFailureEvidenceTests
+        from tests.unit.collect.test_batch_failures import CompleteFailureEvidenceTests
         from kvcbench.collect.analysis.batch import analyze
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)

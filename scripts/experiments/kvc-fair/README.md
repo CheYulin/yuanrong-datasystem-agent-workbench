@@ -35,7 +35,7 @@ python3 -m kvcbench workflow measure --control /absolute/new-control
 
 每一步记录输入、结果、产物清单、验收、摘要和 commit。`measure` 成功结束或失败后都执行环境恢复；准备部分失败也保留 intent 并恢复。现场恢复入口为 `workflow restore --control <control>`，不能用它自动重放请求。步骤或输出已存在时不续写；重新测量使用新 run 和状态目录。
 
-W01–W11 的运行编排已接入并正在进行真实节点验证。W12 收集与 W13/W14 离线派生入口已接入，尚待这次正式矩阵结束后用新原件验收；W15–W18 的完整交付编排仍在接入。独立报告入口已实现；上游必须提供真实绑定产物，不能以空文件或历史结果代替新矩阵。
+W01–W11 的运行编排已接入并正在进行真实节点验证。W12 收集与 W13/W14 离线派生入口已接入，尚待这次正式矩阵结束后用新原件验收；W15–W18 交付入口已接入，仍待新原件的端到端实际验收。独立报告入口已实现；上游必须提供真实绑定产物，不能以空文件或历史结果代替新矩阵。
 
 测量、观测停止和环境恢复均结束后，在目标节点的新冻结工具包目录执行收集；原运行目录与失败记录保持原样。每次操作使用新输出目录：
 
@@ -54,7 +54,9 @@ capture 在构建锁和共同运行锁内复制终态原件、构建物、原始
 
 ```bash
 python3 -m kvcbench status --workflow /absolute/new-control/workflow
-python3 -m unittest discover -s . -p 'test_*.py'
+python3 -m unittest discover -s tests -t . -p 'test_*.py'
 ```
 
 默认回归不启动真实产品、SSH 或修改主机配置；现场构建、资格与压测必须显式执行。测试通过与产品性能通过分别记录。
+
+普通测试按职责放在 tests/unit/，契约测试在 tests/contract/；独立进程安全程序为 `tests/integration/datasystem_runtime_safety.py --out <new-dir>`，不纳入自动导入。诊断实现归 kvcbench/diagnostics/，历史流程实现归 kvcbench/compat/legacy/；根旧命令仅作迁移兼容，当前入口为 python3 -m kvcbench。

@@ -1,6 +1,6 @@
 # 1. 模块化命令与阶段验收
 
-从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。当前已实现 P1 回执/工具包、P2a 构建元数据/部署归属及 P2b 实际 source-build 入口；新的正式 workflow 命令仍在接入，现有 batch 驱动暂时保留。
+从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。推荐使用 `python3 -m kvcbench`；构建、运行、收集和报告/交付入口按模块验收。实现存在与实际本次实验完成分别记录，实际进展见 RFC implementation.md。
 
 ## 2. 制作和复核完整代码包
 
@@ -36,7 +36,7 @@ python3 -m unittest discover -s tests/contract -p 'test_*.py' -v
 python3 -m unittest discover -s . -p 'test_*.py'
 ```
 
-contract 测试只使用本地 fixture 与自有子进程，无产品 SDK、SSH、root 或目标节点依赖。原有测试暂留根目录，后续随各模块迁移归入对应 tests 子目录。安全验证与真实产品 smoke 的入口和依赖仍需明确选择，不混入默认离线测试。
+contract 测试只使用本地 fixture 与自有子进程，无产品 SDK、SSH、root 或目标节点依赖。普通回归已按 build/run/collect/report/delivery/diagnostics/compat 放在 tests/unit/ 下。安全验证与真实产品 smoke 的入口和依赖仍需明确选择，不混入默认离线测试。
 
 
 ## 5. 从源码构建并逐产品验收
@@ -55,7 +55,7 @@ python3 -m kvcbench status --workflow /absolute/new-native-root/workflow
 
 ## 6. 从已绑定中间结果生成报告
 
-新的 report 入口消费显式 analysis/series/builds/workflow/evidence/audit 引用，校验 SHA、mode、run/profile 与审计绑定，正常报告要求完整矩阵和三个通过的构建记录。上游自动生成 report-inputs 的编排仍在接入，不能用空文件冒充审计通过。
+新的 report 入口消费显式 analysis/series/builds/workflow/evidence/audit 引用，校验 SHA、mode、run/profile 与审计绑定，正常报告要求完整矩阵和三个通过的构建记录。collect derive 生成已绑定 report-inputs，不能用空文件冒充审计通过。
 
 ```bash
 python3 -m kvcbench report --inputs /absolute/derived/report-inputs.json --out /absolute/new-report
@@ -107,3 +107,22 @@ W07 资格和其 smoke 子步骤分别验收。正式 W08 只封存观测启动�
 准备对诊断服务只使用 runtime mask，恢复时只移除本次创建的 mask。另对唯一明确的 mihumo.service，仅在观测到 Restart=always、ExecMainStatus=203 且处于失败重启状态时停止；恢复其原激活意图，不声称修复原有执行故障。工作负载执行期间不修改 SELinux 策略、产品数据或单位配置文件。
 
 W12–W18 的完整跨节点收集、派生输入及交付验收编排仍待接入；不能因 `workflow all` 的运行部分结束便宣称整个报告任务完成。
+
+## 9. 终态收集、离线分析与报告交付验收
+
+```bash
+python3 -m kvcbench collect capture --control /absolute/control --out /absolute/snapshot --invocation /absolute/outer-command
+python3 -m kvcbench collect receive --host tiantiyun-80c128g --snapshot /absolute/snapshot --receipt /absolute/snapshot-receipt --out /absolute/received
+python3 -m kvcbench collect derive --received /absolute/received --source-bundle /absolute/current-bundle/bundle.zip --out /absolute/derived
+python3 -m kvcbench report-workflow --derived /absolute/derived --out /absolute/report --control /absolute/delivery-control --node /absolute/node --playwright /absolute/playwright/index.mjs --chrome /absolute/chrome
+python3 -m kvcbench publish-workflow --control /absolute/delivery-control --spec /absolute/publication-spec.json
+python3 -m kvcbench check-publication --control /absolute/delivery-control
+```
+
+W12 必须在真实 W09/W10/W11 封存后执行，并重新锁定资源域，检查终态、恢复和输出身份。receive 保留远端原路径，通过显式根映射核验；derive 写新目录，重算矩阵、资源并独立审计，再生成构建、用例、脚本设计、结果四份文档。
+
+W15/W16 使用新的 delivery control：封存不可变报告、完整校验和与链接；在新目录安全解压并恢复权限，用包内源码重新生成；实际浏览器检查原页面与离线页面的 1440/390/320px 布局、九个 ECharts、四份文档、Mermaid、菜单和失败/N/A 空值。需要显式 Node/Playwright/Chrome 路径；未安装时不伪造浏览器验收。
+
+publication-spec.json 包含 host、site、relative、title、date、url，例如 host=xqyun-32c32g，site=/var/www/html，relative=perf/kvc-modular-20261021，url=https://yche.me/perf/kvc-modular-20261021。W17 上传到新暂存目录，逐文件核验后安装全新版本；首页注册使用站点锁和新鲜 CAS 基线，保留其他条目并同步 gzip。W18 分别下载公开 manifest、页面/文档/依赖/完整 ZIP 核对 SHA，并执行真实公开浏览器验收。W18 可以单独产生新的只读验收 attempt，不重传或覆盖既有报告版本。
+
+W14–W18 的回执和完整阶段耗时保存在 derived/delivery control，晚于报告输入快照的步骤不回填到原分析，避免循环 hash。实际源码运行、原生产品结论与交付验收状态分别记录。

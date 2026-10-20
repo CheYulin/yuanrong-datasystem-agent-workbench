@@ -219,3 +219,22 @@ W13 从原始 SDK 结果/窗口重算矩阵、CSV、资源序列与三产品原�
 本节代码尚未对正在运行的 runtime004 部署，也未接触其开放采样流；必须等 W09–W11 结束后用新冻结包执行实际 W12–W14。上一个完整本地回归 549 项通过（60.991 秒，`collection-all-001.log`）；空目录及离线包新增覆盖后的相关 18 项通过（1.737 秒），完整复核见下一条实际记录。上述自动测试使用隔离 fixture，不替代正式原生矩阵。W15–W18 语义交付回执与 P6 目录归整仍未完成。
 
 最终本地回归：`python3 -m unittest discover -s . -p 'test_*.py'` **551 项通过，75.811 秒**，日志 `collection-all-002.log`；8 个 owner AST 导入边界检查无跨层依赖。保留旧 TCP gate fixture 的未关闭锁 ResourceWarning，尚待 P6 归整。按 ds-self-verify 复核本阶段：diff 范围仅工具/RFC，资源锁内冻结、只读映射验收、新输出目录及失败保留已检查；无产品热路径/持久化格式改动，原始证据不覆盖，产品仓无需 `.repo_context` 结构更新。没有把本地 fixture 通过写成新压测通过。
+
+## 17. W15–W18 交付入口与测试目录归整
+
+新增 `report-workflow`（W15/W16）、`publish-workflow`（W17）、`check-publication`（W18）。W15 消费封存 W14，完整渲染新报告；W16 核对目录清单/gzip/链接，安全解压并恢复模式，实际执行包内 relocate/render，对比显示数据，再以显式 Node/Playwright/Chrome 检查原页面及离线页面的 1440/390/320px、九个 ECharts、失败空值、四文档、Mermaid 与菜单。W17 在新暂存目录上传并逐文件核验，安装全新 report 版本后按原站点锁/CAS 注册；W18 单独下载公开 manifest/依赖/文档/完整 ZIP 校验 SHA，再进行真实公开浏览器验收。未以这些入口存在宣称本次公开交付已通过。
+
+`delivery/acceptance.py`、`browser.mjs`、`install.py`、`public.py` 分别负责本地文件/解压、浏览器、上传主机安装和公开字节验证；pipeline 只组合 owner 检查并封存回执。交付不调用原生 SDK。新增发行日期与外部 registration record 参数，保持旧调用默认值；新报告不因注册记录而改变其封存清单。
+
+P6 首批归整：30 个根目录 unittest 迁入 `tests/unit/{build,run,collect,report,delivery,diagnostics,compat}`，共用 source root 在 tests/paths.py，跨测试 fixture 使用明确包导入。独立清理保护程序迁入 `tests/integration/datasystem_runtime_safety.py`，名称不触发默认发现。16 个原根目录实现在 `kvcbench/diagnostics/` 或 `kvcbench/compat/legacy/` 获得唯一归属，旧文件变为显式转发；修正直接运行时的 package root 和未来导入位置，不改变实际测量循环。旧 TCP gate 的锁现在由上下文管理器关闭，消除该 fixture 的 ResourceWarning。产品 shell 资产与最终旧入口退出仍待收尾，不能把本节当作完整 P6 完成。
+
+验证记录：
+
+- 仅测试迁移后 554 项通过（57.087 秒）；实现迁移首轮检出旧动态加载测试仍指向转发文件，改为测试 canonical owner；该失败原日志保留。
+- 修正后相关兼容/诊断 76 项通过（12.945 秒）；最终全量 `python3 -m unittest discover -s tests -t . -p 'test_*.py'` **554 项通过，61.915 秒**，`organized-tests-004.log`，无先前 TCP gate 锁 ResourceWarning。
+- 后加入的本地 publication install 两项与 delivery acceptance 三项共同通过（5 项，0.178 秒）；不将其额外两项计入上述 554 项。
+- 独立进程身份/清理保护程序通过（只启动自有 fixture 子进程，不启动产品服务），结果 `p6-runtime-safety-001/safety-result.json`。
+- 新 browser 验收器在历史干净包上正确拒绝其只有两份文档的布局，九图、交互、移动端、Mermaid 仍正常；不放宽四文档要求，不当作本次新报告验收。
+- 冻结新后处理/交付包 `collection-bundle-001` 共 316 项，manifest SHA `3a3e2a2f7e19ff037dc9d71427c6494dc0aae8455a2a5c9aebe53183d50266f7`，ZIP SHA `c764b9e6c40a7851efd5f2ac76a2c4818a1a86a722ffec65fe527972630251a0`。尚未在正式测量开放时上传至目标节点。
+
+本阶段按 ds-self-verify 检查：产品仓无改动；改动限工具/RFC，测量热循环未改；原运行根/原件/失败 attempt 未覆盖；上传使用新版本目录，失败不会覆盖已有报告。实际新矩阵、W12–W18 端到端和公开交付仍须由本次真实原件证明。

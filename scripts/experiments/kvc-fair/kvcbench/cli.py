@@ -19,6 +19,18 @@ from kvcbench.platform.receipts import Workflow, file_reference, verify_commit
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    command = commands.add_parser('publish-workflow', help='W17 upload and register an accepted local report')
+    command.add_argument('--control', type=Path, required=True)
+    command.add_argument('--spec', type=Path, required=True)
+    command = commands.add_parser('check-publication', help='W18 actual public download and browser verification')
+    command.add_argument('--control', type=Path, required=True)
+    command = commands.add_parser('report-workflow', help='W15 render and W16 actual local/offline/browser delivery acceptance')
+    command.add_argument('--derived', type=Path, required=True)
+    command.add_argument('--out', type=Path, required=True)
+    command.add_argument('--control', type=Path, required=True)
+    command.add_argument('--node', type=Path, required=True)
+    command.add_argument('--playwright', type=Path, required=True)
+    command.add_argument('--chrome', type=Path, required=True)
     command = commands.add_parser("collect", help="Freeze terminal sources, receive immutable evidence and derive audited report inputs")
     actions = command.add_subparsers(dest="collect_action", required=True)
     action = actions.add_parser("capture")
@@ -81,6 +93,15 @@ def parser():
 
 
 def run(args):
+    if args.command == 'publish-workflow':
+        from kvcbench.pipeline.publication import upload
+        return upload(args.control, read_json(args.spec)), 0
+    if args.command == 'check-publication':
+        from kvcbench.pipeline.publication import check
+        return check(args.control), 0
+    if args.command == 'report-workflow':
+        from kvcbench.pipeline.reporting import local
+        return local(args.derived, args.out, args.control, node=args.node, playwright=args.playwright, chrome=args.chrome), 0
     if args.command == "collect":
         if args.collect_action == "capture":
             from kvcbench.collect.capture import capture

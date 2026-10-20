@@ -67,7 +67,11 @@ def main():
     parser.add_argument("--site", type=Path, default=Path("/var/www/html"))
     parser.add_argument("--report", default="perf/kvc-fair-20261020")
     parser.add_argument("--title", default="DataSystem × Mooncake × LMCache：同节点 CPU 实验")
+    parser.add_argument('--date', default='2026-10-20')
+    parser.add_argument('--record', type=Path)
     args = parser.parse_args()
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.date):
+        raise ValueError('Publication date must use YYYY-MM-DD')
     site = args.site.resolve()
     report = (site / args.report).resolve()
     if site not in report.parents:
@@ -79,8 +83,8 @@ def main():
         path = (report / name).resolve()
         if report not in path.parents or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise RuntimeError("Report dependency hash mismatch: " + name)
-    entry = {"t":args.title, "p":args.report+"/index.html", "d":"2026-10-20", "u":"2026-10-20", "c":"perf", "g":"bench", "e":"发布源码构建、双服务 exist/put/get、cgroup CPU/内存/I/O 与可复现脚本", "tg":["DataSystem","Mooncake","LMCache","公平压测"]}
-    metadata = {"c":"perf","g":"bench","group":"压测与性能基线","d":"2026-10-20","u":"2026-10-20","title":entry["t"],"parent":None}
+    entry = {"t":args.title, "p":args.report+"/index.html", "d":args.date, "u":args.date, "c":"perf", "g":"bench", "e":"发布源码构建、双服务 exist/put/get、cgroup CPU/内存/I/O 与可复现脚本", "tg":["DataSystem","Mooncake","LMCache","公平压测"]}
+    metadata = {"c":"perf","g":"bench","group":"压测与性能基线","d":args.date,"u":args.date,"title":entry["t"],"parent":None}
     lock = Path("/tmp/kvc-yche-publish.lock").open("w")
     fcntl.flock(lock, fcntl.LOCK_EX)
     homepage = site / "index.html"
@@ -89,7 +93,7 @@ def main():
     index = site / "assets/js/document-index-20261011.json"
     index_original = index.read_bytes()
     index_text = register_metadata(index_original.decode(), entry["p"], metadata)
-    audit = report / "publication.json"
+    audit = args.record or report / "publication.json"
     previous = {"homepage_before_sha256":hashlib.sha256(original).hexdigest(),"metadata_before_sha256":hashlib.sha256(index_original).hexdigest(),"pages_before":before,"pages_after":after}
     atomic(homepage, text.encode(), previous["homepage_before_sha256"])
     atomic(index, index_text.encode(), previous["metadata_before_sha256"])
