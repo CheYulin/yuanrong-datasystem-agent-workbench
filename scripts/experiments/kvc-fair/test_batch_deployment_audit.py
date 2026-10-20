@@ -51,7 +51,7 @@ def fixture(root):
     source = root / "runtime-inputs/scripts/datasystem/runtime.py"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"fixture-runtime-source")
-    stage = {"root": REMOTE, "inputs": {"scripts/datasystem/runtime.py":
+    stage = {"root": REMOTE, "feature_profile": "pure-kv", "inputs": {"scripts/datasystem/runtime.py":
              {"sha256": audit.digest(source), "bytes": source.stat().st_size}}}
     save(root / "batch-stage.json", stage)
     for phase, action, repeats in [("batch-gate-001", "gate", 1), ("batch-smoke-001", "smoke", 1), ("formal-batch-001", "run", 3)]:
@@ -94,13 +94,18 @@ def fixture(root):
     for number, name in enumerate(CLUSTERS):
         directory = root / "run" / name
         remote_dir = REMOTE + "/run/" + name
-        manifest = {"run_dir": remote_dir, "rocksdb_store_dirs": {}, "processes": []}
+        manifest = {"run_dir": remote_dir, "runtime_profile": "pure-kv", "rocksdb_store_dirs": {}, "processes": []}
         observations = []
         for index in range(2):
             database = remote_dir + f"/w{index}/rocksdb"
-            flags = ["--worker_address=127.0.0.1:" + str(31531 + index), "--rocksdb_store_dir=" + database]
+            feature_flags = {**audit.PURE_KV_FLAGS, "log_monitor": "false", "ipc_through_shared_memory": "false",
+                             "enable_rdma": "false", "enable_urma": "false", "l2_cache_type": "none", "spill_size_limit": "0"}
+            flags = ["--worker_address=127.0.0.1:" + str(31531 + index),
+                     *[f"--{key}={value}" for key, value in feature_flags.items()], "--rocksdb_store_dir=" + database]
             path = directory / f"w{index}/worker.flags"
             path.parent.mkdir(parents=True)
+            (path.parent / "rocksdb/eviction_policy").mkdir(parents=True)
+            (path.parent / "rocksdb/eviction_policy/policy-state.json").write_text('{"fixture":true}')
             path.write_text("\n".join(flags) + "\n")
             process = {"name": f"worker{index}", "pid": 1000 + number * 2 + index,
                        "start_ticks": str(9000 + number * 2 + index),
@@ -148,6 +153,99 @@ class DeploymentAuditTests(unittest.TestCase):
     def test_missing_repeat_is_not_a_completed_deployment_proof(self):
         self.manifest(20).unlink()
         self.assertFalse(self.result()["valid"])
+
+    def test_pure_kv_profile_and_all_flags_are_required(self):
+        path = self.manifest()
+        original = json.loads(path.read_text())
+        for key, value in audit.PURE_KV_FLAGS.items():
+            data = copy.deepcopy(original)
+            data["processes"][0]["command"] = [item.replace(f"--{key}={value}", f"--{key}=wrong")
+                                               for item in data["processes"][0]["command"]]
+            save(path, data)
+            (path.parent / "w0/worker.flags").write_text("\n".join(data["processes"][0]["command"][1:]) + "\n")
+            self.assertFalse(self.result()["valid"], key)
+        data = copy.deepcopy(original)
+        data.pop("runtime_profile")
+        save(path, data)
+        self.assertFalse(self.result()["valid"])
+
+    def test_rocks_database_artifacts_rejected_but_eviction_state_retained(self):
+        database = self.manifest().parent / "w0/rocksdb"
+        self.assertTrue(self.result()["valid"])
+        for name in ["000001.sst", "MANIFEST-000001", "CURRENT", "000001.log", "LOG", "WAL"]:
+            path = database / name
+            path.write_bytes(b"fixture-database-artifact")
+            result = self.result()
+            self.assertFalse(result["valid"], name)
+            self.assertTrue(any(error["code"] == "rocksdb-database-artifacts" for error in result["errors"]))
+            path.unlink()
+        result = self.result()
+        self.assertTrue(result["valid"], result["errors"])
+        files = result["clusters"][2]["workers"][0]["rocksdb_directory"]["files"]
+        self.assertEqual(len(files), 1)
+        self.assertTrue(files[0]["path"].endswith("eviction_policy/policy-state.json"))
+
+    def readonly_failure(self):
+        phase = self.root / "formal-batch-001"
+        save(phase / "parameters.json", {"continue_readonly_errors": True, "workload_protocol": audit.PROTOCOL,
+                                          "root": REMOTE, "action": "run"})
+        (phase / "resources").mkdir()
+        (phase / "resources/samples.jsonl").write_text("")
+        failure = "r0-datasystem/b16-exist_hit"
+        events = [json.loads(line) for line in (phase / "events.jsonl").read_text().splitlines()]
+        for event in events:
+            if (event.get("event") == "measure_complete" and event.get("group") == "r0-datasystem"
+                    and event.get("batch") == 16 and event.get("operation") == "exist_hit"):
+                event.update(event="measure_failed", identity=failure, returncode=1)
+        (phase / "events.jsonl").write_text("\n".join(json.dumps(row) for row in events) + "\n")
+        summary = json.loads((phase / "summary.json").read_text())
+        summary.update(valid=False, execution_complete=True, measurement_failures=[failure])
+        save(phase / "summary.json", summary)
+        for path in phase.glob("r*-*/epochs/*/epoch-summary.json"):
+            row = json.loads(path.read_text())
+            failed = [failure] if row["identity"] == "r0-datasystem/read" else []
+            row.update(valid=not failed, execution_complete=True, measurement_failures=failed)
+            save(path, row)
+        return phase, failure
+
+    def test_verified_native_failure_kept_distinct_from_successful_deployment_audit(self):
+        phase, failure = self.readonly_failure()
+        verified = {"evidence_verified": True, "counts": {"valid": 149, "failed": 1, "not_supported": 30},
+                    "issues": [], "rows": [{"identity": failure, "status": "failed"}]}
+        with patch("batch_analyze.analyze", return_value=verified) as analyze:
+            result = self.result()
+        analyze.assert_called_once_with(phase)
+        self.assertTrue(result["valid"], result["errors"])
+        formal = result["epoch_suites"][-1]
+        self.assertEqual(formal["native_measurement_failures"], [failure])
+        self.assertTrue(formal["execution_complete"])
+        self.assertTrue(formal["measurement_evidence"]["evidence_verified"])
+        self.assertEqual(formal["measurement_evidence"]["counts"]["failed"], 1)
+        self.assertEqual(set(result["analysis_helpers"]), {"batch_analyze", "batch_epoch_verify", "benchmark", "report"})
+        for row in result["analysis_helpers"].values():
+            path = Path(row["path"])
+            self.assertEqual(row["bytes"], path.stat().st_size)
+            self.assertEqual(row["sha256"], audit.digest(path))
+
+    def test_real_analyzer_rejects_claimed_failure_without_raw_evidence(self):
+        self.readonly_failure()
+        result = self.result()
+        self.assertFalse(result["valid"])
+        self.assertTrue(any(error["code"] == "measurement-evidence" for error in result["errors"]))
+
+    def test_failure_evidence_requires_analyzer_pass_and_exact_failure_identity(self):
+        _, failure = self.readonly_failure()
+        for verified in [{"evidence_verified": False, "issues": ["fixture-tamper"], "rows": []},
+                         {"evidence_verified": True, "issues": [], "rows": [{"identity": "other-case", "status": "failed"}]}]:
+            with patch("batch_analyze.analyze", return_value=verified):
+                self.assertFalse(self.result()["valid"])
+        row = self.root / "formal-batch-001/r0-datasystem/epochs/read/epoch-summary.json"
+        data = json.loads(row.read_text())
+        data["measurement_failures"] = []
+        save(row, data)
+        with patch("batch_analyze.analyze", return_value={"evidence_verified": True, "issues": [],
+                                                       "rows": [{"identity": failure, "status": "failed"}]}):
+            self.assertFalse(self.result()["valid"])
 
     def test_read_epoch_cannot_include_fresh_put_or_unsupported_padding(self):
         path = self.root / "formal-batch-001/plan.json"

@@ -2,6 +2,7 @@
 """Audit collected DS launch isolation and RocksDB errors, without contacting services."""
 import argparse
 import hashlib
+import importlib
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -15,6 +16,10 @@ PRODUCTS = ["datasystem", "mooncake", "lmcache"]
 SOURCE_SHA = "2ff37e2f7c5fb45f3feea7c3fb969b8f84b920d6"
 STORAGE = re.compile(rb"rocks(?:db|_store)|object_metadata|\.(?:sst|ldb)\b", re.I)
 FILE_ERROR = re.compile(rb"no such file|size mismatch|corrupt|(?:i/o|io) error|failed|cannot open|too short|lock.*(?:error|busy)", re.I)
+PURE_KV_FLAGS = {"rocksdb_write_mode": "none", "sc_regular_socket_num": "0", "sc_stream_socket_num": "0",
+                 "json_log_monitor": "false", "enable_perf_trace_log": "false",
+                 "request_sample_rate": "0", "access_sample_rate": "0"}
+ROCKS_ARTIFACT = re.compile(r"(?:LOCK|CURRENT|IDENTITY|LOG(?:\.old.*)?|MANIFEST-.*|OPTIONS-.*|.*\.(?:sst|ldb|wal)|[0-9]+\.log|WAL.*)", re.I)
 
 
 def digest(path):
@@ -76,6 +81,7 @@ class Audit:
     def __init__(self, root):
         self.root = Path(root).absolute()
         self.inputs, self.errors = {}, []
+        self.analysis_helpers = {}
 
     def error(self, code, message, cluster=None, worker=None):
         self.errors.append({"code": code, "message": str(message), "cluster": cluster, "worker": worker})
@@ -127,6 +133,33 @@ class Audit:
         summary = self.read_json(Path(phase) / "summary.json")
         identities, selected = [], []
         events = self.read_events(Path(phase) / "events.jsonl")
+        parameter_path = self.root / phase / "parameters.json"
+        parameters = self.read_json(Path(phase) / "parameters.json") if parameter_path.exists() else {}
+        continued = parameters.get("continue_readonly_errors") is True
+        native_failures = [event for event in events if event.get("event") == "measure_failed"]
+        verified_measurements = None
+        if action != "gate" and (continued or native_failures or summary.get("measurement_failures")):
+            for path in sorted((self.root / phase).rglob("*.json")):
+                self.remember(self.file(path.relative_to(self.root)))
+            sample_path = self.file(Path(phase) / "resources/samples.jsonl")
+            self.remember(sample_path)
+            for name in ["batch_analyze", "benchmark", "report", *(["batch_epoch_verify"]
+                         if parameters.get("workload_protocol") == PROTOCOL else [])]:
+                module = importlib.import_module(name)
+                path = Path(module.__file__).resolve()
+                record = {"path": str(path), "sha256": digest(path), "bytes": path.stat().st_size}
+                if name in self.analysis_helpers and self.analysis_helpers[name] != record:
+                    raise ValueError("Analysis dependency changed during deployment audit: " + name)
+                self.analysis_helpers[name] = record
+            checked = importlib.import_module("batch_analyze").analyze(self.root / phase)
+            verified_measurements = {"evidence_verified": checked.get("evidence_verified"),
+                                     "counts": checked.get("counts"), "issues": checked.get("issues"),
+                                     "failed_identities": [row["identity"] for row in checked.get("rows", [])
+                                                           if row.get("status") == "failed"]}
+            if checked.get("evidence_verified") is not True or checked.get("issues"):
+                self.error("measurement-evidence", verified_measurements)
+            if summary.get("measurement_failures") != verified_measurements["failed_identities"]:
+                self.error("measurement-failure-identities", phase)
         for group in rows:
             cell = f"r{group['repeat']}-{group['product']}"
             epochs = [{"id": "gate", "kind": "correctness", "operations": []}] if action == "gate" else group["epochs"]
@@ -140,10 +173,17 @@ class Audit:
                 name = action + "-" + cell + ("" if action == "gate" else "-" + epoch["id"])
                 try:
                     expected_run = str(task_root / "run" / name)
+                    outcomes = [event for event in events if event.get("event") in {"measure_complete", "measure_failed"}
+                                and event.get("group") == cell and event.get("epoch") == epoch["id"]]
+                    failed = [cell + f"/b{event['batch']}-{event['operation']}" for event in outcomes
+                              if event["event"] == "measure_failed"]
                     if (ledger.get("identity") != identity or ledger.get("kind") != epoch["kind"]
                             or ledger.get("operations") != epoch["operations"] or ledger.get("run_dir") != expected_run
-                            or ledger.get("workload_protocol") != PROTOCOL or ledger.get("valid") is not True):
-                        raise ValueError("Epoch summary identity, workload, layout or success differs")
+                            or ledger.get("workload_protocol") != PROTOCOL or ledger.get("valid") is not (not failed)
+                            or continued and (ledger.get("execution_complete") is not True
+                                              or ledger.get("measurement_failures") != failed)
+                            or failed and not continued):
+                        raise ValueError("Epoch summary identity, workload, completion or honest native-failure status differs")
                     before, after = ledger["start_mono_ns"], ledger["end_mono_ns"]
                     if (type(before) is not int or type(after) is not int or after <= before
                             or abs(ledger["duration_s"] - (after - before) / 1e9) > 1e-9):
@@ -155,9 +195,8 @@ class Audit:
                             or any(value != [] for value in members.values())):
                         raise ValueError("Epoch did not record server/client drain")
                     if group["product"] == "datasystem":
-                        for event_kind in ["measure_prepare", "measure_complete"]:
-                            measured = [event for event in events if event.get("event") == event_kind
-                                        and event.get("group") == cell and event.get("epoch") == epoch["id"]]
+                        for measured in [[event for event in events if event.get("event") == "measure_prepare"
+                                          and event.get("group") == cell and event.get("epoch") == epoch["id"]], outcomes]:
                             if ([(event.get("batch"), event.get("operation")) for event in measured]
                                     != [(spec["batch"], spec["operation"]) for spec in epoch["operations"]]
                                     or any(not ledger["start_wall_ns"] <= event["wall_ns"] <= ledger["end_wall_ns"] for event in measured)):
@@ -182,13 +221,34 @@ class Audit:
                 if group["product"] == "datasystem":
                     selected.append(name)
         completed = [f"r{group['repeat']}-{group['product']}" for group in rows]
+        failures = [event.get("identity") for event in native_failures]
         if (summary.get("workload_protocol") != PROTOCOL or summary.get("action") != action
-                or summary.get("valid") is not True or summary.get("failed") != [] or not summary.get("ended")
+                or summary.get("valid") is not (not failures) or summary.get("failed") != [] or not summary.get("ended")
+                or continued and (summary.get("execution_complete") is not True or summary.get("measurement_failures") != failures)
+                or failures and not continued
                 or summary.get("completed") != completed or summary.get("epochs_expected") != identities
                 or summary.get("epochs_completed") != identities):
             self.error("suite-epoch-coverage", phase)
         return selected, {"suite": phase, "action": action, "expected_epochs": identities,
-                          "epochs_completed": summary.get("epochs_completed"), "datasystem_clusters": selected}
+                          "epochs_completed": summary.get("epochs_completed"), "datasystem_clusters": selected,
+                          "native_measurement_failures": failures, "measurement_evidence": verified_measurements,
+                          "execution_complete": summary.get("execution_complete", summary.get("valid"))}
+
+    def database_files(self, directory):
+        path = self.root / directory
+        if any(part.is_symlink() for part in [path, *path.parents]) or not path.is_dir():
+            raise ValueError("Missing regular collected database directory: " + str(directory))
+        files, artifacts = [], []
+        for item in sorted(path.rglob("*")):
+            if item.is_symlink():
+                raise ValueError("Symlink inside database evidence: " + str(item.relative_to(self.root)))
+            if item.is_file():
+                relative = item.relative_to(self.root)
+                files.append({"path": relative.as_posix(), **self.remember(self.file(relative))})
+                if ROCKS_ARTIFACT.fullmatch(item.name):
+                    artifacts.append(files[-1])
+        return {"files": files, "database_artifacts": artifacts,
+                "scope": "Collected final directory entries only; ordinary eviction_policy state files are retained, not classified as RocksDB by location."}
 
     def scan(self, relative):
         path = self.file(relative)
@@ -219,6 +279,8 @@ class Audit:
             expected_run = task_root / "run" / name
             if path_value(manifest.get("run_dir")) != expected_run:
                 raise ValueError("Manifest run_dir differs from this exact cluster")
+            if manifest.get("runtime_profile") != "pure-kv":
+                raise ValueError("Launch manifest does not declare the pure-kv profile")
             processes = manifest.get("processes", [])
             workers = [process for process in processes if process.get("name") in {"worker0", "worker1"}]
             if len(workers) != 2 or {process["name"] for process in workers} != {"worker0", "worker1"}:
@@ -239,10 +301,18 @@ class Audit:
                 if (manifest.get("rocksdb_store_dirs", {}).get(f"worker{index}") != str(expected)
                         or one_flag(flags, "rocksdb_store_dir") != str(expected) or argv[1:] != flags):
                     raise ValueError("Manifest, launch argv and flagfile disagree on Worker configuration")
+                for key, expected_value in {**PURE_KV_FLAGS, "log_monitor": "false",
+                                            "ipc_through_shared_memory": "false", "enable_rdma": "false",
+                                            "enable_urma": "false", "l2_cache_type": "none", "spill_size_limit": "0"}.items():
+                    if one_flag(argv, key) != expected_value or one_flag(flags, key) != expected_value:
+                        raise ValueError("Pure-KV launch flag is absent, duplicated or enabled: " + key)
+                files = self.database_files(directory / f"w{index}/rocksdb")
+                if files["database_artifacts"]:
+                    self.error("rocksdb-database-artifacts", files["database_artifacts"], name, index)
                 row["workers"].append({"worker_index": index, "pid": process["pid"],
                     "start_ticks": process["start_ticks"], "rocksdb_store_dir": str(value),
                     "flagfile": {"path": (directory / f"w{index}/worker.flags").as_posix(), **flag_record},
-                    "launch_configuration_verified": True})
+                    "launch_configuration_verified": True, "runtime_profile": "pure-kv", "rocksdb_directory": files})
             if name == "gate-r0-datasystem":
                 proof = self.read_json("batch-gate-001/r0-datasystem/tcp-configuration.json")
                 source = proof.get("source", {})
@@ -285,6 +355,8 @@ class Audit:
         try:
             stage = self.read_json("batch-stage.json")
             task_root = path_value(stage.get("root"))
+            if stage.get("feature_profile") != "pure-kv":
+                self.error("feature-profile", "The deployment audit requires the explicit pure-kv feature stage")
             expected_runtime = stage["inputs"]["scripts/datasystem/runtime.py"]
             source = self.file("runtime-inputs/scripts/datasystem/runtime.py")
             runtime = {"path": source.relative_to(self.root).as_posix(), **self.remember(source)}
@@ -322,15 +394,25 @@ class Audit:
                     self.error("input-changed", relative)
             except (OSError, ValueError) as error:
                 self.error("input-changed", error)
+        for name, expected in self.analysis_helpers.items():
+            try:
+                path = Path(expected["path"])
+                if path.stat().st_size != expected["bytes"] or digest(path) != expected["sha256"]:
+                    self.error("analysis-helper-changed", name)
+            except OSError as error:
+                self.error("analysis-helper-changed", error)
         end_mono, end_wall = time.monotonic_ns(), time.time_ns()
-        return {"schema_version": 2, "kind": "datasystem_collected_deployment_audit", "root": str(self.root),
+        return {"schema_version": 3, "kind": "datasystem_collected_deployment_audit", "root": str(self.root),
             "workload_protocol": PROTOCOL,
-            "scope": "Recorded launch isolation and observed error-log audit for DS clusters derived from actual supported-only epoch plans. Gate live procfs is verified separately; other phases remain live-unobserved. No remote inode/symlink or continuous-liveness proof is inferred.",
+            "feature_profile": "pure-kv",
+            "scope": "Recorded pure-KV launch isolation, final collected database-artifact absence and observed error-log audit for DS clusters derived from actual supported-only epoch plans. Fully verified native read failures are retained as failures without invalidating deployment evidence. Gate live procfs is verified separately; other phases remain live-unobserved. No remote inode/symlink or continuous-liveness proof is inferred.",
             "expected_clusters": expected_clusters, "epoch_suites": suites, "clusters": rows, "runtime_source": runtime, "errors": self.errors, "valid": not self.errors,
             "live_coverage": {"observed_clusters": sum(row["live"]["observed"] for row in rows),
                               "expected_clusters": len(expected_clusters), "required_gate_live_observed": any(row["name"] == "gate-r0-datasystem" and row["live"]["observed"] for row in rows)},
             "stdout_error_patterns": {"storage": STORAGE.pattern.decode(), "failure": FILE_ERROR.pattern.decode(),
                 "ordinary_warning_is_failure": False}, "inputs": self.inputs,
+            "analysis_helpers": self.analysis_helpers,
+            "analysis_provenance_scope": "Actual postprocessing source files loaded for native-failure verification; these may be newer than unused frozen-stage helpers and do not replace frozen runtime inputs.",
             "inputs_rehashed_after_audit": True, "helper": {"sha256": digest(Path(__file__)), "bytes": Path(__file__).stat().st_size},
             "start_wall_ns": start_wall, "end_wall_ns": end_wall, "start_mono_ns": start_mono,
             "end_mono_ns": end_mono, "duration_s": (end_mono - start_mono) / 1e9}

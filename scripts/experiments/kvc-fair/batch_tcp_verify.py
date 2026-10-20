@@ -112,6 +112,49 @@ def captured_segments(text):
             yield bytes.fromhex(match[1].replace("\\x", "")), 0, None, int(match[2])
 
 
+def successful_regions(text, successful_bytes):
+    vectors = list(re.finditer(r"\{iov_base=(.*?),\s*iov_len=(\d+)\}", text))
+    if not vectors:
+        for binary, start, index, declared in captured_segments(text):
+            known = binary[:max(0, min(declared, successful_bytes - start))]
+            yield {"binary": known, "start": start, "declared": declared,
+                   "fragments": [{"iov_index": index, "stream_start": start, "captured_bytes": len(known)}]}
+        return
+    region, stream_start, previous_end = None, 0, None
+    for index, match in enumerate(vectors):
+        gap = text[:match.start()].rstrip() if previous_end is None else text[previous_end:match.start()]
+        if (previous_end is None and not gap.endswith("[")) or (previous_end is not None and not re.fullmatch(r"\s*,\s*", gap)):
+            if region is not None:
+                yield region
+            return
+        previous_end = match.end()
+        declared = int(match[2])
+        available = max(0, min(declared, successful_bytes - stream_start))
+        encoded = re.fullmatch(r'"((?:\\x[0-9a-fA-F]{2})*)"(\.\.\.)?', match[1].strip())
+        binary = bytes.fromhex(encoded[1].replace("\\x", "")) if encoded else b""
+        known = binary[:available]
+        complete = encoded is not None and encoded[2] is None and len(binary) >= available
+        # A truncated/unknown vector is a boundary even if its printed prefix is useful alone.
+        if region is not None and (not complete or region["start"] + len(region["binary"]) != stream_start):
+            yield region
+            region = None
+        if known:
+            if region is None:
+                region = {"binary": b"", "start": stream_start, "declared": 0, "fragments": []}
+            region["binary"] += known
+            region["declared"] += declared
+            region["fragments"].append({"iov_index": index, "stream_start": stream_start,
+                                        "captured_bytes": len(known)})
+        if not complete and region is not None:
+            yield region
+            region = None
+        stream_start += declared
+        if stream_start >= successful_bytes:
+            break
+    if region is not None:
+        yield region
+
+
 def full_payload_sample(suite, anchors, prefix, count, line_cache):
     candidates = payload_candidates(prefix, count)
     for anchor in anchors:
@@ -124,20 +167,34 @@ def full_payload_sample(suite, anchors, prefix, count, line_cache):
             raise ValueError("Trace line changed after directional parsing")
         first = lines[anchor["first_line"] - 1]
         text = (first + raw if anchor["first_line"] != anchor["line"] else raw).decode(errors="replace")
-        for binary, stream_start, iov_index, declared in captured_segments(text):
+        for region in successful_regions(text, anchor["successful_bytes"]):
+            binary, stream_start, declared = region["binary"], region["start"], region["declared"]
             for offset in range(max(0, len(binary) - 1024 + 1)):
                 if stream_start + offset + 1024 > anchor["successful_bytes"] or offset + 1024 > declared:
                     continue
                 for index, key, expected in candidates.get(binary[offset:offset + 8], []):
                     if binary[offset:offset + 1024] != expected:
                         continue
+                    sample_start = stream_start + offset
+                    fragments = []
+                    for fragment in region["fragments"]:
+                        begin = max(sample_start, fragment["stream_start"])
+                        end = min(sample_start + 1024, fragment["stream_start"] + fragment["captured_bytes"])
+                        if end > begin:
+                            fragments.append({"iov_index": fragment["iov_index"],
+                                "iov_byte_offset": begin - fragment["stream_start"],
+                                "sample_byte_offset": begin - sample_start, "bytes": end - begin})
+                    if sum(fragment["bytes"] for fragment in fragments) != 1024:
+                        raise ValueError("TCP payload sample contains an unobserved vector gap")
                     return {"sample_key": key, "sample_key_index": index, "sample_version": 0,
                             "sample_size": 1024, "sample_binary_sha256": hashlib.sha256(expected).hexdigest(),
                             "input_path": str(path.relative_to(suite)), "input_line": anchor["line"],
                             "input_line_sha256": anchor["line_sha256"], "input_first_line": anchor["first_line"],
                             "input_first_line_sha256": hashlib.sha256(first).hexdigest(),
                             "segment_byte_offset": offset, "syscall_stream_byte_offset": stream_start + offset,
-                            "iov_index": iov_index, "captured_segment_bytes": len(binary),
+                            "iov_index": fragments[0]["iov_index"], "iov_indices": [fragment["iov_index"] for fragment in fragments],
+                            "sample_iov_fragments": fragments, "captured_segment_bytes": len(binary),
+                            "capture_rule": "Complete successful adjacent iov prefixes within this one syscall; no cross-syscall reconstruction",
                             "declared_buffer_bytes": declared, "successful_syscall_bytes": anchor["successful_bytes"],
                             "timestamp_ns": anchor["timestamp_ns"], "tcp_endpoints": anchor["tcp_endpoints"],
                             "syscall": anchor["syscall"], "actual_medium": "TCP"}
@@ -160,6 +217,7 @@ def verify(suite):
     result = {"schema_version": 2, "kind": "datasystem_native_batch_tcp_any_key_full_payload_audit", "suite": str(suite),
               "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(),
               "cases": [], "inputs": {}, "valid": False,
+              "payload_capture_rule": "single-syscall-complete-adjacent-iov-success-prefix-v1",
               "scope": "Captured gate clients only. Every direction requires successful TCP syscall bytes >= batch_keys*1024, including RPC overhead, plus one complete 1024-byte version-0 payload derived from a key in this exact batch within the syscall's successful return range. Any-key presence does not prove every byte of all batch payloads, RPC count, worker-worker transfers, or continuous tracing of formal performance runs. Earlier key0-prefix-only audits are independent retained records."}
     def remember(path, expected=None):
         record = file_record(path)

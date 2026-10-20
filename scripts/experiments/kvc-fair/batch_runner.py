@@ -57,6 +57,8 @@ class Runner:
         for name, row in stage["inputs"].items():
             if digest(self.root / name) != row["sha256"]:
                 raise RuntimeError("Frozen stage input changed: " + name)
+            if "mode" in row and (self.root / name).stat().st_mode & 0o777 != row["mode"]:
+                raise RuntimeError("Frozen stage input permissions changed: " + name)
         atomic_json(self.out / "batch-stage.json", stage)
         parameters = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
         parameters["workload_protocol"] = PROTOCOL
@@ -69,7 +71,7 @@ class Runner:
         atomic_json(self.out / "status.json", row)
         print(json.dumps(row), flush=True)
 
-    def execute(self, argv, log, env, timeout=1200):
+    def execute(self, argv, log, env, timeout=1200, accepted_returncodes=(0,)):
         start, mono = time.time_ns(), time.monotonic_ns()
         rc = None
         try:
@@ -80,8 +82,9 @@ class Runner:
                 except BaseException:
                     stop_process(proc)
                     raise
-            if rc:
+            if rc not in accepted_returncodes:
                 raise RuntimeError(f"rc={rc}; inspect {log}")
+            return rc
         finally:
             self.event("command", argv=argv, log=str(log), start_wall_ns=start, end_wall_ns=time.time_ns(),
                        duration_s=(time.monotonic_ns() - mono) / 1e9, returncode=rc)
@@ -120,7 +123,8 @@ class Runner:
         epoch_identity = cell.name + "/" + epoch["id"]
         ledger = {"identity": epoch_identity, "kind": epoch["kind"], "operations": epoch["operations"],
                   "run_dir": variables["run_dir"], "workload_protocol": PROTOCOL,
-                  "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(), "valid": False}
+                  "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(), "valid": False,
+                  "execution_complete": False, "measurement_failures": []}
         self.event("epoch_start", group=cell.name, epoch=epoch["id"], run_dir=variables["run_dir"], epoch_kind=epoch["kind"])
         completed = False
         try:
@@ -171,10 +175,38 @@ class Runner:
                     if preloaded:
                         command.append("--skip-preload")
                     self.event("measure_prepare", group=cell.name, epoch=epoch["id"], batch=batch, operation=op)
-                    self.execute(command, output.with_suffix(".log"), env)
+                    continue_errors = getattr(self.args, "continue_readonly_errors", False) and op in {"get", "exist_hit", "exist_miss"}
+                    rc = self.execute(command, output.with_suffix(".log"), env, accepted_returncodes=(0, 1)) if continue_errors else self.execute(command, output.with_suffix(".log"), env)
                     raw = json.loads(output.read_text())
                     if not raw.get("valid"):
-                        raise RuntimeError("Invalid batch result " + str(output))
+                        if not continue_errors or rc != 1:
+                            raise RuntimeError("Invalid batch result " + str(output))
+                        from batch_analyze import measured_row
+                        case_identity = cell.name + "/" + output.stem
+                        checked = measured_row(raw, {"identity": case_identity, "product": row["product"],
+                            "repeat": row["repeat"], "batch": batch, "operation": op, "supported": True}, [], [],
+                            {"continue_readonly_errors": True, "isolated_epochs": True,
+                             "adapter": product["adapter"], "config": product["config"],
+                             "run_id": self.out.name + "-r" + str(row["repeat"]), "out": str(output),
+                             "skip_preload": preloaded})
+                        if checked.get("status") != "failed" or not checked.get("evidence_verified"):
+                            raise RuntimeError("Read-only failure evidence is incomplete: " + repr(checked.get("issues")))
+                        if not hasattr(self, "measurement_failures"):
+                            self.measurement_failures = []
+                        ledger["measurement_failures"].append(case_identity)
+                        self.measurement_failures.append(case_identity)
+                        outcome = {"identity": case_identity, "returncode": rc, "status": "failed",
+                                   "read_only": True, "errors": checked["native_errors"], "result": str(output),
+                                   "result_sha256": digest(output), "evidence_verified": True}
+                        (cell / "case-outcomes").mkdir(exist_ok=True)
+                        atomic_json(cell / "case-outcomes" / (output.stem + ".json"), outcome)
+                        self.event("measure_failed", group=cell.name, epoch=epoch["id"], batch=batch, operation=op,
+                                   identity=case_identity, returncode=rc, failures=raw["failures"],
+                                   success=raw["success"], duration_s=raw["duration_s"])
+                        preloaded = True
+                        continue
+                    if continue_errors and rc != 0:
+                        raise RuntimeError("Successful result contradicts command exit status")
                     preloaded = True
                     self.event("measure_complete", group=cell.name, epoch=epoch["id"], batch=batch, operation=op,
                                success=raw["success"], keys_s=raw["keys_s"], duration_s=raw["duration_s"])
@@ -183,12 +215,14 @@ class Runner:
             try:
                 self.execute(stop, directory / "lifecycle.log", env, 180)
                 ledger["drained"] = drain(CGROUP, ["server", "client"], timeout=10)
-                ledger["valid"] = completed
+                ledger["execution_complete"] = completed
+                ledger["valid"] = completed and not ledger["measurement_failures"]
             finally:
                 ledger.update(end_wall_ns=time.time_ns(), end_mono_ns=time.monotonic_ns())
                 ledger["duration_s"] = (ledger["end_mono_ns"] - ledger["start_mono_ns"]) / 1e9
                 atomic_json(directory / "epoch-summary.json", ledger)
-                self.event("epoch_complete", group=cell.name, epoch=epoch["id"], valid=ledger["valid"], duration_s=ledger["duration_s"])
+                self.event("epoch_complete", group=cell.name, epoch=epoch["id"], valid=ledger["valid"],
+                           execution_complete=ledger["execution_complete"], measurement_failures=ledger["measurement_failures"], duration_s=ledger["duration_s"])
         self.epochs_completed.append(epoch_identity)
 
     def run(self):
@@ -197,9 +231,11 @@ class Runner:
         expected_epochs = [f"r{row['repeat']}-{row['product']}/" + epoch["id"] for row in rows
                            for epoch in ([{"id": "gate"}] if self.args.action == "gate" else row["epochs"])]
         self.epochs_completed = []
+        self.measurement_failures = []
         summary = {"started": utc(), "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(),
                    "completed": [], "failed": [], "profile": "native-batch-tcp", "action": self.args.action,
-                   "workload_protocol": PROTOCOL, "epochs_expected": expected_epochs, "epochs_completed": self.epochs_completed}
+                   "workload_protocol": PROTOCOL, "epochs_expected": expected_epochs, "epochs_completed": self.epochs_completed,
+                   "measurement_failures": self.measurement_failures}
         monitor = interference = None
         try:
             if self.args.action != "gate":
@@ -241,8 +277,9 @@ class Runner:
                 summary["drained"] = drain(CGROUP)
             except BaseException:
                 summary["failed"].append(traceback.format_exc())
-            summary["valid"] = (len(summary["completed"]) == len(rows) and self.epochs_completed == expected_epochs
-                                and not summary["failed"] and summary.get("monitor_exit", 0) == 0 and summary.get("interference_exit", 0) == 0)
+            summary["execution_complete"] = (len(summary["completed"]) == len(rows) and self.epochs_completed == expected_epochs
+                                             and not summary["failed"] and summary.get("monitor_exit", 0) == 0 and summary.get("interference_exit", 0) == 0)
+            summary["valid"] = summary["execution_complete"] and not self.measurement_failures
             atomic_json(self.out / "summary.json", summary)
             self.event("suite_complete", valid=summary["valid"], completed=len(summary["completed"]), duration_s=summary["duration_s"])
         return 0 if summary["valid"] else 1
@@ -277,6 +314,7 @@ def main():
     p.add_argument("--duration", type=float, default=20)
     p.add_argument("--warmup", type=float, default=3)
     p.add_argument("--put-keys", type=int, default=262144)
+    p.add_argument("--continue-readonly-errors", action="store_true")
     args = p.parse_args()
     def interrupted(*_):
         raise KeyboardInterrupt()
@@ -284,6 +322,8 @@ def main():
     signal.signal(signal.SIGINT, interrupted)
     if args.action == "smoke":
         args.repeats, args.duration, args.warmup, args.put_keys = 1, 1, .1, 32768
+    if args.continue_readonly_errors and args.action != "run":
+        p.error("Read-only native failures may only be collected in the formal run")
     if args.repeats < 1:
         p.error("positive repeats required")
     with (args.root / "suite.lock").open("a") as lock:

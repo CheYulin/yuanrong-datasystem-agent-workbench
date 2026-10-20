@@ -2,7 +2,7 @@
 
 ## 3.1 固定矩阵
 
-主矩阵使用独立 r5 profile：Mooncake per-peer queued/pending 均8192，lane=4、admission timeout=1000ms显式固定为锁定源码默认值，全部 B 使用同一配置；DataSystem 各 Worker 使用独立新 RocksDB 目录。三方 cgroup/并发/TCP/对象大小保持相同。默认 r2 失败、r3 共享目录正式失败和 r4 旧协议预检分别保留，不记为 r5 性能重复。
+主矩阵使用独立 r7 `pure-kv` profile：Mooncake per-peer queued/pending 均8192，lane=4、admission timeout=1000ms显式固定，全部 B 使用同一配置；DataSystem 关闭 RocksDB 写入及 stream，两 worker 仍保留独立 fresh 工作目录。三方关闭经源码确认无用的功能，cgroup/并发/TCP/对象大小保持相同。默认 r2、共享目录 r3、旧协议 r4、独立目录仍出现 deadline 的 r5 分别保留，不记为 r7 性能重复。配置依据与未关闭部分见[精简配置设计](configuration-profile.md)。
 
 每个产品/重复先运行独立 READ 服务周期，只预置65536 keys/64MiB，在四档 B 上测 UPSERT/GET/EXIST，再停止并排空服务。随后每个支持的 B 分别启动全新服务周期，预置同一65536-key池，固定预热32768新keys/32MiB并完整读回，再测262144新keys/256MiB fresh PUT；测前驻留98304 keys/96MiB，所有 B 和支持产品相同。各PUT周期之间以及PUT与READ之间不累计数据。LM 不支持的 PUT 槽保持 N/A，不通过逐 key setup补造批量性能。
 
@@ -26,6 +26,8 @@ LMCache EXIST 涉及 lookup-and-lock / result-query / hit unlock ACK，与 DS/Mo
 对已存在 key 使用另一组 payload：DS mset 可更新；Moon put_batch 与 LM store 可能 ACK 成功但保留旧值；Moon upsert_batch 必须真实更新。失败不自动重试，保留可能部分提交的未知数。LM 元数据命中锁必须在 finally 释放并等待 ACK，异常后 adapter 失效，不能把异常改写为 miss。
 
 Gate 通过后先跑相同接口编排 smoke，再跑正式三轮。smoke 与正式结果独立，正式开始前冻结输入哈希。
+
+正式矩阵保留 180 个槽：150 个原生支持槽、30 个 N/A。原生支持槽可以是有效完整测量，或带真实 rc=1/原件 SHA/错误/事件/服务周期的只读失败；两者不能混为“通过”。只有全部三轮有效的组合展示性能中位数。启用 `--continue-readonly-errors` 仅用于正常退出且证据完整的原生 GET/EXIST 状态码错误；写失败、字节或布尔校验失败、预热失败和进程异常仍终止。另设 fresh SDK 的限速 deadline 对照诊断，不作为正式性能重复。
 
 ## 3.3 统计边界
 

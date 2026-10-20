@@ -27,6 +27,31 @@ PUT / UPSERT 在 staging 分配与拷贝后，各调用一次 `Client::BatchPut`
 
 默认 r2 的带跟踪 B4096 门禁出现过 GET 空结果和 `TRANSFER_FAIL`；之后独立无跟踪 C1 诊断通过，仍未证明 C8 稳定性。默认 C8 smoke 随后又在 B4096 UPSERT 预热出现 `-800 / TRANSFER_FAIL`。这些失败、诊断和命令原始边界单独保留，不能删除失败后把独立诊断写成原门禁成功，也不能归入正式性能重复。
 
-r3 主矩阵使用新的冻结配置：仅将 `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER` 和 `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER` 设为 8192，所有 B 与重复保持一致；lanes、timeout、CPU、内存、原生制品与 API 实现保持原实验边界。它是容量适配后的独立配置，不能当作默认参数性能。完整门禁和 C8 smoke 仍须分别通过后才可进入正式矩阵。
+从 r3 引入的容量配置将 `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER` 和 `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER` 设为 8192。最终 r5 沿用它，并显式固定 lanes=4、admission timeout=1000ms 为锁定源码默认数值，所有 B 与重复一致；CPU、内存、原生制品与 API 实现保持同一边界。它是容量适配配置，不能当作默认参数性能。r3失败与r4旧协议预检均不属于最终矩阵；r5独立门禁和C8 smoke通过后才进入正式测量。
 
 独立 default / queue8192 机制诊断的成功率差异只说明这两个已执行配置的观测结果。尚未捕获明确 queue-full / rejection reason counter，因此报告不能宣称已确认 `QUEUE_FULL` 根因，也不能把诊断耗时或吞吐增加为第四轮正式性能结果。历史执行的 helper 原件与当前报告工具分别归档，原始 JSON、错误和日志保留于 raw evidence。
+
+## 纯 KV 内存 TCP 配置审查
+
+用户要求关闭非必要能力后，按同一固定 SHA 审查原生配置；以下为下一独立 `pure-kv` profile 的建议与启动脚本实现，尚不表示该 profile 已执行或具有最优吞吐。R5 冻结运行不会被修改。审查从官方固定提交取得源码，逐文件以 Git tree 的 blob SHA1 校验，另保留 SHA256 清单；不访问目标节点。
+
+| 项目 | R5 实际配置 / 默认行为 | `pure-kv` 显式配置与边界 |
+|---|---|---|
+| 内存副本与数据路径 | 两个 peer 各 4 GiB；client store=0；TCP；单内存副本 | 保持容量、C8、8192/8192/4/1000、完整 bytes 校验；MEMCPY=0、hotcache=0，不引入本地旁路 |
+| client metrics | `MC_STORE_CLIENT_METRIC` 未设，原生默认启用；周期 interval 默认0，仅不报告 | 所有 peer/client 设 `MC_STORE_CLIENT_METRIC=0`、`MC_STORE_CLIENT_METRIC_INTERVAL=0`；工厂返回空指针，使受条件保护的客户端指标记录跳过 |
+| TE metrics 与 trace | 未设置 TE metrics；`MC_LOG_LEVEL=ERROR`，原生 trace=false | 显式 `MC_TE_METRIC=0`；保留 ERROR 日志与外部 cgroup/native 监控。此变量控制 TE 周期线程，不声称移除所有编译内计数 |
+| Master 周期报告 | `enable_metric_reporting` 原生默认 true，错误日志等级不会阻止其统计工作 | `--enable_metric_reporting=false`；关闭报告线程。Master admin HTTP listener 仍存在，不能把 port=0 误作禁用 |
+| SSD / DFS / HA / oplog | 已关闭 HA/offload/oplog；setup SSD offload默认false；`root_fs_dir` 默认空 | 显式保留这些false，`--root_fs_dir=`、`--enable_disk_eviction=false`、`--offload_on_evict=false`、`--offload_force_evict=false`、`--promotion_on_hit=false` |
+| 快照 / 事件 / quota | snapshot/restore、ZMQ KV event publisher、multi-tenant均原生默认false | 显式 `--enable_snapshot=false --enable_snapshot_restore=false --enable_kv_events=false --enable_multi_tenants=false`，避免环境或后续默认值歧义 |
+| 内存 eviction | ratio=0.05、高水位0.90；后台线程常驻 | `--eviction_ratio=0 --eviction_high_watermark_ratio=1` 避免本受控容量下的内存驱逐；原生无全停线程开关，轮询及必要未完成写清理仍存在，满容量错误不能隐藏 |
+| 必要控制面与校验 | Master 内存元数据、TCP RPC、peer心跳/lease、测前后内容校验 | 保留。这里没有启用 DataSystem stream cache 的对应路径；不能把必要 TCP 字节流称为可关闭的可选 streaming 功能 |
+
+证据：[client metrics 工厂](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/client_metric.cpp#L15-L20)与[关闭路径](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/client_metric.cpp#L89-L107)、[批量指标条件](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/client_service.cpp#L1809-L1817)、[TE metric 周期线程](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-transfer-engine/src/transfer_engine_impl.cpp#L1011-L1049)、[trace等级解析](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-transfer-engine/src/config.cpp#L393-L407)。
+
+[Master 原生开关](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master.cpp#L123-L148)、[磁盘/租户/快照默认](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master.cpp#L300-L369)；[setup 默认关闭 SSD 与 client HTTP](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-integration/store/store_py.cpp#L2202-L2236)；空 DFS 路径使[客户端不初始化持久化 backend](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/client_service.cpp#L1073-L1096)。
+
+限制必须与参数同时披露：[Master 无条件启动 admin server](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master.cpp#L1647-L1653)，[HTTP异步启动与周期报告分别控制](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master_admin_service.cpp#L250-L278)；[eviction线程的启动](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master_service.cpp#L476-L477)和[条件/清理循环](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master_service.cpp#L9053-L9121)无法通过上述参数整体删除。必要 Master 指标计数仍可能存在。关闭指标或持久化可能降低开销，但收益必须由独立新 profile 测量，不能从源码推导性能提升或断言已解决其它产品错误。
+
+`mooncake/launch_master.sh` 仅在 `KVC_FEATURE_PROFILE=pure-kv` 时附加以上 Master 参数；默认基线 argv 不变。启动前将实际完整 argv 原子写入当前服务期 `RUNTIME_DIR/master-argv.json`；记录失败会使启动失败，不隐藏 helper 错误。三个本地 fake-master 验证覆盖默认 argv、pure-kv argv与保存原件一致，以及 helper返回23时不启动Master；它们不代表真实服务资格门禁。
+
+端点值已另行核对：`eviction_ratio=0` 被[gflags validator](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master.cpp#L172-L178)允许；`eviction_ratio=0` 与 `eviction_high_watermark_ratio=1` 也都通过[MasterService 构造的闭区间校验](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/src/master_service.cpp#L295-L305)。[builder setter](https://github.com/kvcache-ai/Mooncake/blob/719735896c86b56fabec6cf3e825fb2ea640597a/mooncake-store/include/master_config.h#L877-L886)没有附加更严格下限，无需用 epsilon 伪装关闭。控制面另以 `MC_RPC_PROTOCOL=tcp` 显式固定，避免继承环境选择 RDMA；必要 TCP RPC 保留。R6 pure-kv 预检的 Mooncake 启动失败来自 stage overlay 丢失 launcher 可执行位，尚未执行 Moon API，不归因于原生参数或产品缺陷；由新 stage 修正权限后重新验证，旧失败原件保留。

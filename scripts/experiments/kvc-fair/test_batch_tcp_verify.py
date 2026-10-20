@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import unittest
@@ -76,6 +77,87 @@ class TcpAuditTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         shutil.copytree(self.cached.name, self.root, dirs_exist_ok=True)
         self.cell = self.root / "r0-datasystem"
+
+    def split_get(self, first_marker="", second_marker="", first_declared=195, returned=1237, gap=", "):
+        path = self.cell / "wire-client-0-insert/strace.1234"
+        gate = json.loads((self.cell / "client-0-insert.json").read_text())
+        key = gate["cases"][0]["key_prefix"] + "k0"
+        body = batch_gate.payload(key, 0, 1024)
+        first, second = bytes(165) + body[:30], body[30:] + bytes(48)
+        encode = lambda value: "".join(f"\\x{byte:02x}" for byte in value)
+        lines = path.read_text().splitlines()
+        position = next(index for index, line in enumerate(lines) if "readv(" in line)
+        prefix = lines[position].split("[{iov_base=", 1)[0]
+        vectors = (f'{{iov_base="{encode(first)}"{first_marker}, iov_len={first_declared}}}' + gap
+                   + f'{{iov_base="{encode(second)}"{second_marker}, iov_len=3901}}')
+        lines[position] = prefix + "[" + vectors + f"], 2) = {returned} <0.000017>"
+        path.write_text("\n".join(lines) + "\n")
+        return path, position, prefix, first, second
+
+    def first_get(self, result):
+        return result["cases"][0]["wire"]["operations"]["get"]
+
+    def test_full_payload_across_complete_successful_iov_prefixes(self):
+        self.split_get()
+        result = audit.verify(self.root)
+        self.assertTrue(result["valid"], result.get("fatal"))
+        sample = self.first_get(result)["payload_sample"]
+        self.assertEqual(sample["iov_indices"], [0, 1])
+        self.assertEqual(sample["syscall_stream_byte_offset"], 165)
+        self.assertEqual([part["bytes"] for part in sample["sample_iov_fragments"]], [30, 994])
+        self.assertEqual(sample["successful_syscall_bytes"], 1237)
+
+    def test_iov_truncation_on_either_side_is_a_join_barrier(self):
+        original = (self.cell / "wire-client-0-insert/strace.1234").read_text()
+        for markers in [("...", ""), ("", "...")]:
+            (self.cell / "wire-client-0-insert/strace.1234").write_text(original)
+            self.split_get(*markers)
+            result = audit.verify(self.root)
+            self.assertFalse(self.first_get(result)["full_payload_observed"])
+            self.assertFalse(result["valid"])
+
+    def test_unprinted_successful_gap_cannot_be_removed_when_joining(self):
+        self.split_get(first_declared=196)
+        result = audit.verify(self.root)
+        self.assertFalse(self.first_get(result)["full_payload_observed"])
+
+    def test_printed_but_unsuccessful_last_payload_byte_cannot_be_used(self):
+        self.split_get(returned=1188)
+        result = audit.verify(self.root)
+        self.assertGreaterEqual(self.first_get(result)["successful_bytes"], 1024)
+        self.assertFalse(self.first_get(result)["full_payload_observed"])
+
+    def test_omitted_vector_or_unknown_pointer_is_a_join_barrier(self):
+        original = (self.cell / "wire-client-0-insert/strace.1234").read_text()
+        for gap in [", ..., ", ", {iov_base=0x1234, iov_len=0}, "]:
+            (self.cell / "wire-client-0-insert/strace.1234").write_text(original)
+            self.split_get(gap=gap)
+            result = audit.verify(self.root)
+            self.assertFalse(self.first_get(result)["full_payload_observed"])
+
+    def test_payload_halves_in_different_syscalls_are_not_joined(self):
+        path, position, prefix, first, second = self.split_get()
+        encode = lambda value: "".join(f"\\x{byte:02x}" for byte in value)
+        lines = path.read_text().splitlines()
+        lines[position] = (prefix + f'[{{iov_base="{encode(first)}", iov_len=195}}], 1) = 195 <0.000017>\n'
+                           + prefix + f'[{{iov_base="{encode(second)}", iov_len=3901}}], 1) = 1042 <0.000017>')
+        path.write_text("\n".join(lines) + "\n")
+        result = audit.verify(self.root)
+        self.assertEqual(self.first_get(result)["successful_bytes"], 1237)
+        self.assertFalse(self.first_get(result)["full_payload_observed"])
+
+    def test_split_fragments_from_another_payload_version_cannot_pass(self):
+        path, position, _, _, _ = self.split_get()
+        gate = json.loads((self.cell / "client-0-insert.json").read_text())
+        key = gate["cases"][0]["key_prefix"] + "k0"
+        old = batch_gate.payload(key, 0, 1024)[30:]
+        new = batch_gate.payload(key, 1, 1024)[30:]
+        encode = lambda value: "".join(f"\\x{byte:02x}" for byte in value)
+        lines = path.read_text().splitlines()
+        lines[position] = lines[position].replace(encode(old), encode(new))
+        path.write_text("\n".join(lines) + "\n")
+        result = audit.verify(self.root)
+        self.assertFalse(self.first_get(result)["full_payload_observed"])
 
     def test_all_endpoint_mode_batch_combinations_pass_with_compact_anchors(self):
         result = audit.verify(self.root)

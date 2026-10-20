@@ -14,15 +14,17 @@ HERE = Path(__file__).resolve().parent
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=["stage", "qualify", "prepare", "gate", "diagnose", "compose", "smoke", "collect-checks", "tcp-audit", "run", "restore", "collect", "resource-audit", "report", "publish"])
+    p.add_argument("action", choices=["stage", "qualify", "prepare", "deadline-diagnostic", "gate", "diagnose", "compose", "smoke", "collect-checks", "collect-qualification-failure", "tcp-audit", "run", "restore", "collect", "resource-audit", "deployment-audit", "report", "publish"])
     p.add_argument("--target", default="tiantiyun-80c128g")
     p.add_argument("--publication-host", default="xqyun-32c32g")
-    p.add_argument("--root", default="/home/worktrees/kvc-batch-tcp-20261020-r5")
+    p.add_argument("--root", default="/home/worktrees/kvc-batch-tcp-20261020-r7")
     p.add_argument("--base", default="/home/worktrees/kvc-fair-tcp-20261020")
     p.add_argument("--gate", default="batch-gate-001")
     p.add_argument("--mooncake-queue", type=int, default=8192)
-    p.add_argument("--local-output", type=Path, default=Path.home() / "workspace/scratch/2026-10-20-kvc-batch-tcp-r5")
-    p.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-batch-tcp-r5")
+    p.add_argument("--feature-profile", choices=["baseline", "pure-kv"], default="pure-kv")
+    p.add_argument("--restore-phase", choices=["formal", "qualification"], default="formal")
+    p.add_argument("--local-output", type=Path, default=Path.home() / "workspace/scratch/2026-10-20-kvc-batch-tcp-r7")
+    p.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-batch-tcp-r7")
     p.add_argument("--rfc", type=Path, default=HERE / "docs" if (HERE / "docs").is_dir() else HERE.parents[2] / "rfc/2026-10-20-kvc-batch-tcp-comparison")
     p.add_argument("--report-path", default="perf/kvc-batch-tcp-20261020")
     args = p.parse_args()
@@ -37,17 +39,20 @@ def main():
     if args.action == "qualify":
         common = ["--root", root, "--base", args.base, "--target", args.target,
                   "--gate", args.gate, "--local-output", args.local_output,
-                  "--environment-root", args.environment_root]
-        for action in ["prepare", "gate", "smoke", "collect-checks", "tcp-audit"]:
+                  "--environment-root", args.environment_root, "--feature-profile", args.feature_profile]
+        actions = ["prepare", *(["deadline-diagnostic"] if args.feature_profile == "pure-kv" else []), "gate", "smoke", "collect-checks", "tcp-audit"]
+        for action in actions:
             run([sys.executable, Path(__file__).resolve(), action, *common])
     elif args.action == "stage":
         bundle = "/home/cache/kvc-fair-20261020/batch-script-bundle"
         ssh(["mkdir", "-p", bundle])
         run(["rsync", "-a", "--exclude", "__pycache__", str(HERE) + "/", args.target + ":" + bundle + "/"])
-        ssh(["python3", bundle + "/batch_stage.py", "--base", args.base, "--root", root, "--bundle", bundle, "--mooncake-queue", args.mooncake_queue])
+        ssh(["python3", bundle + "/batch_stage.py", "--base", args.base, "--root", root, "--bundle", bundle, "--mooncake-queue", args.mooncake_queue, "--feature-profile", args.feature_profile])
     elif args.action == "prepare":
         ssh(["python3", root + "/batch_environment.py", "--out", root + "/environment-before-full.json"])
         ssh(["python3", root + "/tcp_stage.py", "--root", root, "--prepare-environment", args.environment_root])
+    elif args.action == "deadline-diagnostic":
+        ssh(["python3", root + "/batch_ds_diagnostic_runner.py", "--root", root, "--out", root + "/deadline-diagnostic-001"])
     elif args.action in {"diagnose", "compose"}:
         script = "batch_diagnostic.py" if args.action == "diagnose" else "batch_compose_gate.py"
         helper = "/home/cache/kvc-fair-20261020/batch-script-bundle/" + script
@@ -62,18 +67,26 @@ def main():
         out = {"gate": "batch-gate-001", "smoke": "batch-smoke-001", "run": "formal-batch-001"}[args.action]
         if args.action == "run":
             ssh(["python3", "-c", "import json;from pathlib import Path;p=Path(" + repr(root) + ");assert json.loads((p/'batch-smoke-001/summary.json').read_text())['valid']"])
-        ssh(["python3", root + "/batch_runner.py", args.action, "--root", root, "--out", root + "/" + out, "--gate", args.gate])
+        command = ["python3", root + "/batch_runner.py", args.action, "--root", root, "--out", root + "/" + out, "--gate", args.gate]
+        if args.action == "run":
+            command += ["--continue-readonly-errors"]
+        ssh(command)
     elif args.action == "restore":
         # The generic restoration guard needs two terminal summaries; its second
         # input is our correctness gate, explicitly not a resource-profile run.
+        suite = "formal-batch-001" if args.restore_phase == "formal" else args.gate
         ssh(["python3", root + "/finish_environment.py", "--root", root,
-             "--suite", root + "/formal-batch-001", "--profile-suite", root + "/" + args.gate,
-             "--environment-root", args.environment_root, "--out", root + "/formal-batch-001/environment-restored.json", "--restore"])
+             "--suite", root + "/" + suite, "--profile-suite", root + "/" + args.gate,
+             "--environment-root", args.environment_root, "--out", root + "/" + suite + "/environment-restored.json", "--restore"])
     elif args.action == "tcp-audit":
         run([sys.executable, HERE / "batch_tcp_verify.py", "--suite", args.local_output / args.gate,
              "--out", args.local_output / "datasystem-batch-tcp-verification.json"])
-    elif args.action in {"collect", "collect-checks"}:
-        names = ["batch-gate-001", args.gate, "batch-smoke-001", "builds", "run"]
+    elif args.action in {"collect", "collect-checks", "collect-qualification-failure"}:
+        names = ["batch-gate-001", args.gate, "builds", "run"]
+        if args.action != "collect-qualification-failure":
+            names += ["batch-smoke-001"]
+        if args.feature_profile == "pure-kv":
+            names += ["deadline-diagnostic-001"]
         if args.action == "collect":
             names += ["formal-batch-001"]
         if args.gate != "batch-gate-001":
@@ -101,9 +114,14 @@ def main():
         for name, record in stage["inputs"].items():
             if hashlib.sha256((inputs / name).read_bytes()).hexdigest() != record["sha256"]:
                 raise RuntimeError("Collected execution input changed: " + name)
+            if "mode" in record and (inputs / name).stat().st_mode & 0o777 != record["mode"]:
+                raise RuntimeError("Collected execution input permissions changed: " + name)
     elif args.action == "resource-audit":
         run([sys.executable, HERE / "batch_resource_audit.py", "--suite", args.local_output / "formal-batch-001",
              "--out", args.local_output / "resource-audit"])
+    elif args.action == "deployment-audit":
+        run([sys.executable, HERE / "batch_deployment_audit.py", "--root", args.local_output,
+             "--out", args.local_output / "deployment-audit.json"])
     elif args.action == "report":
         command = [sys.executable, HERE / "batch_report.py", "--suite", args.local_output / "formal-batch-001",
              "--out", args.local_output / "report", "--rfc", args.rfc, "--builds", args.local_output / "builds",
@@ -115,15 +133,29 @@ def main():
         for path in sorted((args.local_output / "history").glob("protocol-preflight-*")):
             if path.is_dir():
                 command += ["--history", path]
-        tcp = args.local_output / "datasystem-batch-tcp-verification.json"
+        for path in sorted((args.local_output / "history").glob("pure-kv-preflight-*")):
+            if path.is_dir():
+                command += ["--history", path]
+        tcp_history = args.local_output / "history/tcp-proof-attempts"
+        if tcp_history.is_dir():
+            command += ["--history", tcp_history]
+        tcp = args.local_output / "datasystem-batch-tcp-verification-v2.json"
+        if not tcp.is_file():
+            tcp = args.local_output / "datasystem-batch-tcp-verification.json"
         if tcp.is_file():
             command += ["--tcp-verification", tcp]
         for path in sorted((args.local_output / "history").glob("shared-rocksdb-*")):
             if path.is_dir():
                 command += ["--failed-attempts", path]
+        for path in sorted((args.local_output / "history").glob("native-exist-deadline-*")):
+            if path.is_dir():
+                command += ["--failed-attempts", path]
         resource_audit = args.local_output / "resource-audit"
         if resource_audit.is_dir():
             command += ["--resource-audit", resource_audit]
+        deployment_audit = args.local_output / "deployment-audit.json"
+        if deployment_audit.is_file():
+            command += ["--deployment-audit", deployment_audit]
         run(command)
     elif args.action == "publish":
         run(["rsync", "-az", str(args.local_output / "report") + "/",

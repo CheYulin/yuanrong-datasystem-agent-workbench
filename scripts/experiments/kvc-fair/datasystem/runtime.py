@@ -89,6 +89,8 @@ def launch(args):
                 "rocksdb_store_dirs": {f"worker{index}": str(path) for index, path in enumerate(rocksdb_paths)},
                 "etcd_version": subprocess.check_output([str(etcd_binary), "--version"], text=True).strip(),
                 "etcd_sha256": etcd_hash.hexdigest()}
+    if args.profile == "pure-kv":
+        manifest["runtime_profile"] = "pure-kv"
 
     def preexec():
         if args.cgroup:
@@ -151,6 +153,11 @@ def launch(args):
         }
         if args.transport == "tcp":
             config["ipc_through_shared_memory"] = "false"
+        if args.profile == "pure-kv":
+            config.update({"rocksdb_write_mode": "none", "sc_regular_socket_num": "0",
+                           "sc_stream_socket_num": "0", "json_log_monitor": "false",
+                           "enable_perf_trace_log": "false", "request_sample_rate": "0",
+                           "access_sample_rate": "0"})
         flagfile = instance / "worker.flags"
         flagfile.write_text("".join(f"--{key}={value}\n" for key, value in config.items()))
         command = [str(source / "output" / "datasystem" / "service" / "datasystem_worker")]
@@ -220,6 +227,7 @@ def parse_args(argv=None):
     parser.add_argument("--etcd-port", type=int, default=32379)
     parser.add_argument("--memory-mb-per-worker", type=int, default=4096)
     parser.add_argument("--transport", choices=["native", "tcp"], default="native")
+    parser.add_argument("--profile", choices=["baseline", "pure-kv"], default="baseline")
     parser.add_argument("--min-log-level", type=int, choices=[0, 1, 2, 3], default=2)
     parser.add_argument("--stop-timeout", type=float, default=15)
     return parser.parse_args(argv)

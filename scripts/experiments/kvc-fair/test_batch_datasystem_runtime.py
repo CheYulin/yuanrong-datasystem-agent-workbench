@@ -17,7 +17,7 @@ SPEC.loader.exec_module(runtime)
 
 
 class RuntimeStorageTests(unittest.TestCase):
-    def launch(self, root, run_dir, transport="tcp"):
+    def launch(self, root, run_dir, transport="tcp", profile="baseline"):
         commands = []
         original_open = Path.open
 
@@ -31,7 +31,7 @@ class RuntimeStorageTests(unittest.TestCase):
             return SimpleNamespace(pid=900000 + len(commands), poll=lambda: None)
 
         args = runtime.parse_args(["start", "--task-root", str(root), "--run-dir", str(run_dir),
-                                   "--transport", transport])
+                                   "--transport", transport, "--profile", profile])
         with mock.patch.object(Path, "open", open_file), mock.patch.object(runtime.socket, "socket"), \
                 mock.patch.object(runtime.subprocess, "Popen", side_effect=spawn), \
                 mock.patch.object(runtime.subprocess, "check_output", return_value="fixture-etcd-version"), \
@@ -69,6 +69,40 @@ class RuntimeStorageTests(unittest.TestCase):
                     self.assertIn("--minloglevel=2", command)
                     actual.append(expected.resolve())
                 self.assertNotEqual(*actual)
+
+    def test_pure_kv_disables_optional_services_at_actual_process_boundary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            commands, manifest = self.launch(root, root / "pure", profile="pure-kv")
+            self.assertEqual(manifest["runtime_profile"], "pure-kv")
+            for command, _ in commands[1:]:
+                for flag in ["--rocksdb_write_mode=none", "--sc_regular_socket_num=0",
+                             "--sc_stream_socket_num=0", "--json_log_monitor=false",
+                             "--enable_perf_trace_log=false", "--request_sample_rate=0",
+                             "--access_sample_rate=0", "--log_monitor=false",
+                             "--enable_urma=false", "--enable_rdma=false",
+                             "--ipc_through_shared_memory=false", "--l2_cache_type=none",
+                             "--spill_size_limit=0", "--minloglevel=2"]:
+                    self.assertEqual(command.count(flag), 1, flag)
+                self.assertNotIn("--diagnostic_sample_rate=0", command)
+                self.assertFalse(any(flag.startswith("--request_timeout") for flag in command))
+                self.assertTrue(any(flag.startswith("--etcd_address=") for flag in command))
+
+    def test_default_profile_retains_original_flags(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            commands, manifest = self.launch(root, root / "baseline")
+            self.assertNotIn("runtime_profile", manifest)
+            changed_keys = ["rocksdb_write_mode", "sc_regular_socket_num", "sc_stream_socket_num",
+                            "json_log_monitor", "enable_perf_trace_log", "request_sample_rate",
+                            "access_sample_rate"]
+            for command, _ in commands[1:]:
+                self.assertFalse(any(flag.startswith(f"--{key}=") for key in changed_keys for flag in command))
+
+    def test_profile_must_be_explicit_known_choice(self):
+        self.assertEqual(runtime.parse_args(["start"]).profile, "baseline")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            runtime.parse_args(["start", "--profile", "pur-kv"])
 
     def test_outside_task_root_and_parent_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

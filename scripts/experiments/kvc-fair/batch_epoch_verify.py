@@ -32,10 +32,15 @@ def verify(suite, plan, parameters, summary, rows, events):
                 issues.append({"epoch": identity, "errors": ["Missing regular service epoch summary"]})
                 continue
             raw = json.loads(source.read_text())
+            failures = [name + f"/b{spec['batch']}-{spec['operation']}" for spec in epoch["operations"]
+                        if row_map.get(name + f"/b{spec['batch']}-{spec['operation']}", {}).get("status") == "failed"]
+            continued = parameters.get("continue_readonly_errors") is True
+            valid = not failures
             run_dir = str(Path(parameters.get("root", "/missing")) / "run" / (parameters["action"] + "-" + name + "-" + epoch["id"]))
             if (raw.get("identity") != identity or raw.get("kind") != epoch["kind"]
                     or raw.get("operations") != epoch["operations"] or raw.get("run_dir") != run_dir
-                    or raw.get("workload_protocol") != PROTOCOL or raw.get("valid") is not True):
+                    or raw.get("workload_protocol") != PROTOCOL or raw.get("valid") is not valid
+                    or continued and (raw.get("execution_complete") is not True or raw.get("measurement_failures") != failures)):
                 errors.append("Service lifetime identity/operations/directory or successful completion mismatch")
             start, end = raw.get("start_mono_ns"), raw.get("end_mono_ns")
             if (type(start) is not int or type(end) is not int or end <= start
@@ -55,14 +60,15 @@ def verify(suite, plan, parameters, summary, rows, events):
             starts = [event for event in events if event.get("event") == "epoch_start" and event.get("group") == name and event.get("epoch") == epoch["id"]]
             ends = [event for event in events if event.get("event") == "epoch_complete" and event.get("group") == name and event.get("epoch") == epoch["id"]]
             if (len(starts) != 1 or starts[0].get("run_dir") != run_dir or starts[0].get("epoch_kind") != epoch["kind"]
-                    or len(ends) != 1 or ends[0].get("valid") is not True):
+                    or len(ends) != 1 or ends[0].get("valid") is not valid
+                    or continued and (ends[0].get("execution_complete") is not True or ends[0].get("measurement_failures") != failures)):
                 errors.append("Unique actual epoch start/cleanup completion events are required")
             for spec in epoch["operations"]:
                 operation_id = name + f"/b{spec['batch']}-{spec['operation']}"
                 row = row_map.get(operation_id, {})
                 row["epoch"] = epoch["id"]
                 row["epoch_evidence"] = "results/" + source.relative_to(suite).as_posix()
-                if row.get("valid") and (type(start) is not int or type(end) is not int
+                if (row.get("valid") or row.get("status") == "failed") and (type(start) is not int or type(end) is not int
                                          or row.get("start_mono_ns", -1) < start or row.get("end_mono_ns", end + 1) > end):
                     errors.append("SDK window is outside its own fresh service lifetime")
             epochs.append({**raw, "evidence": "results/" + source.relative_to(suite).as_posix()})

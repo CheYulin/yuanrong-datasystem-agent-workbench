@@ -56,12 +56,35 @@ def stage(args):
                         if path.suffix == ".sh":
                             (target / path.name).chmod(path.stat().st_mode & 0o777 | 0o111)
             deployment_runtime = copy_datasystem_runtime(bundle, temporary)
+            feature_profile = getattr(args, "feature_profile", "baseline")
+            overrides = [deployment_runtime]
+            if feature_profile == "pure-kv":
+                for name, target_name in [("mooncake/launch_master.sh", "mooncake/launch_master.sh"),
+                                          ("lmcache/start_server_tcp.sh", "lmcache/start_server.sh")]:
+                    source, target = bundle / name, temporary / target_name
+                    if not source.is_file() or source.is_symlink():
+                        raise ValueError("Pure-KV runtime override is missing: " + name)
+                    shutil.copy2(source, target)
+                    target.chmod(target.stat().st_mode & 0o777 | 0o111)
+                    overrides.append({"path": target_name, "sha256": digest(target), "mode": target.stat().st_mode & 0o777,
+                                      "scope": "Explicit source-pinned pure-memory feature profile; native build unchanged."})
             for name in ["datasystem", "mooncake/source", "mooncake/deps", "mooncake/venv", "mooncake/wheels", "lmcache/source", "lmcache/venv311"]:
                 (temporary / name).symlink_to((base / name).resolve(strict=True), target_is_directory=True)
             os.link(base / "suite.lock", temporary / "suite.lock")
             (temporary / "configs").mkdir()
             manifest = json.loads((base / "products.json").read_text().replace(str(base), str(root)))
             for product in manifest["products"]:
+                if feature_profile == "pure-kv":
+                    product["env"]["KVC_FEATURE_PROFILE"] = feature_profile
+                    if product["name"] == "datasystem":
+                        product["start"] += ["--profile", feature_profile]
+                        product["env"].update(DATASYSTEM_LOG_MONITOR_ENABLE="false", DATASYSTEM_PERF_TRACE_LOG="false",
+                                              DATASYSTEM_LOG_V="0", DATASYSTEM_MIN_LOG_LEVEL="2")
+                    elif product["name"] == "mooncake":
+                        product["env"].update(MC_STORE_CLIENT_METRIC="0", MC_STORE_CLIENT_METRIC_INTERVAL="0", MC_TE_METRIC="0",
+                                              MC_RPC_PROTOCOL="tcp")
+                    else:
+                        product["env"]["LMCACHE_COORDINATOR_EVENT_REPORTING"] = "false"
                 config = json.loads((base / "configs" / (product["name"] + ".json")).read_text())
                 config.update(scalar_adapter=product["adapter"], value_size=1024,
                               preload_batch=1 if product["name"] == "lmcache" else 256,
@@ -76,7 +99,7 @@ def stage(args):
                 (temporary / "configs" / (product["name"] + ".json")).write_text(json.dumps(config, indent=2) + "\n")
             (temporary / "products.json").write_text(json.dumps(manifest, indent=2) + "\n")
             shutil.copytree(base / "formal-tcp-001/builds", temporary / "builds")
-            inputs = {str(p.relative_to(temporary)): {"sha256": digest(p), "bytes": p.stat().st_size}
+            inputs = {str(p.relative_to(temporary)): {"sha256": digest(p), "bytes": p.stat().st_size, "mode": p.stat().st_mode & 0o777}
                       for p in temporary.rglob("*") if p.is_file() and not p.is_symlink()
                       and not any(parent.is_symlink() for parent in p.parents if parent != temporary.parent)
                       and p.name != "suite.lock"}
@@ -85,6 +108,7 @@ def stage(args):
                       "shared_suite_lock_inode": (base / "suite.lock").stat().st_ino,
                       "mooncake_queue_capacity": getattr(args, "mooncake_queue", 0),
                       "datasystem_runtime_override": deployment_runtime,
+                      "feature_profile": feature_profile, "runtime_overrides": overrides,
                       "baseline_performance_reused": False,
                       "baseline_isolation_limitation": "Earlier DataSystem deployments used a shared default RocksDB directory; reuse is limited to verified native build artifacts, not performance baselines.",
                       "inputs": inputs, "old_experiment_inputs_modified": False}
@@ -99,8 +123,9 @@ def stage(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base", type=Path, default=Path("/home/worktrees/kvc-fair-tcp-20261020"))
-    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r5"))
+    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r7"))
     p.add_argument("--mooncake-queue", type=int, default=8192)
+    p.add_argument("--feature-profile", choices=["baseline", "pure-kv"], default="pure-kv")
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))
     args = p.parse_args()

@@ -5,6 +5,7 @@ import bisect
 from collections import Counter, defaultdict
 import csv
 import datetime
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -87,6 +88,9 @@ def measured_row(raw, row, samples, times, context=None):
     protocol.update(context.get("protocol", {}))
     if context.get("isolated_epochs"):
         protocol["put_warmup_keys"] = 32768
+    observed_failure = (context.get("continue_readonly_errors") is True and raw.get("valid") is False
+                        and row["operation"] in {"get", "exist_hit", "exist_miss"}
+                        and type(raw.get("failures")) is int and raw["failures"] > 0)
     protocol.update({key: context[key] for key in ["adapter", "config", "run_id", "out", "skip_preload"] if key in context})
     for key, expected in protocol.items():
         if parameters.get(key) != expected:
@@ -136,7 +140,12 @@ def measured_row(raw, row, samples, times, context=None):
             continue
         count += success
         failed += failures
-        if client.get("errors"):
+        client_errors = client.get("errors")
+        if observed_failure:
+            if (failures not in (0, 1) or not isinstance(client_errors, list) or len(client_errors) != failures
+                    or any(not isinstance(error, str) or not re.match(r"^RuntimeError: code: \[[^\]\r\n]+\](?:,|\s|$)", error) for error in client_errors)):
+                errors.append("Read-only failure lacks exact native error accounting")
+        elif client_errors:
             errors.append("Client records native batch errors")
         if client.get("target") != expected_target:
             errors.append("Client fixed-volume target differs from the independent protocol")
@@ -144,7 +153,7 @@ def measured_row(raw, row, samples, times, context=None):
         start_mono = row["start_mono_ns"]
         if any(type(value) is not int for value in [first, last, start_mono]) or first < start_mono or last < first:
             errors.append("Client monotonic window is invalid")
-        elif row["operation"] != "put" and last < start_mono + int(protocol["duration"] * 1e9):
+        elif row["operation"] != "put" and not (observed_failure and failures) and last < start_mono + int(protocol["duration"] * 1e9):
             errors.append("Client did not finish the full timed protocol window")
         expected_checks = ((success - 1) // 128 + 1) * row["batch"] if row["operation"] == "get" and success else 0
         if client.get("validated_keys") != expected_checks:
@@ -177,7 +186,7 @@ def measured_row(raw, row, samples, times, context=None):
         errors.append("Batch/key success or failure accounting mismatch")
     if raw.get("failed_keys_upper_bound") != failed * row["batch"] or raw.get("partial_success_keys_unknown") is not bool(failed):
         errors.append("Unknown partial-success accounting mismatch")
-    if failed or count <= 0:
+    if (failed and not observed_failure) or count <= 0:
         errors.append("Measurement has failed or zero completed batches")
     if row["operation"] == "put" and any(client.get("success") != expected_target for client in clients):
         errors.append("Fresh PUT did not finish its fixed volume")
@@ -204,7 +213,10 @@ def measured_row(raw, row, samples, times, context=None):
     row["post_validated_keys"] = sum(item.get("post_validated_keys", 0) for item in raw.get("post_validation", []))
     row["issues"] = errors
     row["valid"] = raw.get("valid") is True and not errors
-    row["status"] = "valid" if row["valid"] else "invalid"
+    row["evidence_verified"] = (row["valid"] or observed_failure) and not errors
+    row["status"] = "valid" if row["valid"] else "failed" if row["evidence_verified"] and observed_failure else "invalid"
+    row["native_errors"] = [{"client": item.get("client"), "errors": item.get("errors", [])}
+                            for item in clients if item.get("errors")] if observed_failure else []
     resource_window(row, samples, times)
     return row
 
@@ -218,8 +230,11 @@ def aggregate(rows, repeats):
         valid = [row for row in members if row["valid"]]
         complete = len(valid) == repeats and len({row["repeat"] for row in valid}) == repeats
         na = len(members) == repeats and all(row["status"] == "not_supported" for row in members)
+        failed = (len(members) == repeats and len({row["repeat"] for row in members}) == repeats
+                  and any(row["status"] == "failed" for row in members)
+                  and all(row["status"] in {"valid", "failed"} for row in members))
         row = {"product": product, "operation": operation, "batch": batch,
-               "status": "not_supported" if na else "complete" if complete else "incomplete",
+               "status": "not_supported" if na else "complete" if complete else "failed" if failed else "incomplete",
                "valid_repeats": len(valid), "expected_repeats": repeats, "metrics": {}}
         for name in METRICS:
             values = [member.get(name) for member in valid]
@@ -238,6 +253,7 @@ def analyze(suite, device="253:2"):
     plan = json.loads((suite / "plan.json").read_text())
     summary = json.loads((suite / "summary.json").read_text()) if (suite / "summary.json").exists() else {}
     parameters = json.loads((suite / "parameters.json").read_text()) if (suite / "parameters.json").exists() else {}
+    events = [json.loads(line) for line in (suite / "events.jsonl").read_text().splitlines() if line.strip()] if (suite / "events.jsonl").exists() else []
     samples = reduce_samples(suite / "resources/samples.jsonl", device)
     times = [sample["mono_ns"] for sample in samples]
     issues, rows, expected = [], [], {}
@@ -288,7 +304,8 @@ def analyze(suite, device="253:2"):
                                   and (not isolated_epochs or item.get("epoch") == spec.get("epoch"))]
                     first = candidates[0]
                     context = {"run_id": suite.name + f"-r{row['repeat']}",
-                               "skip_preload": spec is not first, "isolated_epochs": isolated_epochs}
+                               "skip_preload": spec is not first, "isolated_epochs": isolated_epochs,
+                               "continue_readonly_errors": parameters.get("continue_readonly_errors") is True}
                     if row["product"] in product_map:
                         context.update({key: product_map[row["product"]][key] for key in ["adapter", "config"]})
                     else:
@@ -298,20 +315,39 @@ def analyze(suite, device="253:2"):
                     if parameters.get("action") == "smoke":
                         context["protocol"] = {"duration": 1, "warmup": .1, "put_keys": 32768}
                     row = measured_row(raw, row, samples, times, context)
+                    if row["status"] == "failed":
+                        outcome_path = suite / name.split('/')[0] / "case-outcomes" / (path.stem + ".json")
+                        outcome = json.loads(outcome_path.read_text()) if outcome_path.is_file() and not outcome_path.is_symlink() else {}
+                        expected_result = str(Path(parameters.get("out", "/missing")) / (name + ".json"))
+                        commands = [event for event in events if event.get("event") == "command"
+                                    and isinstance(event.get("argv"), list) and "--out" in event["argv"]
+                                    and event["argv"][event["argv"].index("--out") + 1:][:1] == [expected_result]]
+                        failed_events = [event for event in events if event.get("event") == "measure_failed" and event.get("identity") == name]
+                        if (outcome.get("identity") != name or outcome.get("returncode") != 1 or outcome.get("status") != "failed"
+                                or outcome.get("read_only") is not True or outcome.get("evidence_verified") is not True
+                                or outcome.get("errors") != row["native_errors"] or outcome.get("result") != expected_result
+                                or outcome.get("result_sha256") != hashlib.sha256(path.read_bytes()).hexdigest()
+                                or len(commands) != 1 or commands[0].get("returncode") != 1
+                                or len(failed_events) != 1 or failed_events[0].get("returncode") != 1
+                                or failed_events[0].get("failures") != row["failures"]
+                                or failed_events[0].get("success") != row["success"]
+                                or not near(failed_events[0].get("duration_s"), row["duration_s"])):
+                            row["issues"].append("Observed native failure lacks matching exit/event/result-hash evidence")
+                            row.update(status="invalid", evidence_verified=False)
         if row["issues"]:
             issues.append({"identity": name, "errors": row["issues"]})
         rows.append(row)
     for path in suite.glob("r*-*/b*-*.json"):
         if path.relative_to(suite).as_posix()[:-5] not in expected:
             issues.append({"path": str(path), "errors": ["Unplanned result file"]})
-    windows = sorted((row["start_mono_ns"], row["end_mono_ns"], row["identity"]) for row in rows if row["valid"])
+    windows = sorted((row["start_mono_ns"], row["end_mono_ns"], row["identity"]) for row in rows if row["valid"] or row["status"] == "failed")
     for previous, current in zip(windows, windows[1:]):
         if previous[1] > current[0]:
             issues.append({"identities": [previous[2], current[2]], "errors": ["SDK windows overlap despite serialized experiment protocol"]})
     counts = Counter(row["status"] for row in rows)
     completed = summary.get("completed", [])
     expected_groups = {f"r{group['repeat']}-{group['product']}" for group in plan}
-    if summary.get("valid") is True and (counts["missing"] or counts["invalid"] or issues or len(completed) != len(expected_groups) or set(completed) != expected_groups):
+    if summary.get("valid") is True and (counts["missing"] or counts["invalid"] or counts["failed"] or issues or len(completed) != len(expected_groups) or set(completed) != expected_groups):
         issues.append({"errors": ["Suite claims valid but planned evidence or completed group set is incomplete"]})
     if summary.get("valid") is True and (not summary.get("ended") or summary.get("failed") or summary.get("fatal") or summary.get("monitor_exit") != 0 or summary.get("interference_exit") != 0):
         issues.append({"errors": ["Suite claims valid without a terminal successful lifecycle and normal monitor exit"]})
@@ -320,10 +356,20 @@ def analyze(suite, device="253:2"):
     drained = summary.get("drained", {})
     if summary.get("valid") is True and (not drained.get("checked_utc") or drained.get("populated") or any(drained.get("members", {}).values())):
         issues.append({"errors": ["Suite is missing its final empty-cgroup evidence"]})
+    if parameters.get("continue_readonly_errors") is True:
+        expected_failures = [row["identity"] for row in rows if row["status"] == "failed"]
+        if summary.get("measurement_failures") != expected_failures:
+            issues.append({"errors": ["Terminal native-failure identities differ from verified result outcomes"]})
+        if summary.get("execution_complete") is True and (
+                counts["missing"] or counts["invalid"] or len(completed) != len(expected_groups) or set(completed) != expected_groups
+                or not summary.get("ended") or summary.get("failed") or summary.get("fatal")
+                or summary.get("monitor_exit") != 0 or summary.get("interference_exit") != 0
+                or not drained.get("checked_utc") or drained.get("populated") or any(drained.get("members", {}).values())
+                or summary.get("valid") is not (not expected_failures)):
+            issues.append({"errors": ["Suite claims complete without all terminal cases, clean lifecycle and honest validity"]})
     intervals = [(right - left) / 1e6 for left, right in zip(times, times[1:])]
     sampling = {"samples": len(samples), "interval_p50_ms": quantile(intervals, .5),
                 "interval_p95_ms": quantile(intervals, .95), "interval_max_ms": max(intervals) if intervals else None}
-    events = [json.loads(line) for line in (suite / "events.jsonl").read_text().splitlines() if line.strip()] if (suite / "events.jsonl").exists() else []
     epochs = []
     if parameters.get("workload_protocol") == "separate-read-and-fresh-put-v1":
         from batch_epoch_verify import verify
@@ -335,6 +381,8 @@ def analyze(suite, device="253:2"):
             "suite": str(suite), "parameters": parameters, "plan": plan, "summary": summary, "rows": rows,
             "aggregates": aggregate(rows, repeats), "repeats": repeats, "counts": dict(counts), "issues": issues,
             "passed": summary.get("valid") is True and not issues and not counts["missing"] and not counts["invalid"],
+            "evidence_verified": (summary.get("execution_complete") is True or summary.get("valid") is True)
+                                 and not issues and not counts["missing"] and not counts["invalid"],
             "samples": samples, "sampling": sampling, "events": events, "io_device": device, "epochs": epochs,
             "workload_protocol": parameters.get("workload_protocol", "legacy-shared-service-lifetime"),
             "resource_scope": "Only samples inside each SDK monotonic window; CPU/IO use first-to-last counters and stay null below two samples. Memory is the maximum observed charged memory, not an unsampled true peak.",

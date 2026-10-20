@@ -9,7 +9,7 @@
 - 每 key 1024 bytes；并发客户端 8，分别接入两个端点；批量数 `[1,16,256,4096]`；3 轮。GET/EXIST/更新各 20 秒，前置 warmup 3 秒。顺序按轮换产品顺序、共同批量顺序执行，避免产品始终第一个执行。
 - 主矩阵为容量适配配置：Mooncake `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=8192`、`MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=8192`，所有批量大小一致；lane 数与 admission timeout 保持原值，CPU/内存不变。默认参数在独立 r2 smoke 的 C8/B4096 UPSERT 已发生 TRANSFER_FAIL，原始失败和无跟踪诊断单列，不混入适配后性能。
 - 热数据工作集总计 65536 keys / 64 MiB，各客户端私有 8192 keys，跨批量数保持同一组 key。4096 keys / 请求 = 4 MiB，不把 4096 × 1 MiB / 请求塞入 12 GiB 客户端配额。
-- 当前新根目录 `/home/worktrees/kvc-batch-tcp-20261020-r5`；公开目录 `perf/kvc-batch-tcp-20261020`。r3 正式首轮因 RPC deadline 中止后发现两个 DataSystem Worker 使用同一默认 RocksDB 目录，并出现大量 SST 文件错误；它不满足目录隔离条件。r4 显式使用各自 `<run>/wN/rocksdb` 并通过门禁与smoke；随后发现混排PUT使LM不支持批量写的场景驻留背景键更少，故r4仅保留为旧协议预检。r5 把 READ 与每档 fresh PUT 放入独立服务周期，固定 PUT 预热32768新keys；从新目录完整重测，不复用前次成功性能行。共享目录错误不直接等同于超时唯一根因。
+- 当前新根目录 `/home/worktrees/kvc-batch-tcp-20261020-r7`；公开目录 `perf/kvc-batch-tcp-20261020`。r3 正式首轮因 RPC deadline 中止后发现两个 DataSystem Worker 使用同一默认 RocksDB 目录，并出现大量 SST 文件错误；它不满足目录隔离条件。r4 修正目录但尚采用混排 PUT；r5 把 READ 与各档 fresh PUT 放入独立周期后仍在 B16 EXIST 出现原生 deadline 错误，不能把共享目录认定为超时唯一根因。r6 按用户要求关闭 RocksDB、stream 后完成 deadline 对照诊断，但 Mooncake 启动脚本复制时缺失执行权限，资格检查停止；r7 修正复制权限并冻结 mode，保持固定数据校验、完整记录只读原生失败；所有旧轮次独立保留，不复用成功性能行。具体开关、剩余成本和失败判定见[精简配置设计](configuration-profile.md)。
 - 旧单 key native/TCP 的冻结启动脚本也缺少该目录隔离，故其中 DataSystem 性能不能作为隔离公平基线；原始成功调用、数据、脚本与失败历史继续保留，适用限制单列，不用旧 B1 与新 r4 计算批量收益。
 
 ## 1.2 语义优先
