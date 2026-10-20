@@ -151,7 +151,7 @@ r6恢复原件记录0.207646857s、`errors=[]`（SHA `510835caea13499d1f75cc4169
 
 从本地已采集原件确认r7 gate137.246847605秒、3个gate epoch通过；C8 smoke437.495450633秒、12个epoch通过；独立重算50有效支持结果、10 N/A、0issues。TCP审计13.311996920秒、16组合/32方向通过。summary SHA依次`00d0fbf0568a304140a1f95d26b4595ea76d9eb880040f8a1d85084047ff295b`、`9ca51eee53225b6077d41999fa20dbc4cc48bf3855ce8cdf4c4b40ca9a3db203`，TCP证明SHA `4f8aff3a0b517cff731aed16e3f6817eb9933b7cf4050a0734ca216eafa8781d`；stage SHA `991692d50b4fc05ae1150671da3f47d17dd53919ac24cfda2f51649b08b059eb`。
 
-正式运行已启动，其完整身份、原生失败与资源覆盖尚待终态采集，不提前补150有效/30 N/A。运行期间不SSH、rsync、扫描源码或哈希目标制品。r7真实复用既有固定构建物，没有走新增from-source bootstrap或重新编译；新可选`--builds-only-native-root`仅完成本地20项机制测试，目的是让后续重放不被无关旧native/TCP formal阻断，不能冒称r7实际执行入口。完整命令与构建元数据/配方/现态/制品绑定合同见 [script-design.md](script-design.md) 4.3。
+此节保留资格阶段记录；正式终态及132有效/18原生失败/30 N/A见5.16。正式运行期间没有额外SSH、rsync、扫描源码或哈希目标制品。r7真实复用既有固定构建物，没有走新增from-source bootstrap或重新编译；新可选`--builds-only-native-root`当时完成本地20项机制测试，后续又补充准入fixture，目的是让后续重放不被无关旧native/TCP formal阻断，不能冒称r7实际执行入口。完整命令与构建元数据/配方/现态/制品绑定合同见 [script-design.md](script-design.md) 4.3。
 
 ## 5.16 r7正式终态与部署/资源独立审计
 

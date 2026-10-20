@@ -10,43 +10,54 @@ LMCache仅B1 PUT/GET，UPSERT和更大批量PUT/GET为N/A；批量EXIST包含P2P
 
 以下均为同一产品/操作/B的三轮有效中位数。首次PUT固定262144新key；其它操作20秒窗口；P99为整批合并直方图桶上界，不能除以B。大B首次PUT仅64个batch/轮，不能把key数当延迟样本数。
 
+共有21个有效B4096窗口低于1000个batch：DataSystem PUT/UPSERT、Mooncake PUT/UPSERT/GET、LMCache EXIST hit/miss各三轮。它们的整批P99均需保留低样本标识，不仅是首次PUT；页面按每轮实际histogram样本数显示该限制。
+
 | 产品 | API | B | 结果 | keys/s中位数 | 整批P99 µs | CPU核 | 计费GiB | 匿名+SHM GiB |
 |---|---|---:|---|---:|---:|---:|---:|---:|
-| datasystem | exist_hit | 1 | complete | 46290.671 | 282.624 | 8.076 | 5.781 | 1.117 |
-| datasystem | exist_hit | 4096 | failed | 未观测 | 未观测 | 未观测 | 未观测 | 未观测 |
-| datasystem | exist_miss | 1 | complete | 40838.276 | 294.912 | 8.074 | 5.774 | 1.109 |
-| datasystem | exist_miss | 4096 | failed | 未观测 | 未观测 | 未观测 | 未观测 | 未观测 |
-| datasystem | get | 1 | complete | 30700.855 | 405.504 | 8.102 | 5.779 | 1.117 |
-| datasystem | get | 4096 | complete | 389920.746 | 98566.144 | 10.278 | 6.192 | 1.536 |
-| datasystem | put | 1 | complete | 15443.995 | 679.936 | 8.316 | 6.560 | 1.900 |
-| datasystem | put | 4096 | complete | 72029.617 | 486539.264 | 8.184 | 6.798 | 2.133 |
-| datasystem | upsert | 1 | complete | 15448.970 | 679.936 | 8.297 | 5.888 | 1.225 |
-| datasystem | upsert | 4096 | complete | 74236.078 | 524288.000 | 8.171 | 6.209 | 1.554 |
-| lmcache | exist_hit | 1 | complete | 3868.078 | 3244.032 | 5.496 | 14.783 | 10.123 |
-| lmcache | exist_hit | 4096 | complete | 65619.641 | 763363.328 | 3.149 | 14.836 | 10.183 |
-| lmcache | exist_miss | 1 | complete | 6266.071 | 1818.624 | 5.780 | 14.786 | 10.125 |
-| lmcache | exist_miss | 4096 | complete | 174034.497 | 436207.616 | 4.121 | 14.834 | 10.178 |
-| lmcache | get | 1 | complete | 748.660 | 14155.776 | 4.736 | 14.791 | 10.132 |
-| lmcache | get | 4096 | not_supported | 未观测 | 未观测 | 未观测 | 未观测 | 未观测 |
-| lmcache | put | 1 | complete | 2429.087 | 5242.880 | 5.223 | 15.341 | 10.682 |
-| lmcache | put | 4096 | not_supported | 未观测 | 未观测 | 未观测 | 未观测 | 未观测 |
-| lmcache | upsert | 1 | not_supported | 未观测 | 未观测 | 未观测 | 未观测 | 未观测 |
-| lmcache | upsert | 4096 | not_supported | 未观测 | 未观测 | 未观测 | 未观测 | 未观测 |
-| mooncake | exist_hit | 1 | complete | 90952.414 | 143.360 | 8.259 | 5.298 | 0.653 |
-| mooncake | exist_hit | 4096 | complete | 3442834.389 | 9437.184 | 6.755 | 5.396 | 0.750 |
-| mooncake | exist_miss | 1 | complete | 91729.692 | 143.360 | 8.244 | 5.289 | 0.649 |
-| mooncake | exist_miss | 4096 | complete | 7377809.183 | 4784.128 | 7.845 | 5.391 | 0.746 |
-| mooncake | get | 1 | complete | 36200.604 | 335.872 | 8.288 | 5.315 | 0.670 |
-| mooncake | get | 4096 | complete | 99263.341 | 440401.920 | 9.032 | 5.445 | 0.795 |
-| mooncake | put | 1 | complete | 27498.243 | 450.560 | 8.387 | 5.819 | 1.176 |
-| mooncake | put | 4096 | complete | 105987.211 | 398458.880 | 9.051 | 5.907 | 1.260 |
-| mooncake | upsert | 1 | complete | 27967.304 | 434.176 | 8.349 | 5.313 | 0.671 |
-| mooncake | upsert | 4096 | complete | 115633.487 | 356515.840 | 9.210 | 5.396 | 0.747 |
+| datasystem | exist_hit | 1 | 三轮有效 | 46290.671 | 282.624 | 8.076 | 5.781 | 1.117 |
+| datasystem | exist_hit | 4096 | 原生失败 | 不计性能 | 不计性能 | 不计性能 | 不计性能 | 不计性能 |
+| datasystem | exist_miss | 1 | 三轮有效 | 40838.276 | 294.912 | 8.074 | 5.774 | 1.109 |
+| datasystem | exist_miss | 4096 | 原生失败 | 不计性能 | 不计性能 | 不计性能 | 不计性能 | 不计性能 |
+| datasystem | get | 1 | 三轮有效 | 30700.855 | 405.504 | 8.102 | 5.779 | 1.117 |
+| datasystem | get | 4096 | 三轮有效 | 389920.746 | 98566.144 | 10.278 | 6.192 | 1.536 |
+| datasystem | put | 1 | 三轮有效 | 15443.995 | 679.936 | 8.316 | 6.560 | 1.900 |
+| datasystem | put | 4096 | 三轮有效 | 72029.617 | 486539.264 | 8.184 | 6.798 | 2.133 |
+| datasystem | upsert | 1 | 三轮有效 | 15448.970 | 679.936 | 8.297 | 5.888 | 1.225 |
+| datasystem | upsert | 4096 | 三轮有效 | 74236.078 | 524288.000 | 8.171 | 6.209 | 1.554 |
+| lmcache | exist_hit | 1 | 三轮有效 | 3868.078 | 3244.032 | 5.496 | 14.783 | 10.123 |
+| lmcache | exist_hit | 4096 | 三轮有效 | 65619.641 | 763363.328 | 3.149 | 14.836 | 10.183 |
+| lmcache | exist_miss | 1 | 三轮有效 | 6266.071 | 1818.624 | 5.780 | 14.786 | 10.125 |
+| lmcache | exist_miss | 4096 | 三轮有效 | 174034.497 | 436207.616 | 4.121 | 14.834 | 10.178 |
+| lmcache | get | 1 | 三轮有效 | 748.660 | 14155.776 | 4.736 | 14.791 | 10.132 |
+| lmcache | get | 4096 | N/A | N/A | N/A | N/A | N/A | N/A |
+| lmcache | put | 1 | 三轮有效 | 2429.087 | 5242.880 | 5.223 | 15.341 | 10.682 |
+| lmcache | put | 4096 | N/A | N/A | N/A | N/A | N/A | N/A |
+| lmcache | upsert | 1 | N/A | N/A | N/A | N/A | N/A | N/A |
+| lmcache | upsert | 4096 | N/A | N/A | N/A | N/A | N/A | N/A |
+| mooncake | exist_hit | 1 | 三轮有效 | 90952.414 | 143.360 | 8.259 | 5.298 | 0.653 |
+| mooncake | exist_hit | 4096 | 三轮有效 | 3442834.389 | 9437.184 | 6.755 | 5.396 | 0.750 |
+| mooncake | exist_miss | 1 | 三轮有效 | 91729.692 | 143.360 | 8.244 | 5.289 | 0.649 |
+| mooncake | exist_miss | 4096 | 三轮有效 | 7377809.183 | 4784.128 | 7.845 | 5.391 | 0.746 |
+| mooncake | get | 1 | 三轮有效 | 36200.604 | 335.872 | 8.288 | 5.315 | 0.670 |
+| mooncake | get | 4096 | 三轮有效 | 99263.341 | 440401.920 | 9.032 | 5.445 | 0.795 |
+| mooncake | put | 1 | 三轮有效 | 27498.243 | 450.560 | 8.387 | 5.819 | 1.176 |
+| mooncake | put | 4096 | 三轮有效 | 105987.211 | 398458.880 | 9.051 | 5.907 | 1.260 |
+| mooncake | upsert | 1 | 三轮有效 | 27967.304 | 434.176 | 8.349 | 5.313 | 0.671 |
+| mooncake | upsert | 4096 | 三轮有效 | 115633.487 | 356515.840 | 9.210 | 5.396 | 0.747 |
 
-全部B16/B256及波动、单轮结果、原始错误见报告`analysis.md`、`summary.csv`和交互图。存在原生失败的六种组合不生成性能聚合；其错误窗口中的成功速率只作诊断，不与有效窗口排名。
+表中CPU、计费内存与匿名+SHM均为server+client合计，包含各自cgroup的固定开销，不含独立monitor；内存未扣测前基线。全部B16/B256及波动、单轮结果、原始错误见报告`analysis.md`、`summary.csv`和交互图。存在原生失败的六种组合不生成性能聚合；其错误窗口中的成功速率只作诊断，不与有效窗口排名。
 
 ## 3. 正确性与解释
 
 短门禁/smoke通过不意味着20秒窗口必然通过。DataSystem的长窗口失败已在独立目录和关闭RocksDB/stream后复现；四个独立SDK对照支持GET/EXIST共享线程池旧deadline的源码机制，详见datasystem.md及verification.md，不把它归因于共享RocksDB，也不把未直接读取的TLS内容写成已观测事实。
 
 原生源码未修改。这里是固定版本、单节点双服务、TCP、1KiB、C8的Python SDK端到端负载，不是所有语言SDK或硬件路径的性能极限，也不推断跨节点、RDMA、GPU、推理或故障恢复收益。配置优选移除已确认无用功能，没有穷举全局最优。
+
+## 4. 从本矩阵得到的取舍
+
+- GET：DataSystem B1→4096为30,700.86→389,920.75 keys/s（12.70倍），整批P99为0.406→98.566ms；Mooncake为36,200.60→99,263.34 keys/s（2.74倍），P99为0.336→440.402ms。请求中key数同时增加4096倍，吞吐收益与整批等待是两种指标。
+- B4096不是统一最优：DataSystem GET在B256观测到491,154.10 keys/s、P99 4.915ms，B4096吞吐低20.61%。Mooncake PUT、LMCache EXIST hit的最高观测中位数也在B256。只有三轮观察，不能把“观测最高”当作全局最优或显著性证明。
+- B4096 fresh PUT：Mooncake105,987.21、DataSystem72,029.62 keys/s；整批P99分别398.459、486.539ms，每轮均只有64个batch，尾延迟解释需保留低样本限制。
+- EXIST：Mooncake hit/miss的B4096/B1吞吐倍率为37.85/80.43，LMCache为16.96/27.77；LMCache包含不同P2P协议成本。DataSystem大B的18个原生错误不生成倍率或排名。
+
+CPU只作观测：Mooncake GET B4096的客户端约7.634–7.644核/8核，服务端约1.381–1.392核，显示客户端资源已接近配额；本轮没有配额/并发干预，不能断定唯一瓶颈。吞吐、P99、CPU与匿名+SHM需结合看，不能仅按一个最高吞吐点选择配置。

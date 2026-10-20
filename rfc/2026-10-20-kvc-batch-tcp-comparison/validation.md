@@ -4,7 +4,7 @@
 
 ## 6.1 实际输入与比较边界
 
-当前主配置为 `/home/worktrees/kvc-batch-tcp-20261020-r5`，本地证据根为 `/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r5`。协议为 `separate-read-and-fresh-put-v1`，工具阶段提交 `2483b37`；stage记录111项执行输入，最终仍须按采集原件逐SHA绑定。产品复用固定源码构建：DataSystem rc44、Mooncake v0.3.13.post1、LMCache v0.5.6；不是本轮重新编译。Mooncake queued/pending均8192，属于容量适配profile，不能标为默认配置。
+当前主配置为 `/home/worktrees/kvc-batch-tcp-20261020-r7`，本地证据根为 `/home/t14s/workspace/scratch/2026-10-20-kvc-batch-tcp-r7`。协议为 `separate-read-and-fresh-put-v1`；stage记录121项冻结执行输入，SHA256为`991692d50b4fc05ae1150671da3f47d17dd53919ac24cfda2f51649b08b059eb`，已按采集原件逐SHA/size/mode核验。产品复用固定源码构建：DataSystem rc44、Mooncake v0.3.13.post1、LMCache v0.5.6；不是本轮重新编译。Mooncake queued/pending均8192，属于容量适配profile，不能标为默认配置。R5等早期记录在后文按其原执行身份保留。
 
 | 检查项 | 已确认事实与限制 |
 |---|---|
@@ -14,10 +14,10 @@
 | 固定热工作集 | 每产品/重复的read epoch仅65,536 keys / 64 MiB，每客户端私有8,192 keys；跨B读同一池，GET/UPSERT/EXIST hit使用该池，EXIST miss用独立absent namespace。read阶段不继承任何fresh PUT数据 |
 | fresh PUT | 每个支持B独立重启双服务和预置同一65,536-key池，再固定预热32,768新keys（每客户端4,096，按实际B原生批写），正式前resident=98,304 keys / 96 MiB。随后正式写262,144新keys / 256 MiB；smoke写32,768新keys / 32 MiB。不同B不累积前序PUT，LM不支持的B不做scalar padding |
 | 更新与后续读 | UPSERT 交替两组真实内容，计时后验证最后版本，并在窗口外完整恢复/读回基础工作集；GET 不应继承未知更新版本 |
-| 资源 | server/client 各 8 CPU、12 GiB，monitor 独立 2 CPU、1 GiB，swap=0；两个服务共用服务配额。原始 cgroup/配置与采样归属仍需随正式结果核验 |
+| 资源 | server/client 各 8 CPU、12 GiB，monitor 独立 2 CPU、1 GiB，swap=0；两个服务共用服务配额。原始cgroup/配置和150个SDK窗口的采样归属已核验，缺样/干扰边界见资源结果 |
 | 计量 | 吞吐包含同步起点至最晚客户端结束；API 延迟为整个 batch 完成时间，含适配器 O(B) 校验，不能除以 B 后称单 key P99 |
 | LMCache N/A | 仅 B1 支持本次等价 PUT/GET；所有 B 的 UPSERT 和 B>1 的 PUT/GET 明确 N/A。EXIST 为原生 P2P 独立 key 向量，含命中锁释放 ACK 的成本，不是零成本布尔缓存 |
-| 服务epoch | 正式设计9个read启动+27个fresh PUT启动=36个epoch；smoke为12个epoch。DS含gate1、smoke5、正式15，共21次独立集群启动/42个Worker实例；以上为设计数，尚不是已完成数 |
+| 服务epoch | 正式完成9个read启动+27个fresh PUT启动=36个epoch；smoke完成12个epoch。DS含gate1、smoke5、正式15，共21次独立集群启动/42个Worker实例；独立部署审计已核验启动与日志，live只覆盖gate1/21 |
 
 工作负载依据冻结 `batch_benchmark.py` 与 `parameters.json`；能力依据三个 adapter 的 metadata 和 [接口设计](test-design.md)。同 key、同字节、同配额减少输入差异，但不保证各产品内部 RPC 数、锁、分配和复制相同。
 
@@ -104,7 +104,7 @@ r5正式05:16:59.135590–05:20:06.445844 UTC，187.310265231秒后在B16 EXIST 
 
 这是单客户端低速诊断，不纳入性能重复。R6后续gate39.699639772s失败仅因Mooncake launcher Permission denied，DS gate已完成，MC/LM门禁尚未完整执行。复制overlay后x位恢复和mode inventory的5项本地回归通过，必须在fresh根继续验证；原r6失败不覆盖，不以部署错误给产品填零或N/A。完整矩阵、资源覆盖、包和浏览器验收仍待实际执行。
 
-## 6.10 r7通过资格，正式结果仍待终态
+## 6.10 r7资格阶段记录（正式终态见6.6/6.12）
 
 本地原件gate137.246847605s、smoke437.495450633s、TCP13.311996920s均valid；smoke12epoch齐全，独立重算50有效/10 N/A/0issues，TCP16case/32方向限定证明。精确summary和stage SHA见 [verification.md](verification.md) 5.15。它们不证明20秒EXIST已修复，也不替代正式三重复；运行期目标节点不作额外采集。
 
@@ -114,10 +114,18 @@ r5正式05:16:59.135590–05:20:06.445844 UTC，187.310265231秒后在B16 EXIST 
 
 控制机执行 `python3 -m unittest discover -s . -p 'test_batch*.py'`：348项通过，unittest报告42.182秒；这是工具fixture的框架耗时，未记录该命令外层起点，不倒推起止时间。另执行 `python3 -m unittest test_lmcache_profile test_mooncake_pure_kv_launcher`：7项通过、框架0.319秒；两份JS的 `node --check` 与 `git diff --check` 通过。最初误用子目录discover返回NO TESTS RAN/退出5，原操作记录保留，纠正为实际模块后才得到7项结果。
 
-本次检查的是构建输入准入、失败分类、资源/部署审计、报告和交付工具，没有修改DataSystem/Mooncake/LMCache的原生代码，也未把本地工具测试写成产品UT/ST、恢复或性能证据。R7执行输入仍以其冻结清单为准；后增加的复现分支、失败回执链接和浏览器断言是交付工具修订，不能追认成目标机已执行源码。共享suite锁、PID/start-ticks所有权、事务回滚和目录隔离由相关fixture覆盖；没有产品持久化/并发协议或模块结构变化，`.repo_context`无需更新。正式性能结论、公开页面和ZIP验收仍待实际终态。
+本次检查的是构建输入准入、失败分类、资源/部署审计、报告和交付工具，没有修改DataSystem/Mooncake/LMCache的原生代码，也未把本地工具测试写成产品UT/ST、恢复或性能证据。R7执行输入仍以其冻结清单为准；后增加的复现分支、失败回执链接和浏览器断言是交付工具修订，不能追认成目标机已执行源码。共享suite锁、PID/start-ticks所有权、事务回滚和目录隔离由相关fixture覆盖；没有产品持久化/并发协议或模块结构变化，`.repo_context`无需更新。此处记录正式期间的工具检查；正式终态与实际交付验收见6.12以后。
 
 补充fixture后再次执行同一discover命令，355项通过（框架34.148秒）；7项profile测试通过（0.560秒），此次由`workflow.run`保存实际外层起止与耗时。4项新增回执/DOM片段测试覆盖0成功原生失败、CSV链接、错误/状态/回执篡改及HTML转义；它们是synthetic矩阵，不充当正式运行数据。
 
 ## 6.12 r7终态输入与独立核验
 
 正式summary SHA256为 `3a797fe66006d5f6cadeeb5643f16e9d52be4be79dc6ecf387724fd6e148d24d`；部署审计SHA256为 `936de7a4f005c5bf6639678e0ab39cd0605f5cd18926806ff0c1e494e0e78cea`。三方原生源码未修改。采集完成后分别执行analyzer、resource audit、deployment audit；各自原件、执行helper和输入SHA由最终报告重新绑定，不能由本文数字替代原始证据。完整结果与残余背景观测见后续交付文档。
+
+## 6.13 首次本地网页与ZIP验收
+
+实际本地浏览器347检查通过，1440/900/390视口无横向溢出与运行错误；核对180槽/36epoch、失败原文与回执链接、吞吐/整批延迟散点与柱图、资源窗口、9图caption、左侧导航与移动菜单。还实际HTTP GET了带SHA查询参数的ZIP，确认正文SHA等于唯一链接及清单值。此验收针对页面数据和交付字节，不代替独立原始SDK重算，也不提前宣称公网通过。
+
+实际清洁解包验收1822成员、134348850 bytes，CRC/路径/文件类型/逐成员SHA/原模式通过；121份冻结输入精确集合和1696份公开镜像字节匹配。6项CLI help、756项Python编译、56项shell语法、4项Node语法通过。ZIP提供脚本、模板、文档和精选证据，未包含最终index/data.js/data.json；离线网页需保留整个公开报告目录的相对依赖，不能把此ZIP标为最终网页离线包。
+
+实际工具源码分别为SHA256 `71ee3dbeced313764d102fcc2db2dcdf5045b00443489f94c64cb921ee491d8a`（executed-qa.mjs）、`e3ee0c97ef1f5a37e8aa8fa6a43c9f284a1dc10229f7e33a878e858ebc2a4c46`（package_qa.py）。原件保存在R7的final-local-browser-qa与final-package-qa；后续交付快照按内容SHA保存，不替换原冻结测量或生成器源码。公开发布、旧页面提示与最终文档刷新仍按实际命令继续登记。
