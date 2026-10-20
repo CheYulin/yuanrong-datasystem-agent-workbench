@@ -639,8 +639,10 @@ class TCPProofBindingTests(unittest.TestCase):
         gate, scripts = parent / "gate", parent / "parsers"
         gate.mkdir(); scripts.mkdir()
         inputs, sources, cases = {}, {}, []
-        for name in ["batch_tcp_verify.py", "batch_gate.py", "tcp_probe_ds_sizes.py"]:
+        from kvcbench.collect.provenance import TCP
+        for name in TCP:
             content = ("# Synthetic parser provenance fixture " + name + "\n").encode()
+            (scripts / name).parent.mkdir(parents=True, exist_ok=True)
             (scripts / name).write_bytes(content)
             sources[name] = {"bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
         trace = gate / "trace.log"
@@ -666,7 +668,7 @@ class TCPProofBindingTests(unittest.TestCase):
                                   "minimum_directional_bytes": batch * 1024, "gate_path": name,
                                   "valid": True, "errors": [], "wire": {"malformed": [],
                                   "operations": {op: deepcopy(observed) for op in ["put", "get"]}}})
-        raw = {"schema_version": 2, "kind": "datasystem_native_batch_tcp_any_key_full_payload_audit",
+        raw = {"schema_version": 3, "kind": "datasystem_native_batch_tcp_any_key_full_payload_audit",
                "valid": True, "suite": str(gate), "inputs": inputs, "parser_sources": sources,
                "cases": cases, "scope": "Synthetic structural fixture only; no transport runtime evidence."}
         proof = parent / "proof.json"
@@ -683,7 +685,7 @@ class TCPProofBindingTests(unittest.TestCase):
             summary, records = batch_report.verify_tcp_evidence(proof, gate, scripts)
             self.assertEqual((summary["case_count"], summary["direction_count"]), (16, 32))
             self.assertEqual(summary["input_files_revalidated"], 5)
-            self.assertEqual(len(records), 4)
+            self.assertEqual(len(records), 6)
             self.assertEqual(summary["full_evidence"]["sha256"], hashlib.sha256(proof.read_bytes()).hexdigest())
             self.assertIn("without reparsing syscalls", summary["summary_scope"])
             self.assertNotIn("inputs", summary)
@@ -713,8 +715,22 @@ class TCPProofBindingTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     batch_report.verify_tcp_evidence(proof, gate, scripts)
 
+    def test_original_v2_parser_inventory_remains_readable_with_explicit_original_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            gate, scripts, proof, raw = self.fixture(Path(directory))
+            raw['schema_version'] = 2
+            raw['parser_sources'] = {}
+            for name in ['batch_tcp_verify.py', 'batch_gate.py', 'tcp_probe_ds_sizes.py']:
+                source = scripts / name
+                source.write_text('# original-format synthetic source fixture\n')
+                raw['parser_sources'][name] = {'bytes': source.stat().st_size, 'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
+            self.write(proof, raw)
+            summary, records = batch_report.verify_tcp_evidence(proof, gate, scripts)
+            self.assertEqual(summary['case_count'], 16)
+            self.assertEqual(len(records), 4)
+
     def test_bound_raw_file_or_parser_tampering_is_rejected(self):
-        for name in ["trace.log", "batch_tcp_verify.py"]:
+        for name in ["trace.log", "kvcbench/collect/audits/tcp.py"]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 gate, scripts, proof, _ = self.fixture(Path(directory))
                 path = gate / name if name.endswith(".log") else scripts / name
@@ -852,7 +868,7 @@ class ResourceEvidenceBindingTests(unittest.TestCase):
             (suite / "r0-datasystem" / name).write_text(json.dumps(value))
         raw = batch_resource_audit.audit(suite)
         self.write(output, raw)
-        return suite, output, {"summary": summary}, Path(batch_resource_audit.__file__).parent, raw
+        return suite, output, {"summary": summary}, Path(__file__).resolve().parent, raw
 
     @staticmethod
     def write(output, raw):

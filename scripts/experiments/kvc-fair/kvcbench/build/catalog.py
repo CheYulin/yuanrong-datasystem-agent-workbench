@@ -48,6 +48,13 @@ def validate_builds(native_root, products=None):
             raise ValueError("Successful pinned build identity is required: " + name)
         metadata = regular(root, f"build-metadata/{name}.json")
         provenance["inputs"][str(metadata.relative_to(root))] = identity(metadata)
+        for relative, expected in row.get("compiler_inputs", {}).items():
+            if Path(relative).parts[:2] != ("compiler-inputs", name):
+                raise ValueError("Compiler input escaped its product namespace")
+            path = regular(root, relative)
+            if identity(path) != expected:
+                raise ValueError("Recorded compiler input changed")
+            provenance["inputs"][relative] = expected
         source = root / spec["source"]
         if (not source.is_dir() or any(part.is_symlink() for part in [source, *source.parents])
                 or row.get("source_directory") != str(source)):

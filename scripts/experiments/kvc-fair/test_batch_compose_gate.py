@@ -9,9 +9,7 @@ import batch_gate
 from test_batch_gate import FakeAdapter
 
 
-SPEC = importlib.util.spec_from_file_location("batch_compose_gate", Path(__file__).with_name("batch_compose_gate.py"))
-compose = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(compose)
+from kvcbench.collect.audits import integrity as compose
 
 
 def fixture(root):

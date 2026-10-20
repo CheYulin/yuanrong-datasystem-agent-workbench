@@ -19,6 +19,7 @@ import datetime
 import hashlib
 import itertools
 import json
+from kvcbench.core.source_state import source_state
 import os
 from pathlib import Path
 import shutil
@@ -71,20 +72,6 @@ def git_status(source, tracked_only=False):
                "--untracked-files=no" if tracked_only else "--untracked-files=normal"]
     return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT, timeout=15,
                                    env=dict(os.environ, GIT_OPTIONAL_LOCKS="0")).rstrip("\n")
-
-
-def source_state(product, status, tracked_status):
-    lines = status.splitlines() if isinstance(status, str) else []
-    untracked = [line for line in lines if line.startswith("?? ")]
-    allowed = [line for line in untracked if product == "datasystem" and line == "?? .venv/"]
-    unexpected = [line for line in untracked if line not in allowed]
-    tracked_clean = tracked_status == "" and not any(not line.startswith("?? ") for line in lines)
-    return {"source_worktree_clean": status == "", "source_status_porcelain": status,
-            "source_tracked_worktree_clean": tracked_clean, "source_tracked_status_porcelain": tracked_status,
-            "source_untracked_status_porcelain": "\n".join(untracked) if isinstance(status, str) else None,
-            "source_allowed_untracked": allowed, "source_unexpected_untracked": unexpected,
-            "source_worktree_policy_valid": isinstance(status, str) and tracked_clean and not unexpected,
-            "source_worktree_policy": "Tracked source must be clean; only DataSystem's recipe-created untracked .venv/ directory is allowed. Full worktree cleanliness remains separately recorded."}
 
 
 def utc_ns(value):
@@ -142,12 +129,16 @@ def record(args):
     if missing:
         errors.append("required native artifacts missing: " + ", ".join(missing))
     compiler = observe("compiler", lambda: compiler_probe(root, source, args.compiler))
+    compiler_inputs = {}
+    if (root / "compiler-inputs/datasystem/record.json").is_file() and args.product == "datasystem":
+        from kvcbench.build.toolchain import verify
+        compiler_inputs = observe("effective compatibility compiler", lambda: verify(root)) or {}
     metadata = {
         "schema_version": 1, "product": args.product, "tag": spec["tag"], "pinned_sha": spec["sha"],
         "sha": head, "tag_sha": tag_sha, "official_source": spec["official_source"],
         "source_directory": str(source), **state,
         "python_executable": python, "python": observe("Python", lambda: command_text([python, "--version"])),
-        "compiler": compiler["version"] if compiler else None, "compiler_probe": compiler,
+        "compiler": compiler["version"] if compiler else None, "compiler_probe": compiler, "compiler_inputs": compiler_inputs,
         "build_started_wall_ns": args.started_wall_ns, "build_finished_wall_ns": args.finished_wall_ns,
         "build_started_utc": utc_ns(args.started_wall_ns), "build_finished_utc": utc_ns(args.finished_wall_ns),
         "build_wall_seconds": (args.finished_wall_ns - args.started_wall_ns) / 1e9,

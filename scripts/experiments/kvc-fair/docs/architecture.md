@@ -42,3 +42,12 @@ P1 提供持久化和绑定机制；每个 W 步骤的业务验收函数仍随 b
 `observe.Session.start()` 启动 host 和 interference，要求服务端/客户端 cgroup 首样本完整、必需外部工具存活且干扰采样已出现，再封存 `ready.json`。它包括独立的首样本、就绪样本和启动清单快照，不对开放流提前计算固定 hash。正式 runner 接收显式 observer factory，旧 CLI 的组合仅在兼容入口发生。
 
 `Session.stop()` 等待自有监控退出，关闭日志后写 `final.json`，绑定已停止的采样、工具日志、最终 manifest 和 ready。两种中间结果由 `observe.validation` 独立只读复核；final 通过仍不证明测量窗口覆盖，由 collect/audit 继续核验。目标节点已实际验证启动—采样—停止—封存，相关数据在工作区外；尚未据此宣称三产品正式压测完成。
+
+
+## 5. 收集与审计的模块边界
+
+`collect/analysis/` 负责 scalar/batch 原始结果重算；`collect/audits/` 分离服务期、资源、部署、TCP、门禁来源、runtime/build 来源和后处理来源复核；`collect/traces.py` 只读解析 syscall；`snapshot.py`、`timings.py` 分别保留停止后的源码/构建快照和阶段耗时收集。原生 payload 约定和 source-state 规则为 core 纯函数，收集层不导入 run/build/report。
+
+审计来源清单绑定实际 canonical 文件。新 TCP、资源、部署审计分别使用 schema 3、2、4，保留旧 schema 的只读解释；旧记录必须提供其原始 helper 字节，不用今天的薄 facade 冒充原先执行的脚本。当前版本的 closure 包括真实分析、直方图、原生结果校验、资源归约和相关 provenance 声明。
+
+`collect/index.py` 按明确且唯一的 path/role 清单制作新快照，保存 SHA/size/mode 并可独立复核。允许选择已经关闭的 W01–W11 回执，排除本次 W12、自身索引和下游派生目录；复制中变化保留失败现场。terminal_suite 区分“原生失败但执行完整”和“清理未知”，后者阻断正常收集。W12 的锁、现场排空、恢复与上游回执准入仍由总编排提供，索引完整性本身不是这些业务前置条件的证明。

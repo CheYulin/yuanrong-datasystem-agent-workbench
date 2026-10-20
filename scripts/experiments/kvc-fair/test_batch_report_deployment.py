@@ -42,7 +42,7 @@ class DeploymentReportTests(unittest.TestCase):
                                                    "required_gate_live_observed": True})
         self.assertEqual(summary["input_files_revalidated"], len(self.raw["inputs"]))
         self.assertEqual(len(records), 2)
-        self.assertEqual(records[1]["sha256"], audit.digest(self.scripts / "batch_deployment_audit.py"))
+        self.assertEqual(records[1]["sha256"], audit.digest(self.scripts / "kvcbench/collect/audits/deployment.py"))
         self.assertIn("live-unobserved", summary["scope"])
 
     def test_unused_frozen_helper_is_separate_from_executed_postprocessor(self):

@@ -12,6 +12,9 @@ import time
 import traceback
 import uuid
 
+from kvcbench.core.payload import payload, digest_items
+from kvcbench.platform.files import write_immutable
+
 
 OPERATIONS = {"put": "put_batch", "get": "get_batch", "exists": "exists_batch"}
 
@@ -23,19 +26,6 @@ def load_adapter(path, config):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.new_adapter(config)
-
-
-def payload(key, version, size):
-    return hashlib.shake_256(f"kvc-batch-gate-v1\0{key}\0{version}".encode()).digest(size)
-
-
-def digest_items(items):
-    digest = hashlib.sha256()
-    for item in items:
-        value = item.encode() if isinstance(item, str) else item
-        digest.update(len(value).to_bytes(8, "big"))
-        digest.update(value)
-    return digest.hexdigest()
 
 
 def supports(metadata, operation, count):
@@ -304,21 +294,6 @@ def run_gate(adapter_path, config, *, client_index, batch_sizes, value_size, run
         result["valid"] = not failed and len(result["cases"]) == len(batch_sizes) and all(case["valid"] for case in result["cases"])
         result["failed_steps"] = [step["name"] for step in recorder.steps if step["status"] == "failed"]
     return result
-
-
-def write_immutable(path, result):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
-    descriptor, pending = tempfile.mkstemp(prefix=path.name + ".pending-", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.link(pending, path)
-    finally:
-        os.unlink(pending)
 
 
 def main(argv=None):

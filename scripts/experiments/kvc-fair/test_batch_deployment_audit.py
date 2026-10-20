@@ -221,7 +221,7 @@ class DeploymentAuditTests(unittest.TestCase):
         self.assertTrue(formal["execution_complete"])
         self.assertTrue(formal["measurement_evidence"]["evidence_verified"])
         self.assertEqual(formal["measurement_evidence"]["counts"]["failed"], 1)
-        self.assertEqual(set(result["analysis_helpers"]), {"batch_analyze", "batch_epoch_verify", "benchmark", "report"})
+        self.assertEqual(set(result["analysis_helpers"]), {"kvcbench/collect/analysis/batch.py", "kvcbench/collect/audits/epochs.py", "kvcbench/core/statistics.py", "kvcbench/core/case_validation.py", "kvcbench/collect/resources.py", "kvcbench/collect/provenance.py"})
         for row in result["analysis_helpers"].values():
             path = Path(row["path"])
             self.assertEqual(row["bytes"], path.stat().st_size)

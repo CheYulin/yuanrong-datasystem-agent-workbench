@@ -178,6 +178,7 @@ def build(spec, *, tool=None, resources_factory=BuildResources, command_runner=e
                 payloads = [reference(root, p.relative_to(root)) for p in sorted(folder.glob("*")) if p.is_file()]
                 if row_path.is_file():
                     payloads.append(reference(root, row_path.relative_to(root)))
+                payloads.extend(reference(root, relative) for relative in row.get("compiler_inputs", {}))
                 payloads.extend(reference(root, Path(name).relative_to(root)) for name in artifact_records)
                 commit = attempt.finish(execution="completed" if valid else "failed", returncode=0 if valid else 1,
                     scope="actual source recipe command and recorded native build identity",

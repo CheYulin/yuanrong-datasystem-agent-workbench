@@ -5,7 +5,7 @@ scripts/experiments/kvc-fair/batch-report.css,report,kvcbench/report/assets/css/
 scripts/experiments/kvc-fair/batch-report.html,report,kvcbench/report/assets/templates/batch-report.html,move,P5,模板不内嵌采集与统计逻辑
 scripts/experiments/kvc-fair/batch-report.js,report,kvcbench/report/assets/js/batch-report.js,move,P5,ECharts 与状态/链接语义保持
 scripts/experiments/kvc-fair/batch_acceptance.py,delivery,kvcbench/delivery/acceptance.py,move,P5,交付验收和 native_matrix 状态分列
-scripts/experiments/kvc-fair/batch_analyze.py,collect,kvcbench/collect/analysis/batch.py | kvcbench/collect/analysis/resources.py | kvcbench/core/statistics.py,split,P1-P4,移除对 report/benchmark 入口的反向依赖
+scripts/experiments/kvc-fair/batch_analyze.py,collect,kvcbench/collect/analysis/batch.py | kvcbench/collect/resources.py | kvcbench/core/case_validation.py,split,P1-P4,移除对 report/benchmark 入口的反向依赖
 scripts/experiments/kvc-fair/batch_benchmark.py,run,kvcbench/run/workers/batch.py | kvcbench/core/statistics.py,split,P1-P3,先保持 scalar/batch 各自循环边界；只提取已有统计原语
 scripts/experiments/kvc-fair/batch_build_stage.py,build,kvcbench/build/metadata.py | kvcbench/run/stage.py,split,P2,复用 builds-only 验证，不依赖历史 formal 成功
 scripts/experiments/kvc-fair/batch_compose_gate.py,collect,kvcbench/collect/audits/integrity.py,move,P4,组合已有门禁证据不等于重新执行；前置诊断由 pipeline 编排
@@ -28,13 +28,13 @@ scripts/experiments/kvc-fair/batch_report.py,report,kvcbench/collect/analysis/ |
 scripts/experiments/kvc-fair/batch_resource_audit.py,collect,kvcbench/collect/audits/resources.py,move,P4,保留实际输入、窗口、代码身份和原件 hash 约束
 scripts/experiments/kvc-fair/batch_runner.py,run,kvcbench/run/plan.py | kvcbench/run/runner.py | kvcbench/core/case_validation.py,split,P3,各 profile 协议保持；共享失败纯校验放 core，run/outcomes 只控制继续/停止
 scripts/experiments/kvc-fair/batch_stage.py,run,kvcbench/run/stage.py | kvcbench/run/environment.py | configs/experiments/,split,P2,配置物化/部署与环境准备分离；保留旧格式 reader
-scripts/experiments/kvc-fair/batch_tcp_verify.py,collect,kvcbench/collect/audits/integrity.py | kvcbench/collect/audits/tcp.py | kvcbench/collect/readers/,split,P4,按历史 schema 选择 reader，不改原件
+scripts/experiments/kvc-fair/batch_tcp_verify.py,collect,kvcbench/collect/audits/tcp.py | kvcbench/collect/traces.py,split,P4,按历史 schema 选择 reader，不改原件
 scripts/experiments/kvc-fair/batch_workflow.py,cli,kvcbench/cli.py | kvcbench/pipeline.py | kvcbench/compat/commands.py,split,P1-P6,迁移期保留同名薄入口，分别转入 native/single_tcp/batch_tcp profile；P6 退出
 scripts/experiments/kvc-fair/benchmark.py,run,kvcbench/run/workers/scalar.py | kvcbench/core/statistics.py,split,P1-P3,先保持 scalar/batch 各自循环边界；只提取已有统计原语
 scripts/experiments/kvc-fair/build_metadata.py,build,kvcbench/build/metadata.py | configs/versions/kvc_20261020.json,split,P2,分离固定版本声明与产物来源核验
-scripts/experiments/kvc-fair/capture_evidence.py,collect,kvcbench/collect/freeze.py,move,P1-P4,先用显式 manifest 覆盖新目录；完成后持锁快照
+scripts/experiments/kvc-fair/capture_evidence.py,collect,kvcbench/collect/snapshot.py,move,P1-P4,先用显式 manifest 覆盖新目录；完成后持锁快照
 scripts/experiments/kvc-fair/cgroup.py,platform,kvcbench/platform/cgroup.py,move,P1,保留配额、验证与归属语义
-scripts/experiments/kvc-fair/collect_timings.py,collect,kvcbench/collect/analysis/timings.py,move,P4,离线时间归约与原始事件写入分开
+scripts/experiments/kvc-fair/collect_timings.py,collect,kvcbench/collect/timings.py,move,P4,离线时间归约与原始事件写入分开
 scripts/experiments/kvc-fair/commit_publication.py,delivery,kvcbench/delivery/git.py,move,P5,站点主干与 remote 审计独立于实验
 scripts/experiments/kvc-fair/datasystem/README.md,docs,docs/build/datasystem.md,move,P2,产品构建和运行入口文档，链接指向正式模块
 scripts/experiments/kvc-fair/datasystem/adapter_datasystem.py,run,kvcbench/run/products/datasystem/adapter_datasystem.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
@@ -128,7 +128,7 @@ scripts/experiments/kvc-fair/test_tcp_retry.py,tests,tests/unit/test_tcp_retry.p
 scripts/experiments/kvc-fair/test_tcp_workflow.py,tests,tests/unit/test_tcp_workflow.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
 scripts/experiments/kvc-fair/test_versioned_delivery.py,tests,tests/unit/test_versioned_delivery.py,move,P1-P6,随所属模块阶段迁移；保留语义断言，必要分拆到 contract/integration
 scripts/experiments/kvc-fair/timed.py,core,kvcbench/core/timing.py | kvcbench/platform/command.py,split,P1,统一命令与阶段耗时，保留时钟域
-scripts/experiments/kvc-fair/verify_results.py,collect,kvcbench/collect/audits/integrity.py | kvcbench/collect/audits/tcp.py | kvcbench/collect/readers/,split,P4,按历史 schema 选择 reader，不改原件
+scripts/experiments/kvc-fair/verify_results.py,collect,kvcbench/collect/audits/legacy.py,split,P4,按历史 schema 选择 reader，不改原件
 scripts/experiments/kvc-fair/verify_tcp.py,collect,kvcbench/collect/audits/integrity.py | kvcbench/collect/audits/tcp.py | kvcbench/collect/readers/,split,P4,按历史 schema 选择 reader，不改原件
 scripts/experiments/kvc-fair/workflow.py,cli,kvcbench/cli.py | kvcbench/pipeline.py | kvcbench/compat/commands.py,split,P1-P6,迁移期保留同名薄入口，分别转入 native/single_tcp/batch_tcp profile；P6 退出
 rfc/2026-10-20-kvc-batch-tcp-comparison/appendix-mobile-layout-v1.py,migration,tools/migrations/20261020/appendix-mobile-layout-v1.py,archive,P5,一次性修补留作历史，不加入主命令；相关文档引用同步更新

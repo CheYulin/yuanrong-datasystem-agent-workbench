@@ -21,6 +21,8 @@ import time
 import traceback
 import uuid
 
+from kvcbench.collect.traces import trace_evidence
+
 
 SIZES = (1024, 65536, 1048576)
 OPERATIONS = ("DS_KV_CLIENT_SET", "DS_KV_CLIENT_GET")
@@ -44,7 +46,6 @@ SOURCE = {
     "tcp_payload_set": "src/datasystem/client/object_cache/transport/data_plane/tcp_transporter.cpp:149-176",
     "inline_rpc_fallback": "src/datasystem/client/object_cache/transport/data_plane/shm_transporter.h:259-288",
 }
-
 
 
 def digest(data):
@@ -173,67 +174,6 @@ def configuration_evidence(run_dir, endpoints):
                          "flags": required, "pid": pid, "start_ticks": live_stat[19], "live_argv": live_args})
     return {"workers": evidence, "processes_path": str(manifest_path),
             "processes_sha256": digest(manifest_path.read_bytes()), "source": SOURCE}
-
-
-def trace_evidence(directory, windows, payload_prefix_hex, endpoint):
-    endpoints = [endpoint] if isinstance(endpoint, str) else list(endpoint)
-    operations = {name: {"successful_bytes": 0, "payload_prefix_observed": False, "anchors": []}
-                  for name in ["put", "get"]}
-    hashes, malformed = [], []
-    outgoing = {"write", "writev", "sendto", "sendmsg"}
-    incoming = {"read", "readv", "recvfrom", "recvmsg"}
-    encoded_prefix = "".join("\\x" + payload_prefix_hex[i:i + 2] for i in range(0, len(payload_prefix_hex), 2))
-    for path in sorted(directory.glob("strace.*")):
-        content = path.read_bytes()
-        hashes.append({"path": str(path), "bytes": len(content), "sha256": digest(content)})
-        pending = None
-        for number, raw in enumerate(content.splitlines(), 1):
-            line = raw.decode("utf-8", errors="replace")
-            prefix = re.match(r"(\d+\.\d+) (.*)", line)
-            if not prefix:
-                continue
-            timestamp_ns = int(Decimal(prefix[1]) * 1000000000)
-            text = prefix[2]
-            if "<unfinished ...>" in text:
-                pending = (number, timestamp_ns, text.replace("<unfinished ...>", ""))
-                continue
-            resumed = re.match(r"<\.\.\. (\w+) resumed>(.*)", text)
-            first_line = number
-            if resumed:
-                if pending is None or not pending[2].startswith(resumed[1] + "("):
-                    continue
-                first_line, _, start = pending
-                text = start + resumed[2]
-                pending = None
-            call = re.match(r"(\w+)\(", text)
-            returned = re.search(r"\)\s+=\s+(\d+)(?:\s|$)", text)
-            tcp = re.findall(r"<TCP:\[([^]]+)\]>", text)
-            if not call or not returned or not tcp or not any(
-                    item.endswith("->" + allowed) for item in tcp for allowed in endpoints):
-                continue
-            name = "put" if call[1] in outgoing else "get" if call[1] in incoming else None
-            if name is None or name not in windows:
-                continue
-            window = windows[name]
-            if not window["start_wall_ns"] <= timestamp_ns <= window["end_wall_ns"]:
-                continue
-            count = int(returned[1])
-            if count <= 0:
-                continue
-            observed = encoded_prefix in text
-            record = {**anchor(path, number, raw), "first_line": first_line, "syscall": call[1],
-                      "successful_bytes": count, "timestamp_ns": timestamp_ns, "tcp_endpoints": tcp,
-                      "payload_prefix_observed": observed, "actual_medium": "TCP"}
-            operations[name]["successful_bytes"] += count
-            operations[name]["payload_prefix_observed"] |= observed
-            operations[name]["anchors"].append(record)
-    for operation in operations.values():
-        operation["actual_payload_endpoints"] = sorted({
-            value for record in operation["anchors"] if record["payload_prefix_observed"]
-            for value in record["tcp_endpoints"]})
-    return {"operations": operations, "trace_sha256": hashes, "malformed": malformed,
-            "allowed_worker_endpoints": endpoints,
-            "scope": "Successful direction-specific TCP syscalls inside each synchronous SDK operation's wall-clock window, to either configured worker. Bound SDK endpoint does not determine routed storage worker. Bytes include RPC overhead; payload prefix is key-specific. Not performance evidence."}
 
 
 def audit_evidence(evidence, materialize, wire, child_result, key, size, *, returncode=0, timed_out=False):

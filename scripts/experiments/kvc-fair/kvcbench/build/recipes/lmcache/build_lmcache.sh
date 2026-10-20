@@ -38,7 +38,7 @@ fi
 export NO_GPU_EXT=1 MAX_JOBS=${MAX_JOBS:-4}
 "$UV" pip install --python venv311/bin/python --no-build-isolation --no-deps --editable source
 "$UV" pip freeze --python venv311/bin/python | sed '/^lmcache/d; /^-e /d' > requirements.lock
-venv311/bin/python - <<'PY'
+venv311/bin/python -I -B - <<'PY'
 import torch
 import lmcache
 import lmcache.lmcache_native

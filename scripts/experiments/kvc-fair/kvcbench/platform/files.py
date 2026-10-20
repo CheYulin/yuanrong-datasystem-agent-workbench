@@ -117,3 +117,18 @@ def atomic_json(path, value, *, exclusive=False):
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def write_immutable(path, result):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    descriptor, pending = tempfile.mkstemp(prefix=path.name + ".pending-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(pending, path)
+    finally:
+        os.unlink(pending)

@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | P0 | 已完成设计 | 五个主模块、142 项基线迁移表、W01–W18 中间结果和独立验收契约 |
 | P1 | 已验收 | core/platform/build 包、回执与只读复核、显式源码包；部署/源码快照/ZIP 接入嵌套模块；完整回归与干净包通过 |
-| P2 | 进行中 | P2a 已迁移 metadata/catalog/stage 与配置归属；构建服务、实际新构建及 workflow 接入待完成 |
-| P3 | 待实施 | 运行/资格/epoch/worker/environment 与 observe 分离及真实产品 smoke |
-| P4 | 待实施 | 原件收集、离线 reader/analysis/audits、来源链与逐步验收 |
+| P2 | 进行中 | metadata/catalog/stage、配方与 source-build 已接入；第三次真实构建正在运行，完整实验计划和 stage/workflow 准入待接入 |
+| P3 | 进行中 | 运行/资格/epoch/worker/batch adapter 与 observe 已分离，目标机观测 smoke 通过；产品 runtime/环境恢复/业务回执及真实产品 smoke 待完成 |
+| P4 | 进行中 | 原件 snapshot/index、analysis/audits 与来源复核已迁移，历史原件重算一致；完整 W12–W14 准入与实际新实验审计待完成 |
 | P5 | 待实施 | 报告模板/文档/资源/复现包、独立交付与浏览器验收 |
 | P6 | 待实施 | 旧入口退出、引用迁移、干净包验收与完整新实验及最终报告刷新 |
 
@@ -90,3 +90,29 @@ P2a 结束时尚未启动本任务的新编译或压测。P2 后续状态以第 
 - 观测 smoke 仅验证采样链路；构建同时在另一个域运行，不将此样本解释为产品性能或正式矩阵资源覆盖。Mooncake 实际构建退出 0，metadata identity_valid=true；DataSystem 构建仍在执行，全部三产品的聚合验收尚待终态。
 
 P3 尚未完成：产品 runtime/现场环境与恢复还需迁移，W07–W11 的业务回执仍须由总编排逐步绑定，不能以 ready/final 文件存在代替全工作流验收。P4/P5/P6、真实三产品资格/正式矩阵、刷新报告和公开交付继续保留在目标内。共享锁、进程身份、写请求不重放和历史原件不改写的边界保持；未修改 DataSystem 产品代码，无产品上下文结构变更。
+
+
+## 9. P4a 收集、分析与独立来源复核
+
+迁入 collect 的实现包括 batch/scalar 分析、epoch/resource/deployment/TCP/integrity 审计、停止后 snapshot、timings；原报告中的 runtime/build、gate/TCP 和后处理来源核验分别迁入三个审计模块。确定性 payload 和 source-state 规则归 core；collect 不导入 build/run/report，build 版本信息通过明确参数提供。根目录暂时保留兼容入口，P6 清理尚未完成。
+
+新 `collect/index.py` 接收明确、排序、唯一的 path/role 清单，将原始文件 SHA/size/mode 保存至全新 payload；只读 verify 检查精确文件集、字节、权限和符号链接。选定的 W01–W11 关闭回执可作为源，W12/后续派生目录与活动状态索引不能混入；复制中变化留下 failure。正常 terminal_suite 要求完整执行、正常停止监控和已保存排空，原生 failed 仍可作为终态证据，不能用清理未知放行。实际持锁/现场状态/恢复/上游回执准入仍须由 workflow 接入，不以索引通过冒充完整 W12。
+
+来源声明改为绑定实际 canonical 模块及依赖闭包。新 TCP/resource/deployment schema 分别为 3/2/4；旧 2/1/2–3 仍按原格式读，并要求显式提供其原始 helper 文件，旧归档不改写。相关 fixture 改为新路径和完整闭包，同时保留错误来源、篡改、缺项、重复和旧 schema 拒绝/接受条件。
+
+- 最终 `python3 -m unittest discover -s . -p 'test_*.py'`：**516 项通过，51.691 秒**（unittest 自报），日志 `p4-complete-all-008.log`。迁移初轮的来源路径失败日志、误选不存在测试模块的命令日志均保留，不能列为通过。
+- 对历史 R7 原件作只读分析回归：counts/issues/rows/aggregates/epochs 五项与原 independent-formal-analysis 完全一致，仍为 132 valid /18 failed /30 N/A；27.050262513 秒，证据 `p4-real-evidence-regression/regression.json`。这不是新的 runtime 结果。
+- 将历史 180 个 case 与 5 个计划/终态文件制作独立 index 快照，185 文件通过复核，0.17883294 秒；原件 valid=false 被保留。该快照不包含资源/全部现场材料，不能冒充完整 W12。
+- 代码依赖检查通过；SDK 测量循环未改，变更位于构建、控制面与离线处理。没有修改产品代码或其上下文结构；并发/持久化风险落在明确文件清单、原子 JSON、失败现场保留和来源重核，不据单元测试推断产品恢复能力。
+
+## 10. 真实构建失败与编译器输入修正
+
+第一次真实构建的完整命令耗时：Mooncake 373.074 秒/退出 0，DataSystem 629.469 秒/退出 1，LMCache 152.385 秒/退出 1。DataSystem 首个错误为第三方 RocksDB 在 GCC 15 下缺少 cstdint；LMCache 扩展已构建，后置 probe 受工作目录同名 namespace 干扰。原始日志、metadata、失败 W02 及清理记录保留；独立 verify-step 确认绑定有效，同时 accepted_for_normal_use=false，未将失败改写为成功。失败 cgroup 已排空并移除。
+
+LMCache probe 改用 `-I -B`，目标机实际复核加载了固定 source/lmcache/__init__.py，版本和 distribution 均为 0.5.6，三个 native 模块导入成功；原失败记录不改写。
+
+第二次构建在新的 `...-002` 根目录进行。观察到第三方 CMake 将 CXX 解析后的 compiler path 单独转发，丢失追加的环境参数，RocksDB 仍报原错误；不能认为上一轮环境变量调整已修复。当前配方改用 `build/toolchain.py` 创建带固定 header preinclude 的可执行 driver，原始 GCC 15 的身份、wrapper 字节/权限/参数另有记录，不修改产品/第三方源码和运行功能开关。metadata 核对实际 RocksDB CMakeCache 是否使用该 driver；catalog、W02 和冻结 build provenance 绑定这些 compiler 输入。
+
+目标机 `compiler-probe-001` 以实际 GCC 15 和显式 CMake compiler 参数完成 configure/build/execute，三个命令均退出 0，实际 1.028712926 秒；测试证明参数经过 executable driver 传递，不代表完整 DataSystem 已构建成功。两项 compiler 输入/实际 cache/篡改单测已包含上述 516 项。
+
+第二次构建已终态：Mooncake、LMCache 通过，DataSystem 失败，构建域排空并移除。第三次以全新 `...-003` 根目录和 `kvcbuild20261021modular003` 域启动，使用 `code-p4-004` 冻结包；旧目录与失败不改写。完整 native catalog、P3 剩余环境/恢复、P4 工作流绑定、P5/P6、全新正式矩阵及站点交付都仍未完成。

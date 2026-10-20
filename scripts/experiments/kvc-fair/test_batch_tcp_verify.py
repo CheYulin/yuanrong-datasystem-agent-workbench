@@ -10,9 +10,7 @@ from test_batch_gate import FakeAdapter
 import batch_gate
 
 
-SPEC = importlib.util.spec_from_file_location("batch_tcp_verify", Path(__file__).with_name("batch_tcp_verify.py"))
-audit = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(audit)
+from kvcbench.collect.audits import tcp as audit
 
 
 def stamp(ns):
