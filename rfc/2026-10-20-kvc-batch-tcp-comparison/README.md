@@ -4,6 +4,8 @@
 
 网页新增[附录 A：构建、版本与配置](https://yche.me/perf/kvc-batch-tcp-20261020/index.html#build-appendix)，同时补充旧单 key TCP 页面。内容模板为 [build-appendix.html](build-appendix.html)，发布与验证记录见 [build-appendix-publication.md](build-appendix-publication.md)。
 
+构建、配置、测试与接口细节已提供网页阅读版：[批量文档中心](https://yche.me/perf/kvc-batch-tcp-20261020/docs/index.html)、[旧 TCP 文档中心](https://yche.me/perf/kvc-tcp-20261020/docs/index.html)。转换和验收见 [web-documents.md](web-documents.md)。DataSystem 后续说明统一称 Coordinator；历史源码、配置和日志按原件保留。
+
 当前正式证据已独立重算：**132有效 / 18原生失败 / 30 N/A**，共180槽、36个服务周期；`evidence_verified=true`但`passed=false`。18失败均为DataSystem大批量EXIST三重复。交付状态以[验收文档](validation.md)为准。
 
 ## 1.1 固定边界

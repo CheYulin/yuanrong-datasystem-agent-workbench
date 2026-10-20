@@ -22,6 +22,7 @@
 ## DataSystem 工程与 Git 约束
 
 - 重要结论以当前源码或日志为准，区分事实、推断和未观察到的运行证据。
+- DataSystem 后续架构和组件说明统一使用 Coordinator；历史源码符号、配置字段及日志保留原名并说明映射，不改写实验事实。Mooncake 自身的 Master 名称按该产品原名保留。
 - 涉及 DataSystem 行为、源码或测试时，先读取产品仓 `AGENTS.md`、`.repo_context/README.md`、`index.md`、`maintenance.md`，再选择相关模块和工程工作流。
 - 性能、并发安全、内存安全、恢复正确性和可用性是产品工程要求；验证范围按改动风险选择。
 - 禁止向 `openeuler/yuanrong-datasystem` 的任何分支推送。每次 push 前验证 remote，只推送用户授权的 fork。
