@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Script every batch experiment phase, preserving failed commands and durations."""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import shlex
 import sys
@@ -12,11 +14,12 @@ HERE = Path(__file__).resolve().parent
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=["stage", "prepare", "gate", "smoke", "run", "restore", "collect", "report", "publish"])
+    p.add_argument("action", choices=["stage", "prepare", "gate", "diagnose", "compose", "smoke", "run", "restore", "collect", "report", "publish"])
     p.add_argument("--target", default="tiantiyun-80c128g")
     p.add_argument("--publication-host", default="xqyun-32c32g")
     p.add_argument("--root", default="/home/worktrees/kvc-batch-tcp-20261020-r2")
     p.add_argument("--base", default="/home/worktrees/kvc-fair-tcp-20261020")
+    p.add_argument("--gate", default="batch-gate-002")
     p.add_argument("--local-output", type=Path, default=Path.home() / "workspace/scratch/2026-10-20-kvc-batch-tcp")
     p.add_argument("--environment-root", default="/home/cache/kvc-fair-20261020/environment-batch-tcp")
     p.add_argument("--rfc", type=Path, default=HERE / "docs" if (HERE / "docs").is_dir() else HERE.parents[2] / "rfc/2026-10-20-kvc-batch-tcp-comparison")
@@ -38,19 +41,29 @@ def main():
     elif args.action == "prepare":
         ssh(["python3", root + "/batch_environment.py", "--out", root + "/environment-before-full.json"])
         ssh(["python3", root + "/tcp_stage.py", "--root", root, "--prepare-environment", args.environment_root])
+    elif args.action in {"diagnose", "compose"}:
+        script = "batch_diagnostic.py" if args.action == "diagnose" else "batch_compose_gate.py"
+        helper = "/home/cache/kvc-fair-20261020/batch-script-bundle/" + script
+        run(["scp", HERE / script, args.target + ":" + helper])
+        command = ["env", "PYTHONPATH=" + root, "python3", helper, "--root", root]
+        if args.action == "diagnose":
+            command += ["--out", root + "/untraced-diagnostic-001"]
+        else:
+            command += ["--source-gate", root + "/batch-gate-001", "--diagnostic", root + "/untraced-diagnostic-001", "--out", root + "/" + args.gate]
+        ssh(command)
     elif args.action in {"gate", "smoke", "run"}:
         out = {"gate": "batch-gate-001", "smoke": "batch-smoke-001", "run": "formal-batch-001"}[args.action]
         if args.action == "run":
             ssh(["python3", "-c", "import json;from pathlib import Path;p=Path(" + repr(root) + ");assert json.loads((p/'batch-smoke-001/summary.json').read_text())['valid']"])
-        ssh(["python3", root + "/batch_runner.py", args.action, "--root", root, "--out", root + "/" + out])
+        ssh(["python3", root + "/batch_runner.py", args.action, "--root", root, "--out", root + "/" + out, "--gate", args.gate])
     elif args.action == "restore":
         # The generic restoration guard needs two terminal summaries; its second
         # input is our correctness gate, explicitly not a resource-profile run.
         ssh(["python3", root + "/finish_environment.py", "--root", root,
-             "--suite", root + "/formal-batch-001", "--profile-suite", root + "/batch-gate-001",
+             "--suite", root + "/formal-batch-001", "--profile-suite", root + "/" + args.gate,
              "--environment-root", args.environment_root, "--out", root + "/formal-batch-001/environment-restored.json", "--restore"])
     elif args.action == "collect":
-        for name in ["batch-gate-001", "batch-smoke-001", "formal-batch-001", "builds", "run"]:
+        for name in ["batch-gate-001", args.gate, "untraced-diagnostic-001", "batch-smoke-001", "formal-batch-001", "builds", "run"]:
             destination = args.local_output / name
             destination.mkdir(parents=True, exist_ok=True)
             run(["rsync", "-az", args.target + ":" + root + "/" + name + "/", str(destination) + "/"])
@@ -59,9 +72,25 @@ def main():
         run(["rsync", "-az", "--exclude", "*.tar.gz", args.target + ":" + args.environment_root + "/", str(evidence) + "/"])
         run(["scp", args.target + ":" + root + "/cgroup-settings.json", args.local_output / "cgroup-settings.json"])
         run(["scp", args.target + ":" + root + "/environment-before-full.json", args.local_output / "environment-before-full.json"])
+        stage_path = args.local_output / "batch-stage.json"
+        run(["scp", args.target + ":" + root + "/batch-stage.json", stage_path])
+        stage = json.loads(stage_path.read_text())
+        names = sorted(stage["inputs"])
+        if any(Path(name).is_absolute() or ".." in Path(name).parts for name in names):
+            raise ValueError("Frozen input path escaped runtime root")
+        inputs = args.local_output / "runtime-inputs"
+        inputs.mkdir(exist_ok=True)
+        listing = args.local_output / "runtime-input-paths.txt"
+        listing.write_text("\n".join(names) + "\n")
+        run(["rsync", "-az", "--files-from", listing, args.target + ":" + root + "/", str(inputs) + "/"])
+        for name, record in stage["inputs"].items():
+            if hashlib.sha256((inputs / name).read_bytes()).hexdigest() != record["sha256"]:
+                raise RuntimeError("Collected execution input changed: " + name)
     elif args.action == "report":
         run([sys.executable, HERE / "batch_report.py", "--suite", args.local_output / "formal-batch-001",
-             "--output", args.local_output / "report", "--rfc", args.rfc])
+             "--out", args.local_output / "report", "--rfc", args.rfc, "--builds", args.local_output / "builds",
+             "--gate", args.local_output / args.gate, "--environment", args.local_output / "environment",
+             "--operation-log", args.local_output / "operation-timings.jsonl", "--runtime-inputs", args.local_output / "runtime-inputs", "--raw-evidence"])
     elif args.action == "publish":
         run(["rsync", "-az", str(args.local_output / "report") + "/",
              args.publication_host + ":/var/www/html/" + args.report_path + "/"])
