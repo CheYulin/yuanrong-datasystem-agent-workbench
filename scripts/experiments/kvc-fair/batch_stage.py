@@ -12,6 +12,17 @@ import time
 from profile_put import digest, drain
 
 
+def copy_datasystem_runtime(bundle, temporary):
+    source = bundle / "datasystem/runtime.py"
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("An explicit DataSystem runtime with per-worker RocksDB isolation is required")
+    target = temporary / "scripts/datasystem/runtime.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    return {"path": "scripts/datasystem/runtime.py", "sha256": digest(target),
+            "scope": "Deployment script replacement only; native build bytes unchanged. Each worker must use its own fresh RocksDB path."}
+
+
 def stage(args):
     base, root, bundle = args.base.resolve(), args.root.resolve(strict=False), args.bundle.resolve()
     if root.exists() or args.root.is_symlink() or base in root.parents or root in base.parents:
@@ -44,6 +55,7 @@ def stage(args):
                         shutil.copy2(path, target / path.name)
                         if path.suffix == ".sh":
                             (target / path.name).chmod(path.stat().st_mode & 0o777 | 0o111)
+            deployment_runtime = copy_datasystem_runtime(bundle, temporary)
             for name in ["datasystem", "mooncake/source", "mooncake/deps", "mooncake/venv", "mooncake/wheels", "lmcache/source", "lmcache/venv311"]:
                 (temporary / name).symlink_to((base / name).resolve(strict=True), target_is_directory=True)
             os.link(base / "suite.lock", temporary / "suite.lock")
@@ -69,6 +81,9 @@ def stage(args):
                       "base": str(base), "builds_reused": True, "build_artifacts": artifacts,
                       "shared_suite_lock_inode": (base / "suite.lock").stat().st_ino,
                       "mooncake_queue_capacity": getattr(args, "mooncake_queue", 0),
+                      "datasystem_runtime_override": deployment_runtime,
+                      "baseline_performance_reused": False,
+                      "baseline_isolation_limitation": "Earlier DataSystem deployments used a shared default RocksDB directory; reuse is limited to verified native build artifacts, not performance baselines.",
                       "inputs": inputs, "old_experiment_inputs_modified": False}
             (temporary / "batch-stage.json").write_text(json.dumps(record, indent=2) + "\n")
             temporary.rename(root)
@@ -81,7 +96,7 @@ def stage(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base", type=Path, default=Path("/home/worktrees/kvc-fair-tcp-20261020"))
-    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r3"))
+    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r4"))
     p.add_argument("--mooncake-queue", type=int, default=8192)
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))

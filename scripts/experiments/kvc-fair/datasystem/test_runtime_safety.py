@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -39,9 +40,12 @@ def verify_transport_flags():
 
     with tempfile.TemporaryDirectory(dir=args.out) as temporary:
         root = Path(temporary)
+        captures = 0
 
         def capture(options):
-            (root / "run/processes.json").unlink(missing_ok=True)
+            nonlocal captures
+            captures += 1
+            run_dir = root / f"run-{captures}"
             processes = []
 
             def spawn(command, **keyword):
@@ -49,7 +53,7 @@ def verify_transport_flags():
                 return SimpleNamespace(pid=900000 + len(processes), poll=lambda: None)
 
             parsed = runtime.parse_args(["start", "--task-root", str(root),
-                                         "--run-dir", str(root / "run"), *options])
+                                         "--run-dir", str(run_dir), *options])
             with mock.patch.object(Path, "open", open_fixture), \
                     mock.patch.object(runtime.socket, "socket"), \
                     mock.patch.object(runtime.subprocess, "Popen", side_effect=spawn), \
@@ -58,13 +62,18 @@ def verify_transport_flags():
                     mock.patch.object(runtime, "wait_port"), mock.patch.object(runtime, "wait_ready"), \
                     contextlib.redirect_stdout(io.StringIO()):
                 runtime.launch(parsed)
-            manifest = json.loads((root / "run/processes.json").read_text())
-            flags = [(root / f"run/w{i}/worker.flags").read_bytes() for i in range(2)]
+            manifest = json.loads((run_dir / "processes.json").read_text())
+            flags = [(run_dir / f"w{i}/worker.flags").read_bytes() for i in range(2)]
             assert [p["command"] for p in manifest["processes"]] == processes
             assert len(processes) == 3
             for index, content in enumerate(flags):
                 assert content == ("\n".join(processes[index + 1][1:]) + "\n").encode()
-            return processes, flags
+                assert f"--rocksdb_store_dir={run_dir}/w{index}/rocksdb\n".encode() in content
+            assert len(set(manifest["rocksdb_store_dirs"].values())) == 2
+            def normalized(value):
+                value = value.replace(str(run_dir), "<fresh-run>")
+                return re.sub(re.escape(str(root / "u")) + r"/ds[0-9a-f]{10}", "<instance-uds>", value)
+            return [[normalized(value) for value in command] for command in processes], [normalized(content.decode()).encode() for content in flags]
 
         default_commands, default_flags = capture([])
         native_commands, native_flags = capture(["--transport", "native"])
@@ -85,6 +94,7 @@ def verify_transport_flags():
             assert [option.replace("--minloglevel=0", "--minloglevel=2")
                     for option in smoke_commands[index]] == tcp_commands[index]
     return {"default_is_native_error_logging": True, "native_unchanged": True,
+            "fresh_per_worker_rocksdb_paths": True,
             "tcp_disables_both_workers_shm_only": True, "smoke_logging_is_opt_in": True,
             "invalid_options_rejected": True, "product_processes_started": 0}
 

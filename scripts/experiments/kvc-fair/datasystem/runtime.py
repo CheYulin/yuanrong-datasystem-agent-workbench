@@ -44,16 +44,35 @@ def wait_ready(path, process, timeout=120):
     raise TimeoutError(f"Worker did not become ready: {path}")
 
 
+def storage_paths(root, requested_run_dir):
+    run_dir = Path(requested_run_dir).absolute() if requested_run_dir else root / "runtime" / "ds"
+    if ".." in run_dir.parts or root not in run_dir.parents:
+        raise RuntimeError("Run directory must be strictly inside the task root")
+    paths = [run_dir / f"w{index}" / "rocksdb" for index in range(2)]
+    for path in [root, run_dir, *paths]:
+        if any(part.is_symlink() for part in [path, *path.parents]):
+            raise RuntimeError(f"Symlink storage paths are forbidden: {path}")
+    if any(path.parent.exists() for path in paths):
+        raise RuntimeError("Worker instance directory already exists; use a fresh run directory")
+    if len(set(path.resolve() for path in paths)) != len(paths):
+        raise RuntimeError("Workers must use distinct RocksDB directories")
+    return run_dir, paths
+
+
 def launch(args):
-    root = Path(args.task_root).resolve()
+    root = Path(args.task_root).absolute()
     source = root / "datasystem"
-    run_dir = Path(args.run_dir).resolve() if args.run_dir else root / "runtime" / "ds"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir, rocksdb_paths = storage_paths(root, args.run_dir)
     manifest_file = run_dir / "processes.json"
+    if manifest_file.is_symlink():
+        raise RuntimeError("Symlink process evidence is forbidden")
     if manifest_file.exists():
         manifest = json.loads(manifest_file.read_text())
         if any(start_ticks(p["pid"]) == p["start_ticks"] for p in manifest["processes"]):
             raise RuntimeError("Experiment cluster is already running; stop it before restarting")
+        raise RuntimeError("Run directory already has process evidence; use a fresh run directory")
+    if run_dir.exists() and next(run_dir.iterdir(), None) is not None:
+        raise RuntimeError("Run directory is not empty; use a fresh run directory")
     for port in [args.etcd_port, args.etcd_port + 1, args.worker_port, args.worker_port + 1]:
         with socket.socket() as check:
             check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -63,7 +82,11 @@ def launch(args):
     with etcd_binary.open("rb") as data:
         for chunk in iter(lambda: data.read(4 << 20), b""):
             etcd_hash.update(chunk)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for path in rocksdb_paths:
+        path.mkdir(parents=True, exist_ok=False)
     manifest = {"source": str(source), "run_dir": str(run_dir), "cgroup": args.cgroup, "processes": [],
+                "rocksdb_store_dirs": {f"worker{index}": str(path) for index, path in enumerate(rocksdb_paths)},
                 "etcd_version": subprocess.check_output([str(etcd_binary), "--version"], text=True).strip(),
                 "etcd_sha256": etcd_hash.hexdigest()}
 
@@ -110,6 +133,7 @@ def launch(args):
             "cluster_name": "kvc-fair-ds-20261020",
             "host_id_env_name": "KVC_FAIR_HOST_ID",
             "shared_memory_size_mb": str(args.memory_mb_per_worker),
+            "rocksdb_store_dir": str(rocksdb_paths[index]),
             "l2_cache_type": "none",
             "spill_directory": "",
             "spill_size_limit": "0",

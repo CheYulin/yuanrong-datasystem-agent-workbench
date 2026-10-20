@@ -230,6 +230,44 @@ class AdmissionTests(unittest.TestCase):
             summary = json.loads((out / "summary.json").read_text())
             self.assertIn("complete successful native batch gate", summary["failed"][0])
 
+    def test_deployment_overlay_preserves_baseline_and_freezes_executed_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            base, bundle = self.base_fixture(parent)
+            plan = json.loads((base / "formal-tcp-001/plan.json").read_text())
+            completed = [f"r{row['repeat']}-{row['product']}-s{row['size']}-c{row['concurrency']}" for row in plan]
+            (base / "formal-tcp-001/summary.json").write_text(json.dumps(
+                {"ended": "fixture-end", "valid": True, "failed": [], "completed": completed}))
+            original = b"ORIGINAL_SHARED_DEFAULT = True\n"
+            replacement = b"PER_WORKER_DATABASE_PATH = True\n"
+            (base / "scripts/datasystem/runtime.py").write_bytes(original)
+            (bundle / "datasystem").mkdir()
+            (bundle / "datasystem/runtime.py").write_bytes(replacement)
+            args = SimpleNamespace(base=base, root=parent / "new-root", bundle=bundle,
+                                   cgroup=parent / "fake-cgroup", mooncake_queue=8192)
+            with patch.object(batch_stage, "drain"):
+                record = batch_stage.stage(args)
+            relative = "scripts/datasystem/runtime.py"
+            self.assertEqual((base / relative).read_bytes(), original)
+            self.assertEqual((args.root / relative).read_bytes(), replacement)
+            self.assertEqual(record["datasystem_runtime_override"]["sha256"], record["inputs"][relative]["sha256"])
+            self.assertFalse((args.root / relative).is_symlink())
+
+    def test_missing_or_symlinked_runtime_overlay_cannot_silently_use_shared_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            bundle, stage = parent / "bundle", parent / "stage"
+            bundle.mkdir(); stage.mkdir()
+            with self.assertRaises(ValueError):
+                batch_stage.copy_datasystem_runtime(bundle, stage)
+            (bundle / "datasystem").mkdir()
+            source = parent / "untrusted.py"
+            source.write_text("SOURCE = True\n")
+            (bundle / "datasystem/runtime.py").symlink_to(source)
+            with self.assertRaises(ValueError):
+                batch_stage.copy_datasystem_runtime(bundle, stage)
+            self.assertFalse((stage / "scripts/datasystem/runtime.py").exists())
+
     def test_symlink_parent_cannot_stage_inside_immutable_baseline(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
