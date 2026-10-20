@@ -10,14 +10,14 @@ from kvcbench.platform.files import atomic_json
 from kvcbench.platform.locks import open_lock
 
 
-def revalidate(root, output):
+def revalidate(root, output, *, adopt_coordinator=False):
     root = catalog.build_root(root)
     with open_lock(root) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return revalidate_locked(root, output)
+        return revalidate_locked(root, output, adopt_coordinator=adopt_coordinator)
 
 
-def revalidate_locked(root, output):
+def revalidate_locked(root, output, *, adopt_coordinator=False):
     output = Path(output).absolute()
     relative = output.relative_to(root)
     if not relative.parts or relative.parts[0] != "revalidation":
@@ -56,6 +56,9 @@ def revalidate_locked(root, output):
     validator_paths = [Path(__file__), Path(catalog.__file__), Path(metadata.__file__),
                        package / "build/toolchain.py", package / "core/source_state.py",
                        package.parent / "configs/versions/kvc_20261020.json"]
+    if adopt_coordinator:
+        from kvcbench.build import adoption
+        validator_paths += [Path(adoption.__file__), package / 'core/artifact_extension.py', package / 'platform/archives.py']
     validator = {str(path): catalog.identity(path) for path in validator_paths}
     paths = {}
     try:
@@ -66,7 +69,13 @@ def revalidate_locked(root, output):
                 compiler=None, started_wall_ns=old["build_started_wall_ns"],
                 finished_wall_ns=old["build_finished_wall_ns"], build_exit=0, output=destination))
             current = metadata.read_json(destination)
-            if code != 0 or any(current[key] != old[key] for key in ["artifact_hashes", "artifact_sizes"]):
+            if code != 0:
+                raise ValueError('Revalidation identity failed: ' + name)
+            changed = any(current[key] != old[key] for key in ['artifact_hashes', 'artifact_sizes'])
+            if changed and name == 'datasystem' and adopt_coordinator:
+                current = adoption.record(root, old, current)
+                metadata.write_json(destination, current)
+            elif changed:
                 raise ValueError("Revalidation failed or original build outputs changed: " + name)
             paths[name] = str(destination.relative_to(root))
         records, artifacts, provenance = catalog.validate_builds(root, record_paths=paths)
@@ -91,8 +100,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument('--adopt-coordinator', action='store_true')
     args = parser.parse_args()
-    revalidate(args.root, args.out)
+    revalidate(args.root, args.out, adopt_coordinator=args.adopt_coordinator)
 
 
 if __name__ == "__main__":

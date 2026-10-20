@@ -73,22 +73,22 @@ def launch(args):
         raise RuntimeError("Run directory already has process evidence; use a fresh run directory")
     if run_dir.exists() and next(run_dir.iterdir(), None) is not None:
         raise RuntimeError("Run directory is not empty; use a fresh run directory")
-    for port in [args.etcd_port, args.etcd_port + 1, args.worker_port, args.worker_port + 1]:
+    for port in [args.coordinator_port, args.worker_port, args.worker_port + 1]:
         with socket.socket() as check:
             check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             check.bind(("127.0.0.1", port))
-    etcd_binary = Path("/usr/local/bin/etcd")
-    etcd_hash = hashlib.sha256()
-    with etcd_binary.open("rb") as data:
+    coordinator_binary = source / "output/datasystem/service/datasystem_coordinator"
+    coordinator_hash = hashlib.sha256()
+    with coordinator_binary.open("rb") as data:
         for chunk in iter(lambda: data.read(4 << 20), b""):
-            etcd_hash.update(chunk)
+            coordinator_hash.update(chunk)
     run_dir.mkdir(parents=True, exist_ok=True)
     for path in rocksdb_paths:
         path.mkdir(parents=True, exist_ok=False)
     manifest = {"source": str(source), "run_dir": str(run_dir), "cgroup": args.cgroup, "processes": [],
                 "rocksdb_store_dirs": {f"worker{index}": str(path) for index, path in enumerate(rocksdb_paths)},
-                "etcd_version": subprocess.check_output([str(etcd_binary), "--version"], text=True).strip(),
-                "etcd_sha256": etcd_hash.hexdigest()}
+                "metadata_backend": "coordinator", "coordinator_address": f"127.0.0.1:{args.coordinator_port}",
+                "coordinator_binary_sha256": coordinator_hash.hexdigest()}
     if args.profile == "pure-kv":
         manifest["runtime_profile"] = "pure-kv"
 
@@ -106,18 +106,19 @@ def launch(args):
         manifest_file.write_text(json.dumps(manifest, indent=2) + "\n")
         return proc
 
-    etcd_command = [str(etcd_binary), "--name", "kvc-fair-ds", "--data-dir", str(run_dir / "etcd-data"),
-                    "--listen-client-urls", f"http://127.0.0.1:{args.etcd_port}",
-                    "--advertise-client-urls", f"http://127.0.0.1:{args.etcd_port}",
-                    "--listen-peer-urls", f"http://127.0.0.1:{args.etcd_port + 1}",
-                    "--initial-advertise-peer-urls", f"http://127.0.0.1:{args.etcd_port + 1}",
-                    "--initial-cluster", f"kvc-fair-ds=http://127.0.0.1:{args.etcd_port + 1}",
-                    "--initial-cluster-token", "kvc-fair-ds-20261020"]
-    etcd = spawn("etcd", etcd_command)
-    wait_port(args.etcd_port, etcd)
     env = os.environ.copy()
     env["KVC_FAIR_HOST_ID"] = "kvc-fair-host-20261020"
     env["LD_LIBRARY_PATH"] = str(source / "output" / "datasystem" / "service" / "lib") + ":" + env.get("LD_LIBRARY_PATH", "")
+    coordinator_flags = {
+        "coordinator_address": f"127.0.0.1:{args.coordinator_port}",
+        "coordinator_raft_initial_peers": "", "coordinator_raft_data_dir": str(run_dir / "coordinator-state"),
+        "log_dir": str(run_dir / "coordinator-logs"), "minloglevel": str(args.min_log_level),
+        "log_monitor": "false", "json_log_monitor": "false", "request_sample_rate": "0",
+        "access_sample_rate": "0", "diagnostic_sample_rate": "0", "rpc_thread_num": "8",
+        "brpc_server_num_threads": "8", "brpc_max_concurrency": "128", "watch_event_dispatch_thread": "4"}
+    (run_dir / "coordinator.flags").write_text("".join(f"--{key}={value}\n" for key, value in coordinator_flags.items()))
+    coordinator = spawn("coordinator", [str(coordinator_binary), *[f"--{key}={value}" for key, value in coordinator_flags.items()]], env)
+    wait_port(args.coordinator_port, coordinator)
     workers = []
     for index in range(2):
         instance = run_dir / f"w{index}"
@@ -130,8 +131,8 @@ def launch(args):
         (instance / "healthy").unlink(missing_ok=True)
         config = {
             "worker_address": f"127.0.0.1:{args.worker_port + index}",
-            "etcd_address": f"127.0.0.1:{args.etcd_port}",
-            "coordinator_address": "",
+            "etcd_address": "",
+            "coordinator_address": f"127.0.0.1:{args.coordinator_port}",
             "cluster_name": "kvc-fair-ds-20261020",
             "host_id_env_name": "KVC_FAIR_HOST_ID",
             "shared_memory_size_mb": str(args.memory_mb_per_worker),
@@ -224,7 +225,7 @@ def parse_args(argv=None):
     parser.add_argument("--run-dir")
     parser.add_argument("--cgroup")
     parser.add_argument("--worker-port", type=int, default=31531)
-    parser.add_argument("--etcd-port", type=int, default=32379)
+    parser.add_argument("--coordinator-port", type=int, default=31511)
     parser.add_argument("--memory-mb-per-worker", type=int, default=4096)
     parser.add_argument("--transport", choices=["native", "tcp"], default="native")
     parser.add_argument("--profile", choices=["baseline", "pure-kv"], default="baseline")

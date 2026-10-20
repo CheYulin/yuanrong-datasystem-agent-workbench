@@ -12,12 +12,14 @@
       "artifacts": [
         "datasystem/output/*.whl",
         "datasystem/output/*.tar.gz",
-        "datasystem/output/datasystem/service/datasystem_worker"
+        "datasystem/output/datasystem/service/datasystem_worker",
+        "datasystem/output/datasystem/service/datasystem_coordinator"
       ],
       "native_required": [
-        "datasystem_worker"
+        "datasystem_worker",
+        "datasystem_coordinator"
       ],
-      "scope": "DataSystem worker and SDK built from pinned C++ source; ETCD and some OS/Python/third-party dependencies may be prebuilt binaries. No source build of ETCD is claimed.",
+      "scope": "DataSystem worker, Coordinator and SDK built from pinned C++ source; OS/Python/third-party dependencies may be prebuilt binaries. Coordinator is included in server accounting.",
       "recipe_source": "kvcbench/build/recipes/datasystem/build.sh"
     },
     "mooncake": {

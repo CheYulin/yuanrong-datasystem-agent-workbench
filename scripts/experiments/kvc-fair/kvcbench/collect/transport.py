@@ -47,8 +47,10 @@ def terminal_records(payload, inventory):
         if identity(current) != {key: row[key] for key in ('sha256', 'bytes', 'mode')}:
             raise ValueError('Closed observation file differs from its final manifest')
     stage = read_json(regular(payload, 'batch-stage.json'))
-    if len(stage.get('build_artifacts', {})) != 9:
-        raise ValueError('The three pinned source builds must identify their nine native outputs')
+    expected_outputs = sum(len(read_json(regular(payload, 'builds/' + name + '.json'))['artifact_hashes'])
+                           for name in ('datasystem', 'mooncake', 'lmcache'))
+    if len(stage.get('build_artifacts', {})) != expected_outputs or not expected_outputs:
+        raise ValueError('The three pinned source build inventories must identify every native output')
     native = Path(inventory['source_roots']['native'])
     for name, expected in stage['build_artifacts'].items():
         relative = Path(name).relative_to(native)

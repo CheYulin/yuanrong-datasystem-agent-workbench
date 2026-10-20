@@ -140,6 +140,20 @@ def verify_source_build_provenance(stage, runtime_records, builds, *, products):
         if content != read(copies[0]):
             raise ValueError("Source-build metadata and its original snapshot differ")
         metadata = json.loads(content)
+        if metadata.get('artifact_adoption'):
+            from kvcbench.core.artifact_extension import validate as validate_extension
+            adoption = metadata['artifact_adoption']
+            relative = adoption['original_metadata']
+            if relative != 'build-metadata/datasystem.json' or product != 'datasystem':
+                raise ValueError('Only an explicitly bound original DataSystem inventory may be extended')
+            copied = 'builds-provenance/inputs/' + relative
+            original = json.loads(read(copied))
+            validate_extension(original, metadata)
+            if (validation['inputs'].get(relative) != adoption['original_identity']
+                    or hashlib.sha256(read(copied)).hexdigest() != adoption['original_identity']['sha256']):
+                raise ValueError('Coordinator inventory extension changed its original metadata binding')
+            native_inputs.add(relative)
+            expected_inputs.add(copied)
         for relative, expected in metadata.get("compiler_inputs", {}).items():
             if Path(relative).parts[:2] != ("compiler-inputs", product):
                 raise ValueError("Compiler provenance escaped its product namespace")

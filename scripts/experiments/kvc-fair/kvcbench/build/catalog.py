@@ -52,6 +52,10 @@ def validate_builds(native_root, products=None, record_paths=None):
             raise ValueError("Successful pinned build identity is required: " + name)
         metadata = regular(root, paths[name])
         provenance["inputs"][str(metadata.relative_to(root))] = identity(metadata)
+        if row.get('artifact_adoption'):
+            from kvcbench.build.adoption import verify
+            adoption = verify(root, row)
+            provenance['inputs'][adoption['original_metadata']] = adoption['original_identity']
         for relative, expected in row.get("compiler_inputs", {}).items():
             if Path(relative).parts[:2] != ("compiler-inputs", name):
                 raise ValueError("Compiler input escaped its product namespace")

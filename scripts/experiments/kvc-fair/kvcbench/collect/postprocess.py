@@ -4,7 +4,7 @@ import json
 
 from kvcbench.collect import index, documents, sources
 from kvcbench.collect.analysis import batch
-from kvcbench.collect.audits import coverage, resources, tcp, deployment, runtime, gate_inputs, postprocessing
+from kvcbench.collect.audits import coverage, resources, tcp, deployment, runtime, gate_inputs, postprocessing, coordinator
 from kvcbench.collect.transport import verify_received
 from kvcbench.collect.capture import REQUIRED_STEPS
 from kvcbench.core.configuration import configuration_profile
@@ -71,11 +71,14 @@ def configuration(payload, analysis):
     before = read_json(payload / 'controller/payload/environment-preparation/after.json')
     ds = read_json(payload / 'batch-gate-001/r0-datasystem/tcp-configuration.json')
     moon = read_json(payload / 'run/gate-r0-mooncake/master-argv.json')
+    monitor = read_json(payload / 'formal-batch-001/resources/monitor-manifest.json')
     lm = sorted((payload / 'batch-gate-001/r0-lmcache/server-logs').glob('server-*-launch.json'))
     if len(lm) != 2:
         raise ValueError('Both LMCache native server launch records are required for the current configuration appendix')
     return [{'name': '运行与测量参数', 'value': {key: analysis['parameters'][key] for key in ('repeats', 'duration', 'warmup', 'put_keys', 'continue_readonly_errors', 'workload_protocol')}},
+            {'name': 'DataSystem 元数据后端实际观察', 'value': {'backend': ds.get('metadata_backend') or 'legacy-etcd', 'coordinator': ds.get('coordinator')}},
             {'name': '实际 cgroup 配额', 'value': before['settings']},
+            {'name': '实际采样周期与系统观测工具', 'value': {'interval_s': monitor['interval_s'], 'commands': monitor['commands']}},
             {'name': 'DataSystem 两 Worker 原始配置', 'value': [row['live_argv'] for row in ds['workers']]},
             {'name': 'Mooncake TCP 配置', 'value': configuration_profile(products)},
             {'name': 'Mooncake Master 启动参数记录', 'value': moon},
@@ -148,6 +151,8 @@ def derive(received, out, source_bundle, *, device='253:2'):
         atomic_json(audits / 'tcp.json', tcp_result, exclusive=True)
         deployment_result = deployment.Audit(payload).run()
         atomic_json(audits / 'deployment.json', deployment_result, exclusive=True)
+        coordinator_result = coordinator.verify(payload, builds, deployment_result)
+        atomic_json(audits / 'coordinator.json', coordinator_result, exclusive=True)
         stage, runtime_records = runtime.verify_runtime_inputs(suite, payload / 'runtime-inputs')
         pins = read_json(payload / 'runtime-inputs/configs/versions/kvc_20261020.json')['products']
         source_builds = runtime.verify_source_build_provenance(stage, runtime_records, builds, products=pins)
@@ -163,6 +168,7 @@ def derive(received, out, source_bundle, *, device='253:2'):
                   Check('gate', True, gate_proof['passed'], gate_proof['passed']),
                   Check('tcp_payload', True, tcp_proof, tcp_result['valid'] is True),
                   Check('deployment_isolation', True, deployment_proof['verified'], deployment_proof['verified']),
+                  Check('datasystem_metadata_backend', True, coordinator_result, coordinator_result['verified']),
                   Check('resource_reduction', True, resource_proof['verified'], resource_proof['verified']),
                   Check('resource_coverage', True, coverage_result, coverage_result['verified']),
                   Check('short_window_sampling', 0, len(coverage_result['findings']), not coverage_result['findings'], required=False)]
@@ -182,7 +188,7 @@ def derive(received, out, source_bundle, *, device='253:2'):
                  'evidence_verified': not issues, 'native_passed': analysis['passed'], 'issues': issues,
                  'findings': coverage_result['findings'], 'checks': [check.record() for check in checks],
                  'bindings': {name: inputs[name]['sha256'] for name in sorted(REPORT_DATA_INPUTS)},
-                 'configuration': config, 'source_builds': source_builds, 'datasystem_isolation': isolation,
+                'configuration': config, 'source_builds': source_builds, 'datasystem_isolation': isolation, 'coordinator': coordinator_result,
                  'postprocessing_package': package,
                  'document_bindings': {path.name: digest(path) for path in docs}, 'source_bundle_sha256': digest(source_bundle),
                  'timing_scope': 'audit computation and bound-input construction before final receipt sealing', **finished(begin)}
@@ -192,7 +198,7 @@ def derive(received, out, source_bundle, *, device='253:2'):
                 + [reference(out, path.relative_to(out)) for path in docs]
                 + [reference(out, path.relative_to(out)) for path in audits.rglob('*') if path.is_file()],
             validator_id='collect.audit.v1', validator_sources=[Path(__file__), Path(batch.__file__), Path(coverage.__file__), Path(tcp.__file__),
-                Path(resources.__file__), Path(deployment.__file__), Path(postprocessing.__file__), Path(runtime.__file__), Path(gate_inputs.__file__)])
+                Path(resources.__file__), Path(deployment.__file__), Path(postprocessing.__file__), Path(runtime.__file__), Path(gate_inputs.__file__), Path(coordinator.__file__)])
         if verify_commit(commit)['acceptance'] not in {'passed', 'passed_with_findings'}:
             raise ValueError('Independent audit did not accept normal report generation')
         descriptor = {'schema_version': 1, 'run_id': run_id, 'profile': profile, 'inputs': dict(inputs, audit=file_reference(out / 'audit.json')),

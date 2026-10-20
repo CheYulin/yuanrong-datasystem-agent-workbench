@@ -48,7 +48,8 @@ class BuildStageTests(unittest.TestCase):
         self.bundle.mkdir()
         self.specs = copy.deepcopy(build_metadata.PRODUCTS)
         outputs = {"datasystem": ["datasystem/output/sdk.whl", "datasystem/output/sdk.tar.gz",
-                                   "datasystem/output/datasystem/service/datasystem_worker"],
+                                   "datasystem/output/datasystem/service/datasystem_worker",
+                                   "datasystem/output/datasystem/service/datasystem_coordinator"],
                    "mooncake": ["mooncake/wheels/mooncake_transfer_engine-fixture.whl", "mooncake/deps/lib/libxxhash.so.0"],
                    "lmcache": [f"lmcache/source/lmcache/{name}.fixture.so" for name in ["lmcache_native", "lmcache_fs", "lmcache_redis"]]}
         for name, spec in self.specs.items():
@@ -67,7 +68,7 @@ class BuildStageTests(unittest.TestCase):
             write(self.native / spec["script"], "#!/bin/sh\n# fixture build recipe, never executed\n", 0o755)
             write(self.native / spec["python"], "#!/bin/sh\necho Python 3.11.15\n", 0o755)
             for relative in outputs[name]:
-                write(self.native / relative, "fixture-native-bytes: " + relative, 0o755 if relative.endswith("datasystem_worker") else 0o644)
+                write(self.native / relative, "fixture-native-bytes: " + relative, 0o755 if relative.endswith(("datasystem_worker", "datasystem_coordinator")) else 0o644)
             row = {"schema_version": 1, "product": name, "tag": spec["tag"], "sha": spec["sha"],
                    "pinned_sha": spec["sha"], "tag_sha": spec["sha"], "official_source": spec["official_source"],
                    "source_directory": str(source), "source_status_porcelain": "", "source_tracked_status_porcelain": "",
@@ -181,7 +182,7 @@ class BuildStageTests(unittest.TestCase):
         self.assertEqual(record["source_build_mode"], "builds-only-native-root")
         self.assertFalse(record["legacy_suites_required"])
         self.assertFalse(record["baseline_performance_reused"])
-        self.assertEqual(len(record["build_artifacts"]), 8)
+        self.assertEqual(len(record["build_artifacts"]), 9)
         self.assertEqual(set(snapshot(self.native)) - set(before), {"suite.lock"})
         for name, expected in before.items():
             self.assertEqual(snapshot(self.native)[name], expected)
@@ -241,7 +242,7 @@ class BuildStageTests(unittest.TestCase):
         row["artifact_sizes"][relative] = master.stat().st_size
         self.metadata("mooncake").write_text(json.dumps(row))
         stage = self.stage()
-        self.assertEqual(len(stage["build_artifacts"]), 9)
+        self.assertEqual(len(stage["build_artifacts"]), 10)
         self.assertIn(str(master), stage["build_artifacts"])
         import batch_report
         suite = self.parent / "consumer-suite"
@@ -250,7 +251,7 @@ class BuildStageTests(unittest.TestCase):
         builds = [json.loads(path.read_text()) for path in sorted((self.target / "builds").glob("*.json"))]
         accepted = batch_report.verify_source_build_provenance(checked_stage, runtime, builds)
         self.assertTrue(accepted["verified"])
-        self.assertEqual(accepted["native_artifacts"], 9)
+        self.assertEqual(accepted["native_artifacts"], 10)
         self.assertTrue(all(value is None for value in accepted["legacy_smoke_exit"].values()))
 
     def test_zero_or_noninteger_sizes_cannot_pass_coherently_resealed_metadata(self):
@@ -356,7 +357,7 @@ class BuildStageTests(unittest.TestCase):
         actual = self.xxhash_aliases()
         record = self.stage()
         proof = json.loads((self.target / record["builds_provenance"]["path"]).read_text())
-        self.assertEqual(len(record["build_artifacts"]), 8)
+        self.assertEqual(len(record["build_artifacts"]), 9)
         self.assertEqual(len(proof["artifact_aliases"]), 2)
         for path, alias in proof["artifact_aliases"].items():
             self.assertEqual(alias["target"], str(actual))

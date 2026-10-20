@@ -17,7 +17,7 @@ REQUIRED_TOOLS = ('iostat', 'mpstat', 'pidstat', 'dstat')
 
 
 class Session:
-    def __init__(self, out, cgroup, *, interval=.2, cpus=tuple(range(0, 32, 2)), required_tools=REQUIRED_TOOLS):
+    def __init__(self, out, cgroup, *, interval=.05, cpus=tuple(range(0, 32, 2)), required_tools=REQUIRED_TOOLS):
         self.out, self.cgroup = Path(out), Path(cgroup)
         self.interval, self.cpus, self.required_tools = interval, tuple(cpus), tuple(required_tools)
         self.children, self.stream = {}, None

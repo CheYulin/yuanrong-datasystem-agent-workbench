@@ -143,6 +143,35 @@ def checkouts(runtime):
     return records
 
 
+def receipt_closure(selection, roots):
+    selected = {row['path']: row for row in selection}
+    pending = list((roots['control'] / 'workflow').rglob('*.json')) + list((roots['native'] / 'workflow').rglob('*.json'))
+    checked = set()
+    while pending:
+        path = pending.pop()
+        if path in checked or any(part.startswith('.') for part in path.parts):
+            continue
+        checked.add(path)
+        for record in index.file_references(read_json(path)):
+            original = Path(record['root']) / record['path']
+            choices = [(name, root) for name, root in roots.items() if root in original.parents]
+            if not choices:
+                raise ValueError('Closed receipt references a source outside the explicit capture origins: ' + str(original))
+            name, root = max(choices, key=lambda item: len(item[1].parts))
+            relative = original.relative_to(root).as_posix()
+            source = regular(root, relative)
+            if identity(source) != {key: record[key] for key in ('sha256', 'bytes', 'mode')}:
+                raise ValueError('Closed receipt dependency changed before capture: ' + str(original))
+            destination = (Path(ORIGIN_PREFIXES[name]) / relative).as_posix()
+            row = {'source_root': name, 'source_path': relative, 'path': destination,
+                   'role': 'build' if name in {'native', 'revalidator'} else 'runtime'}
+            if destination not in selected:
+                selected[destination] = row
+                if source.suffix == '.json':
+                    pending.append(source)
+    return sorted(selected.values(), key=lambda row: row['path'])
+
+
 def capture(control, out, *, invocation=None):
     control, out = real_directory(control), Path(out).absolute()
     spec = read_json(regular(control, 'spec.json'))
@@ -183,13 +212,14 @@ def capture(control, out, *, invocation=None):
             directories = []
             selection, roots, skipped = members(runtime, control, native, bundle, stage, invocation,
                                                 Path(spec['build_catalog']), Path(__file__).resolve().parents[2], directories)
+            selection = receipt_closure(selection, roots)
             result = index.freeze_sources(selection, out, run_id=spec['run_id'], profile=spec['profile'],
                                           roots=roots, directories=directories)
             drain(Path(spec['cgroup']))
             root_mapping = {str(source): str(out / 'payload' / ORIGIN_PREFIXES[name]) for name, source in roots.items()}
             atomic_json(out / 'collection-admission.json', {'run_id': spec['run_id'], 'profile': spec['profile'],
                 'drained': drained, 'source_checkouts': sources, 'root_mapping': root_mapping, 'skipped_nodes': skipped,
-                'selection_scope': 'Closed result/log/code/build/receipt files; Coordinator etcd-data and nonregular nodes are excluded. Native artifact bytes are included for independent offline build-receipt verification.',
+                'selection_scope': 'Closed result/log/code/build/receipt files; historical ETCD etcd-data and nonregular nodes are excluded. Native Coordinator state/logs and native artifact bytes are retained for independent offline build-receipt verification.',
                 'workflow_spec': str(control / 'spec.json')}, exclusive=True)
             payloads = [reference(out, name) for name in ('evidence-index.json', 'collection-admission.json')]
             payloads += [reference(out / 'payload', row['path']) for row in read_json(out / 'evidence-index.json')['files']]

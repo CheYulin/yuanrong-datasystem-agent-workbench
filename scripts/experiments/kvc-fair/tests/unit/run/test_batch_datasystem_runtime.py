@@ -38,8 +38,8 @@ class RuntimeStorageTests(unittest.TestCase):
         original_open = Path.open
 
         def open_file(path, *args, **kwargs):
-            if path == Path("/usr/local/bin/etcd"):
-                return io.BytesIO(b"fixture-etcd")
+            if path.name == "datasystem_coordinator":
+                return io.BytesIO(b"fixture-coordinator")
             return original_open(path, *args, **kwargs)
 
         def spawn(command, **kwargs):
@@ -70,6 +70,9 @@ class RuntimeStorageTests(unittest.TestCase):
                 run_dir = root / transport
                 commands, manifest = self.launch(root, run_dir, transport)
                 self.assertEqual(len(commands), 3)
+                self.assertEqual(manifest["metadata_backend"], "coordinator")
+                self.assertEqual(manifest["processes"][0]["name"], "coordinator")
+                self.assertFalse(any("etcd" == Path(row[0][0]).name for row in commands))
                 actual = []
                 for index, (command, kwargs) in enumerate(commands[1:]):
                     flags = [flag for flag in command if flag.startswith("--rocksdb_store_dir=")]
@@ -102,7 +105,8 @@ class RuntimeStorageTests(unittest.TestCase):
                     self.assertEqual(command.count(flag), 1, flag)
                 self.assertNotIn("--diagnostic_sample_rate=0", command)
                 self.assertFalse(any(flag.startswith("--request_timeout") for flag in command))
-                self.assertTrue(any(flag.startswith("--etcd_address=") for flag in command))
+                self.assertIn("--etcd_address=", command)
+                self.assertIn("--coordinator_address=127.0.0.1:31511", command)
 
     def test_default_profile_retains_original_flags(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -398,7 +398,7 @@ class SourceBuildProvenanceReportTests(unittest.TestCase):
         self.assertTrue(result['verified'])
         self.assertFalse(result['legacy_suites_required'])
         self.assertEqual(result['legacy_smoke_exit'], dict.fromkeys(self.fixture.specs))
-        self.assertEqual(result['native_artifacts'], 8)
+        self.assertEqual(result['native_artifacts'], 9)
         self.assertIn('no independent compiler execution attestation', result['scope'])
         self.assertFalse(any(self.runtime.glob('formal-tcp*')))
 

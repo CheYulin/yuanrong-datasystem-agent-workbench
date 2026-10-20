@@ -19,6 +19,10 @@ from kvcbench.platform.receipts import Workflow, file_reference, verify_commit
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    command = commands.add_parser('cancel-workflow', help='Guarded signal to the currently owned smoke/measure process; cleanup is independently verified')
+    command.add_argument('--control', type=Path, required=True)
+    command.add_argument('--out', type=Path, required=True)
+    command.add_argument('--reason', required=True)
     command = commands.add_parser('publish-workflow', help='W17 upload and register an accepted local report')
     command.add_argument('--control', type=Path, required=True)
     command.add_argument('--spec', type=Path, required=True)
@@ -93,6 +97,9 @@ def parser():
 
 
 def run(args):
+    if args.command == 'cancel-workflow':
+        from kvcbench.pipeline.cancel import cancel
+        return cancel(args.control, args.out, args.reason), 0
     if args.command == 'publish-workflow':
         from kvcbench.pipeline.publication import upload
         return upload(args.control, read_json(args.spec)), 0

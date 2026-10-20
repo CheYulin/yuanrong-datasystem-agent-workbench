@@ -36,7 +36,7 @@ def verify_transport_flags():
     original_open = Path.open
 
     def open_fixture(path, *positional, **keyword):
-        if path == Path("/usr/local/bin/etcd"):
+        if path.name == "datasystem_coordinator":
             return io.BytesIO(b"fixture-etcd-binary")
         return original_open(path, *positional, **keyword)
 

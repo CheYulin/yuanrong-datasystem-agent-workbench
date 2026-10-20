@@ -250,3 +250,25 @@ runtime004 外层真实命令已终止：returncode=0，5056.379312235 秒，W09
 **关键遗漏：对实际 argv 的验收复核确认 runtime004 使用 ETCD，coordinator_address 为空。用户要求后续统一 Coordinator，因此这一轮只能保留为旧后端基线，不得作为最终符合要求的对比。** 已从相同固定 tag/SHA 的实际源码和 output/service 确认 Coordinator 二进制与配置已经构建；尚未把它冒充纳入原 metadata。后续按 [coordinator-correction.md](coordinator-correction.md) 验证其与原 tar 成员一致，明确纳入新 catalog、切换实际服务并重跑完整新矩阵；不需重编译或改变产品源码。
 
 按 ds-self-verify 检查本阶段 diff：测量热循环未变；新 launcher 实体逐字节迁移；收集仍要求静止、锁定、绑定和新目录；安全解压只增加合法固定根成员。产品仓无改动。本次没有最终 Coordinator 矩阵、正式新报告或公开验收完成的证据，目标保持未完成。
+
+## 19. 原生 Coordinator 已接入、实际资格通过与采样覆盖修正
+
+新增 core/artifact_extension、build/adoption：额外产物只允许固定路径 datasystem_coordinator，原输出 hash/size、build tag/SHA/recipe/实际时间区间必须保持原值；额外二进制必须与原已绑定 tar 的对应普通文件成员 SHA/size/mode 相同。新 catalog 在 `native004/revalidation/attempt-003/`，真实验证命令 returncode=0，**8.040891305 秒**，未执行编译，输出清单从 9 增为 10。原始 metadata/失败验收不改写；W14 对归档字节和原 metadata 扩展另做独立复核。
+
+运行已移除 ETCD 启动：默认一个原生 Coordinator（单节点无选举、8 个 RPC/bRPC 线程、4 个 watch dispatch 线程、关闭可选 metrics/采样），两个 Workers 的 etcd_address 为空、coordinator_address 非空。三进程全在 server cgroup 内计费。原 Worker RocksDB/Stream/IPC/RDMA/URMA 关闭项保持。run/configuration_evidence 接管原诊断中的 live 配置读取，主运行不再依赖诊断脚本；新模式每个 DataSystem epoch 在 SDK 窗口前读取实际 PID/start_ticks/argv/cgroup/原生二进制 SHA，检查 server 域内正好三个进程；collect/audits/coordinator 独立复核 21 个 distinct epoch 及归档来源。
+
+| 真实尝试 | 当前证据与结论 |
+| --- | --- |
+| coordinator-command001/control001 | W01/W02 通过；W03 发现入口 Python 自动生成 __pycache__ 后拒绝包清单，外层 4.379510422 秒 returncode=1，未部署或启动 SDK。保留该包与失败记录；冻结包入口明确使用 python3 -B 和 PYTHONDONTWRITEBYTECODE=1，不放宽完整性检查。 |
+| coordinator-command002/control002/runtime002 | W01–W07 通过；真实三产品 gate valid/native_passed=true，156.380353736 秒，现场 Coordinator verified=true，server_members 为 Coordinator+两 Worker。 |
+| 旧 ETCD 基线实际 W12/W13/W14 | 缺失闭包依赖的接收被拒绝；新 receipt_closure 纳入全部显式来源内的回执依赖，新 snapshot005 共 **4304** 文件，received002 原始回执链独立验证通过。W13 为 valid132/failed18/N/A30，无 invalid；W14 的构建/TCP/部署/资源归约均通过，但 r0-mooncake 的 B16/B4096 fresh PUT 未达到 90% 采样覆盖，被拒绝正常报告。 |
+| 安全取消 coordinator002 smoke | 在正式测量前，按明确的 90% 覆盖要求决定增加采样频率。新 cancel-workflow 只对本 control 的 active smoke/measure PID 使用 pidfd+SIGINT，核对 boot、进程 lifetime、argv、cwd，先记 intent。真实 signal 请求 0.013919721 秒；W07.smoke 记录失败/取消，W11 恢复通过，server/client/monitor 全空，未进入正式矩阵。不是产品资格失败。 |
+| coordinator-command003/control003/runtime003 | 使用全新源码包/根目录、相同 workload/配额、**50ms 采样**；三产品 gate valid=true，于 UTC 2026-10-20 23:23:20 结束；smoke 的实际 monitor-manifest.interval_s=0.05。smoke/正式矩阵仍在进行，未提前宣布完成。 |
+
+提升采样密度而不降低 90% 的既定门槛：200ms 的两端边界损失对约两秒 PUT 窗口不可忽略，50ms 留出更充分的实际覆盖余量。监控仍在独立的 2 CPU / 1GiB monitor 域，必需系统工具保持原配置，所有产品一致；实际覆盖仍须最终 W14 判断。报告前端仍保留每个有效 SDK 窗口内的全部实际 CPU/charged-memory 点，只移除前端时间线从不使用的 anon/shmem/IO 字段；完整 series/raw 与 IO 聚合不删减、不下采样、不插值，避免 50ms 数据将页面推过明确的 20MiB 预算。
+
+当前运行包 coordinator-bundle-004 共 329 项，manifest SHA `8e2cc56bd76af2da2a28e12cce88b3f00049d547f8f05b2f306013a35c508c3c`，ZIP SHA `ca291ced79be499912a092f56d4f97f2d78f635d7cf7a194df17737308a42fa7`。冻结运行目录 `/home/worktrees/kvc-coordinator-modular-20261021-003`，外层命令在 `/home/cache/kvc-modular-20261021/coordinator-command003/`，control 同前缀 coordinator-control003；后续只检查该具体句柄和真实终态，不根据日志暂时无更新重启。
+
+本地验证：初始全量发现 fixture 仍期望旧 artifact 个数，修正后 560 项通过（57.318 秒）；后续 560 项通过（74.772 秒）。新增 live/cancel 拒绝错误 argv/cgroup/PID 复用/其他 boot 的检查后，最终 **563 项通过，54.945 秒**（coordinator-all-004.log），针对性 17 项通过（1.725 秒）；独立精确进程清理程序通过。两条后续只读 Coordinator 审计条件增加了 Worker 完整性和 expected binary 路径检查，继续由实际新数据审计验收，未把 fixture 当作最终 SDK 结果。
+
+按 ds-self-verify：产品源码仓干净；工作台 diff 限本次构建产物扩展、运行 backend/现场观察、收集闭包、采样与交付契约。实际 SDK 热循环未改，额外现场检查在窗口外；配置 backend 的性能影响是明确目的，因此正式三轮重新运行。pidfd 取消已核对实际恢复；旧基线、失败 attempt、原始编译记录未覆盖。P6 旧入口退出、最终 Coordinator 完整矩阵与 W12–W18 公开交付仍未完成。

@@ -177,6 +177,7 @@ def stage(args, *, verify_builds=None, snapshot_builds=None, install_inputs=None
                       and p.name != "suite.lock"}
             record = {"profile": "native-batch-tcp", "created_wall_ns": time.time_ns(), "root": str(root),
                       "base": str(base), "builds_reused": True, "build_artifacts": artifacts,
+                      "datasystem_metadata_backend": "coordinator",
                       "shared_suite_lock_inode": held.st_ino, "shared_suite_lock_device": held.st_dev,
                       "resource_lock_path": str(resource_path), "cgroup": str(args.cgroup),
                       "mooncake_queue_capacity": getattr(args, "mooncake_queue", 0),

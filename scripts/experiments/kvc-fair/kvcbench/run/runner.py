@@ -33,6 +33,7 @@ class Runner:
         self.log = (self.out / "events.jsonl").open("x", buffering=1)
         self.products = {p["name"]: p for p in json.loads((self.root / "products.json").read_text())["products"]}
         stage = json.loads((self.root / "batch-stage.json").read_text())
+        self.datasystem_backend = stage.get("datasystem_metadata_backend")
         for name, row in stage["inputs"].items():
             if digest(self.root / name) != row["sha256"]:
                 raise RuntimeError("Frozen stage input changed: " + name)
@@ -111,17 +112,17 @@ class Runner:
             self.execute(stop, directory / "lifecycle.log", env, 180)
             self.execute(start, directory / "lifecycle.log", env, 180)
             time.sleep(2)
+            if row["product"] == "datasystem" and (self.args.action == "gate" or getattr(self, "datasystem_backend", None) == "coordinator"):
+                from kvcbench.run.configuration_evidence import configuration_evidence
+                evidence = configuration_evidence(Path(variables["run_dir"]), ["127.0.0.1:31531", "127.0.0.1:31532"], require_coordinator=getattr(self, "datasystem_backend", None) == "coordinator")
+                for worker in evidence["workers"]:
+                    destination = directory / f"worker-{worker['worker_index']}.flags"
+                    shutil.copy2(worker["path"], destination)
+                    worker["collected_copy"] = str(destination)
+                shutil.copy2(evidence["processes_path"], directory / "processes.json")
+                evidence["collected_processes_copy"] = str(directory / "processes.json")
+                atomic_json(directory / "tcp-configuration.json", evidence)
             if self.args.action == "gate":
-                if row["product"] == "datasystem":
-                    from tcp_probe_ds_sizes import configuration_evidence
-                    evidence = configuration_evidence(Path(variables["run_dir"]), ["127.0.0.1:31531", "127.0.0.1:31532"])
-                    for worker in evidence["workers"]:
-                        destination = cell / f"worker-{worker['worker_index']}.flags"
-                        shutil.copy2(worker["path"], destination)
-                        worker["collected_copy"] = str(destination)
-                    shutil.copy2(evidence["processes_path"], cell / "processes.json")
-                    evidence["collected_processes_copy"] = str(cell / "processes.json")
-                    atomic_json(cell / "tcp-configuration.json", evidence)
                 for index in [0, 1]:
                     for mode in ["insert"] if row["product"] == "lmcache" else ["insert", "upsert"]:
                         output = cell / f"client-{index}-{mode}.json"

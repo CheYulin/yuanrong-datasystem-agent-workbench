@@ -26,11 +26,11 @@ DataSystem、Mooncake Store、LMCache 的原生 CPU/TCP KV 实验工具。当前
 ```bash
 python3 -m kvcbench bundle --out /absolute/frozen-bundle
 cd /absolute/frozen-bundle/payload
-python3 -m kvcbench workflow start --spec /absolute/run-spec.json --control /absolute/new-control
+python3 -B -m kvcbench workflow start --spec /absolute/run-spec.json --control /absolute/new-control
 cd /absolute/new-runtime-root
-python3 -m kvcbench workflow gate --control /absolute/new-control
-python3 -m kvcbench workflow smoke --control /absolute/new-control
-python3 -m kvcbench workflow measure --control /absolute/new-control
+python3 -B -m kvcbench workflow gate --control /absolute/new-control
+python3 -B -m kvcbench workflow smoke --control /absolute/new-control
+python3 -B -m kvcbench workflow measure --control /absolute/new-control
 ```
 
 每一步记录输入、结果、产物清单、验收、摘要和 commit。`measure` 成功结束或失败后都执行环境恢复；准备部分失败也保留 intent 并恢复。现场恢复入口为 `workflow restore --control <control>`，不能用它自动重放请求。步骤或输出已存在时不续写；重新测量使用新 run 和状态目录。

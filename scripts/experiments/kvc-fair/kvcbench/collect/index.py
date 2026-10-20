@@ -12,6 +12,17 @@ ROLES = {'runtime', 'build', 'qualification', 'measurement', 'observation', 'env
 RESERVED = {'derived', 'report', 'delivery', '__pycache__'}
 
 
+def file_references(value):
+    if isinstance(value, dict):
+        if {'root', 'path', 'sha256', 'bytes', 'mode'} <= set(value):
+            yield value
+        for child in value.values():
+            yield from file_references(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from file_references(child)
+
+
 def terminal_suite(suite):
     summary = read_json(regular(suite, 'summary.json'))
     if (not summary.get('ended') or summary.get('execution_complete') is not True

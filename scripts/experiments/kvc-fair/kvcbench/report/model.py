@@ -23,7 +23,7 @@ def compact_payload(analysis):
     for row in rows:
         if row["valid"] and type(row.get("start_mono_ns")) is int and type(row.get("end_mono_ns")) is int:
             kept.update(range(bisect.bisect_left(times, row["start_mono_ns"]), bisect.bisect_right(times, row["end_mono_ns"])))
-    fields = ["memory", "anon", "shmem", "cpu_usec_per_s", "read_bytes_per_s", "write_bytes_per_s"]
+    fields = ["memory", "cpu_usec_per_s"]
     payload["samples"] = [{**{key: samples[index][key] for key in ["mono_ns", "prev_mono_ns", "wall_ms", "sampling_ms"] if key in samples[index]},
                            **{role: {key: samples[index][role].get(key) for key in fields} for role in ["server", "client"]}}
                           for index in sorted(kept)]

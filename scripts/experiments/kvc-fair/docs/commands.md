@@ -97,7 +97,7 @@ python3 -m kvcbench environment-restore \
 
 ```bash
 cd /absolute/frozen-bundle/payload
-python3 -m kvcbench workflow all --spec /absolute/run-spec.json --control /absolute/new-control
+python3 -B -m kvcbench workflow all --spec /absolute/run-spec.json --control /absolute/new-control
 ```
 
 `start` 在代码包 payload 中执行 W01 固定计划、W02 构建复用验收、W03 代码包复核、W04 新运行部署、W05 现场基线和 W06 隔离。后续 gate/smoke/measure 子进程从新运行目录的冻结 package 执行。每步有独立中间结果和 owner 检查，控制目录保存 command 日志/实际耗时；`status` 只读展示它们。
