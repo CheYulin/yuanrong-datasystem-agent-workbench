@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | P0 | 已完成设计 | 五个主模块、142 项基线迁移表、W01–W18 中间结果和独立验收契约 |
 | P1 | 已验收 | core/platform/build 包、回执与只读复核、显式源码包；部署/源码快照/ZIP 接入嵌套模块；完整回归与干净包通过 |
-| P2 | 进行中 | source-build 与独立重验目录通过，新部署消费明确构建 catalog；完整实验计划和 stage/workflow 准入待接入 |
-| P3 | 进行中 | 运行/资格/epoch/worker/batch adapter 与 observe 已分离，共同运行锁、环境账本及新部署三产品 gate 通过；产品 runtime 归整、业务回执及正式矩阵待完成 |
+| P2 | 进行中 | source-build、独立重验目录、显式运行 spec、W01–W04 计划/复用/代码包/部署验收已接入并通过真实节点检查；完整实验仍待下游闭环 |
+| P3 | 进行中 | Python 产品 runtime/adapter 归整，W01–W11 编排已实现，新的三产品 gate 通过；观测 smoke 与正式矩阵正在实际验证，旧入口与测试归整仍待 P6 |
 | P4 | 进行中 | 原件 snapshot/index、analysis/audits 与来源复核已迁移，历史原件重算一致；完整 W12–W14 准入与实际新实验审计待完成 |
 | P5 | 进行中 | 新 report 消费者、ECharts/文档/离线包已实现且浏览器/干净包验证通过；上游 report-inputs 自动生成与 W16–W18 仍待接入 |
 | P6 | 待实施 | 旧入口退出、引用迁移、干净包验收与完整新实验及最终报告刷新 |
@@ -180,3 +180,28 @@ Mermaid vendor 从已使用的本地阅读器逐字节保留，vendor.json 记�
 最后修改环境配置写入保留换行，使空 cpuset 原值也能正确恢复到 cgroup 接口。`python3 -m unittest tests.contract.test_runtime_environment tests.contract.test_bundle` **13 项通过，1.552 秒**，日志 `p3-runtime-final-targeted-003.log`。本地资格/诊断/环境收集为 686 MiB 原件，放在仓库外的 `runtime001/`；不把原件或大型 strace 提交到 Git。
 
 W01–W18 的完整语义回执接入、P6 旧入口/测试归整及新的正式测量仍未完成。本节是 P3 的实际推进，不能据此将整个目标标为完成。
+
+## 15. 产品运行代码归属与 W01–W11 实际编排
+
+三产品 Python runtime、scalar/TCP adapter、Mooncake peer/进程身份实现迁入 `run/products/{datasystem,mooncake,lmcache}/`；旧路径只做显式 package 转发。LMCache 通过明确 LMCACHE_ROOT 定位运行目录和 SDK source，不再通过新模块的 sibling 目录猜测。7 个迁移文件的 **26 个原有顶层函数/类定义 AST 均未改变**；Mooncake peer 原件逐字节迁移。DataSystem 另增加 main 负责旧命令转发，不改变 launch/stop 的所有权与保护逻辑。比较结果在仓库外 `product-migration-functions-001.json`。
+
+`core/spec.validate_runtime` 固定完整运行参数、3 次重复、原生只读错误政策和明确路径。`pipeline/runtime.py` 组合 owner 检查，`pipeline/steps.py` 只处理回执。W01–W06 分别固定计划、重验构建复用、复核完整工具包、新部署、观察基线和隔离；W07/gate、smoke 独立验收；正式 W08 ready 后才进入 W09，W09 封存原生 case 与结果后由 W10 停止观测并重新排空，W11 恢复账本。W09 重新调用 core 完整校验，包括所有 planned case 的参数、client 阶段、字节验证、histogram、错误会计；完整原生失败只生成 findings，不改写 native_passed。
+
+新增 `workflow all/start/gate/smoke/measure/restore`。all 从冻结 bundle payload 执行 start，再从新运行根目录的冻结 package 启动独立子命令，command/log/耗时均保留，无隐式重试。较新的 partial attempt 阻断消费更早 PASS。current admission 子步骤在持资源锁时重新核对现场，不用 W06 历史 PASS 代替当前条件。
+
+真实尝试与失败均保留：
+
+| 尝试 | 实际结论与处理 |
+| --- | --- |
+| pipeline-control001 / runtime002 | W01–W06 均通过，外层 start 8.442241279 秒；gate 前发现 setroubleshootd 被重新激活，拒绝进入 SDK 并恢复，W11 通过。最初准入失败缺少 W07 子回执的缺口已在后续版本修正，不回填旧记录。 |
+| 诊断干扰来源 | systemd show/journal 证明 mihumo.service 为 Restart=always、ExecMainStatus=203 的失败重启环，持续触发 SELinux 诊断；仅观察，未执行日志建议的 restorecon/SELinux 策略变更。 |
+| pipeline-control002 / runtime003 | W06 使用新账本暂停明确失败重启来源，并 runtime-mask 诊断服务；资格检查发现 DataSystem 兼容脚本没有执行 main，未启动 Worker，W07 失败并恢复。本次是工具入口缺陷，不能记为被测产品性能失败。已修正 main 转发并新增无关 cwd 下 CLI/parser 与 start/stop 分发测试。 |
+| pipeline-control003 / runtime004 | 使用修正后的冻结 pipeline-bundle-004，W01–W07 已通过；W06 验收 0.831300570 秒，W07 153.660115484 秒，gate 子命令 154.526988013 秒，三产品 native_passed=true。正在验证观测 smoke/正式矩阵，未提前宣布完成。 |
+
+当前正式候选源码包 271 项，manifest SHA `8b96526809a5ecc3a9c6e61966851491ae869f6cf126a011616c373b9e1b7236`，ZIP SHA `c2874c5de7534f4197e014edae881ad60c7e1ff0a3025027b26d46deae3282b6`。节点根 `/home/worktrees/kvc-batch-modular-20261021-004`，control `/home/cache/kvc-modular-20261021/pipeline-control003`；外部总 command 在 `pipeline-command003/all-command.json`，其只在该真实进程终止后出现，缺失时不能据此认定停止或重启。
+
+验证：第一次全量 536 项因两个绕过 __init__ 的 fixture 缺少新的可选 observer/log 字段失败，更新 fixture 后 536 项通过（54.380 秒）。加入环境 mask 与失败账本检查后 537 项通过（51.239 秒）；最终 main 转发修正后 **539 项通过，51.727 秒**，日志 `pipeline-all-004.log`。最后有关子集为 35 项通过（5.461 秒）。8 个 owner 的 AST 导入边界检查无跨层依赖。独立自有进程清理保护程序通过，不把该程序当成产品 SDK smoke。
+
+环境新规则只移除本次创建的 runtime mask，已有 mask 保留；恢复有 baseline/hash 绑定，空 cpuset 用换行正确写回。mihumo 仅在重新观察到明确的 203 失败重启状态时暂停，恢复的是原激活意图，不声称修复原有故障。源码、永久 unit、SELinux 策略和历史原件均未修改。新步骤回执与重验在套件边界发生，不在每次 SDK 调用热路径新增 IO、锁或采样。
+
+W12–W18 的跨节点收集/报告/公开验收、P6 归整和最终新结果仍是未完成项。后续将复核运行句柄/实际终态，再冻结原件及生成新的报告输入，禁止在开放流上提前封存或覆盖这次候选输入。

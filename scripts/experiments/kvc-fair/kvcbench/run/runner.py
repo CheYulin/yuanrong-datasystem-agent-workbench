@@ -24,9 +24,10 @@ from kvcbench.run.plan import BATCHES, OPS, PROTOCOL, supported, plan
 
 
 class Runner:
-    def __init__(self, args, *, observer_factory=None):
+    def __init__(self, args, *, observer_factory=None, workflow_observer=None):
         self.args = args
         self.observer_factory = observer_factory
+        self.workflow_observer = workflow_observer
         self.root, self.out = args.root.resolve(), args.out.absolute()
         self.out.mkdir(parents=True, exist_ok=False)
         self.log = (self.out / "events.jsonl").open("x", buffering=1)
@@ -223,6 +224,8 @@ class Runner:
                 observation = self.observer_factory(self.out / "resources", CGROUP)
                 ready = observation.start()
                 self.event("monitor_ready", evidence=str(ready), scope="startup only")
+                if self.workflow_observer is not None:
+                    self.workflow_observer.measurement_started(ready)
             for number, row in enumerate(rows):
                 summary["completed"].append(self.lifecycle(row, number + 1))
                 atomic_json(self.out / "summary.json", summary)
@@ -230,6 +233,11 @@ class Runner:
             summary["failed"].append(traceback.format_exc())
             self.event("suite_failed", error=summary["failed"][-1])
         finally:
+            if self.workflow_observer is not None:
+                try:
+                    self.workflow_observer.measurement_finished(summary, rows, expected_epochs)
+                except BaseException:
+                    summary["failed"].append(traceback.format_exc())
             if observation is not None:
                 try:
                     final = observation.stop()
@@ -253,26 +261,14 @@ class Runner:
             summary["valid"] = summary["execution_complete"] and not self.measurement_failures
             atomic_json(self.out / "summary.json", summary)
             self.event("suite_complete", valid=summary["valid"], completed=len(summary["completed"]), duration_s=summary["duration_s"])
+            self.log.close()
+            if self.workflow_observer is not None:
+                self.workflow_observer.cleanup_finished(summary)
         return 0 if summary["valid"] else 1
 
     def check_gate(self):
-        root = self.root / self.args.gate
-        gate = json.loads((root / "summary.json").read_text())
-        if (not gate.get("valid") or not gate.get("ended") or gate.get("failed")
-                or set(gate.get("completed", [])) != {"r0-" + name for name in self.products}):
-            raise RuntimeError("A complete successful native batch gate is required")
-        for filename in ["batch-stage.json", "products.json"]:
-            if (root / filename).read_bytes() != (self.out / filename).read_bytes():
-                raise RuntimeError("Gate execution inputs differ: " + filename)
-        for name in self.products:
-            for index in [0, 1]:
-                for mode in ["insert"] if name == "lmcache" else ["insert", "upsert"]:
-                    raw = json.loads((root / ("r0-" + name) / f"client-{index}-{mode}.json").read_text())
-                    if (not raw.get("valid") or raw.get("client_index") != index
-                            or raw.get("value_size") != 1024 or raw.get("batch_sizes") != BATCHES
-                            or not all(case.get("valid") for case in raw.get("cases", []))
-                            or [case.get("batch_keys") for case in raw.get("cases", [])] != BATCHES):
-                        raise RuntimeError("Gate endpoint/batch evidence incomplete")
+        from kvcbench.run.admission import verify_gate
+        verify_gate(self.root, self.args.gate, self.products, self.out)
 
 
 def main(argv=None, *, observer_factory=None):
@@ -299,16 +295,8 @@ def main(argv=None, *, observer_factory=None):
         p.error("positive repeats required")
     with open_path(args.root / "suite.lock") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        stage = json.loads((args.root / "batch-stage.json").read_text())
-        observed = os.fstat(lock.fileno())
-        if (stage.get("shared_suite_lock_inode") != observed.st_ino
-                or stage.get("shared_suite_lock_device", observed.st_dev) != observed.st_dev):
-            raise ValueError("Runtime lock differs from the accepted deployment")
-        if stage.get("resource_lock_path"):
-            with open_path(Path(stage["resource_lock_path"])) as shared:
-                current = os.fstat(shared.fileno())
-                if (current.st_dev, current.st_ino) != (observed.st_dev, observed.st_ino):
-                    raise ValueError("Runtime resource lock was replaced")
+        from kvcbench.run.admission import verify_resource_lock
+        verify_resource_lock(args.root, lock.fileno(), CGROUP)
         drain(CGROUP)
         raise SystemExit(Runner(args, observer_factory=observer_factory).run())
 

@@ -19,6 +19,10 @@ from kvcbench.platform.receipts import Workflow, file_reference, verify_commit
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    command = commands.add_parser("workflow", help="Execute explicit runtime steps with owner acceptance receipts")
+    command.add_argument("action", choices=["all", "start", "gate", "smoke", "measure", "restore"])
+    command.add_argument("--control", type=Path, required=True)
+    command.add_argument("--spec", type=Path)
     command = commands.add_parser("stage", help="Fresh pure-KV runtime from an explicitly verified native catalog")
     command.add_argument("--native-root", type=Path, required=True)
     command.add_argument("--catalog", type=Path, required=True)
@@ -58,6 +62,19 @@ def parser():
 
 
 def run(args):
+    if args.command == "workflow":
+        from kvcbench.pipeline import runtime
+        if args.action in {"all", "start"}:
+            if args.spec is None:
+                raise ValueError("Workflow start requires --spec")
+            function = runtime.launch if args.action == "all" else runtime.start
+            return function(read_json(args.spec), args.control), 0
+        if args.spec is not None:
+            raise ValueError("Existing workflow steps consume their fixed specification, not a replacement --spec")
+        if args.action == "restore":
+            return runtime.restore(args.control), 0
+        result = runtime.execute(args.control, args.action)
+        return result, 0 if result["execution_complete"] else 1
     if args.command == "stage":
         from kvcbench.build import catalog
         from kvcbench.run.stage import stage

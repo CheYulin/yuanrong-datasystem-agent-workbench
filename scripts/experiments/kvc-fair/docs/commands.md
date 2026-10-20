@@ -89,3 +89,21 @@ python3 -m kvcbench environment-restore \
 重验不执行编译，比较原生输出与原构建记录的 hash/size，输出新目录；旧失败记录保留。stage 重新验证明确选择的 catalog，不自动选择最近一次记录。完整代码包必需包含当前新增模块。
 
 同一运行资源域使用同一把已有锁，新运行目录硬链接该锁；构建域锁可以不同。环境准备和恢复分别持资源锁，使用新输出目录，只变更记录的配置差异和明确的服务，不清理历史 tmpfs 目录。实际资格、采样、正式测量与交付仍须各自验收，不由这些命令自动宣称完成。
+
+
+## 8. 按步骤验收的运行编排
+
+`configs/experiments/batch-modular.example.json` 列出完整运行配置。`bundle` 参数指含 manifest/archive/payload 的整个代码包目录。以下四条命令由 `workflow all` 顺序执行，也可明确逐步执行；没有断点续写或请求自动重放。
+
+```bash
+cd /absolute/frozen-bundle/payload
+python3 -m kvcbench workflow all --spec /absolute/run-spec.json --control /absolute/new-control
+```
+
+`start` 在代码包 payload 中执行 W01 固定计划、W02 构建复用验收、W03 代码包复核、W04 新运行部署、W05 现场基线和 W06 隔离。后续 gate/smoke/measure 子进程从新运行目录的冻结 package 执行。每步有独立中间结果和 owner 检查，控制目录保存 command 日志/实际耗时；`status` 只读展示它们。
+
+W07 资格和其 smoke 子步骤分别验收。正式 W08 只封存观测启动快照；W09 逐项重新检查所有计划 case 的参数、字节验证、client 边界、histogram 和原生只读错误；W10 封存已经停止的观测并重新确认排空；W11 恢复实际环境变更。完整原生错误可使 W09 为 passed_with_findings，native_passed 仍为 false；缺 case、畸形 histogram、错误账本不符或清理未知不放行。存在更新但未提交的 attempt 时，不回退消费更早的 PASS。
+
+准备对诊断服务只使用 runtime mask，恢复时只移除本次创建的 mask。另对唯一明确的 mihumo.service，仅在观测到 Restart=always、ExecMainStatus=203 且处于失败重启状态时停止；恢复其原激活意图，不声称修复原有执行故障。工作负载执行期间不修改 SELinux 策略、产品数据或单位配置文件。
+
+W12–W18 的完整跨节点收集、派生输入及交付验收编排仍待接入；不能因 `workflow all` 的运行部分结束便宣称整个报告任务完成。

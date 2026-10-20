@@ -37,7 +37,7 @@ scripts/experiments/kvc-fair/cgroup.py,run,kvcbench/run/isolation.py | kvcbench/
 scripts/experiments/kvc-fair/collect_timings.py,collect,kvcbench/collect/timings.py,move,P4,离线时间归约与原始事件写入分开
 scripts/experiments/kvc-fair/commit_publication.py,delivery,kvcbench/delivery/registration.py,move,P5,站点主干与 remote 审计独立于实验
 scripts/experiments/kvc-fair/datasystem/README.md,docs,docs/build/datasystem.md,move,P2,产品构建和运行入口文档，链接指向正式模块
-scripts/experiments/kvc-fair/datasystem/adapter_datasystem.py,run,kvcbench/run/products/datasystem/adapter_datasystem.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/datasystem/adapter_datasystem.py,run,kvcbench/run/products/datasystem/adapter.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
 scripts/experiments/kvc-fair/datasystem/build.sh,build,kvcbench/build/recipes/datasystem/build.sh,move,P2,保留依赖/版本/命令和 executable mode
 scripts/experiments/kvc-fair/datasystem/build_summary.py,build,kvcbench/build/recipes/datasystem/build_summary.py,move,P2,产品特有元数据，公共部分使用 build.metadata
 scripts/experiments/kvc-fair/datasystem/common_smoke.sh,tests,tests/live/datasystem/common_smoke.sh,move,P3,显式真实产品 smoke；默认单元测试不执行
@@ -49,8 +49,8 @@ scripts/experiments/kvc-fair/echarts.min.js,report,kvcbench/report/assets/vendor
 scripts/experiments/kvc-fair/finish_environment.py,run,kvcbench/run/environment_restore.py | kvcbench/run/environment.py | kvcbench/platform/locks.py,split,P1-P3,历史协议逐字迁移并保留兼容入口；新实验使用明确变更账本和独立恢复结果
 scripts/experiments/kvc-fair/identify_interference.py,observe,kvcbench/observe/interference.py,move,P3,外部进程只观测；不得 signal
 scripts/experiments/kvc-fair/light_monitor.py,observe,kvcbench/observe/light.py,move,P3,仅诊断轻量观测，不混入正式 profile
-scripts/experiments/kvc-fair/lmcache/adapter_lmcache.py,run,kvcbench/run/products/lmcache/adapter_lmcache.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
-scripts/experiments/kvc-fair/lmcache/adapter_lmcache_tcp.py,run,kvcbench/run/products/lmcache/adapter_lmcache_tcp.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/lmcache/adapter_lmcache.py,run,kvcbench/run/products/lmcache/adapter.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
+scripts/experiments/kvc-fair/lmcache/adapter_lmcache_tcp.py,run,kvcbench/run/products/lmcache/tcp_adapter.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
 scripts/experiments/kvc-fair/lmcache/build_lmcache.sh,build,kvcbench/build/recipes/lmcache/build_lmcache.sh,move,P2,保留依赖/版本/命令和 executable mode
 scripts/experiments/kvc-fair/lmcache/fake_mechanics_backend.py,tests,tests/fixtures/lmcache/fake_mechanics_backend.py,move,P3,测试替身不在正式包适配器路径
 scripts/experiments/kvc-fair/lmcache/harness_correctness.py,tests,tests/live/lmcache_harness_correctness.py,move,P3,实际 CPU MP 机制验证，需显式执行
@@ -70,7 +70,7 @@ scripts/experiments/kvc-fair/mooncake/launch_master.sh,run,kvcbench/run/products
 scripts/experiments/kvc-fair/mooncake/localdeps-install.sh,build,kvcbench/build/recipes/mooncake/localdeps-install.sh,move,P2,保留依赖/版本/命令和 executable mode
 scripts/experiments/kvc-fair/mooncake/os-packages.lock,build,kvcbench/build/recipes/mooncake/os-packages.lock,move,P2,保留依赖/版本/命令和 executable mode
 scripts/experiments/kvc-fair/mooncake/peer.py,run,kvcbench/run/products/mooncake/peer.py,move,P3,服务/adapter/launcher；移除 sibling 路径假设，保留产品额外约束
-scripts/experiments/kvc-fair/mooncake/process_identity.py,platform,kvcbench/platform/process.py,extract,P1,保留 Mooncake 命令根与身份额外约束
+scripts/experiments/kvc-fair/mooncake/process_identity.py,run,kvcbench/run/products/mooncake/process_identity.py,move,P3,保留产品专用 pidfd 命令根及身份保护；通用自有进程组处理另归 platform
 scripts/experiments/kvc-fair/mooncake/requirements-installed.lock,build,kvcbench/build/recipes/mooncake/requirements-installed.lock,move,P2,保留依赖/版本/命令和 executable mode
 scripts/experiments/kvc-fair/mooncake/requirements.lock,build,kvcbench/build/recipes/mooncake/requirements.lock,move,P2,保留依赖/版本/命令和 executable mode
 scripts/experiments/kvc-fair/mooncake/smoke.py,tests,tests/live/mooncake/smoke.py,move,P3,显式真实产品 smoke；默认单元测试不执行

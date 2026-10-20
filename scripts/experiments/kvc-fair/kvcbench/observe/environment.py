@@ -8,12 +8,10 @@ import subprocess
 import time
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--out", type=Path, required=True)
-    args = p.parse_args()
-    if args.out.exists() or args.out.is_symlink():
-        p.error("Preserve existing environment observations")
+def capture(out):
+    out = Path(out)
+    if out.exists() or out.is_symlink():
+        raise FileExistsError("Preserve existing environment observations")
     commands = [["uname", "-a"], ["lscpu", "-J"], ["numactl", "--hardware"],
                 ["lsblk", "-J", "-o", "NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT"],
                 ["df", "-h", "/home", "/dev/shm"],
@@ -34,8 +32,16 @@ def main():
                                    "duration_s": (time.monotonic_ns() - mono) / 1e9, **row})
     result.update(end_wall_ns=time.time_ns(), end_mono_ns=time.monotonic_ns())
     result["duration_s"] = (result["end_mono_ns"] - result["start_mono_ns"]) / 1e9
-    with args.out.open("x") as stream:
+    with out.open("x") as stream:
         json.dump(result, stream, indent=2)
+    return result
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--out", type=Path, required=True)
+    args = p.parse_args()
+    result = capture(args.out)
     print(json.dumps({"out": str(args.out), "duration_s": result["duration_s"]}))
 
 

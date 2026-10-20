@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "run_id": "kvc-native-batch-example",
+  "profile": "native-batch-tcp",
+  "root": "/absolute/new-runtime-root",
+  "native_root": "/absolute/native-build-root",
+  "build_catalog": "/absolute/native-build-root/revalidation/accepted-attempt/build-catalog.json",
+  "bundle": "/absolute/frozen-source-bundle",
+  "resource_lock": "/absolute/shared-runtime/suite.lock",
+  "cgroup": "/sys/fs/cgroup/kvcfair20261020",
+  "measurement": {
+    "repeats": 3,
+    "duration_s": 20,
+    "warmup_s": 3,
+    "put_keys": 262144,
+    "continue_readonly_errors": true
+  }
+}

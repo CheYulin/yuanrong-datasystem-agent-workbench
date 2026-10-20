@@ -28,6 +28,7 @@ class EnvironmentTests(unittest.TestCase):
             preparation, restoration = directory / "prepare", directory / "restore"
             with patch.object(environment, "drain", return_value={"populated": []}), \
                  patch.object(environment, "unit_state", return_value={"active": True}), \
+                 patch.object(environment, "mask_state", return_value={"exists": False, "is_mask": False}), \
                  patch.object(environment.shutil, "which", return_value="/fixture/tool"), \
                  patch.object(environment.os, "geteuid", return_value=0), \
                  patch.object(environment, "execute", return_value={"returncode": 1}) as execute:
@@ -46,6 +47,7 @@ class EnvironmentTests(unittest.TestCase):
             preparation = directory / "prepare"
             with patch.object(environment, "drain", return_value={"populated": []}), \
                  patch.object(environment, "unit_state", return_value={"active": False}), \
+                 patch.object(environment, "mask_state", return_value={"exists": True, "is_mask": True}), \
                  patch.object(environment.shutil, "which", return_value=None), \
                  patch.object(environment.os, "geteuid", return_value=0):
                 with self.assertRaises(ValueError):
@@ -68,6 +70,7 @@ class EnvironmentTests(unittest.TestCase):
             lock.touch()
             with patch.object(environment, "drain", return_value={"populated": []}), \
                  patch.object(environment, "unit_state", return_value={"active": False}), \
+                 patch.object(environment, "mask_state", return_value={"exists": True, "is_mask": True}), \
                  patch.object(environment.shutil, "which", return_value="/fixture/tool"), \
                  patch.object(environment.os, "geteuid", return_value=0):
                 result = environment.prepare(root, preparation, resource_lock=lock)
@@ -79,6 +82,33 @@ class EnvironmentTests(unittest.TestCase):
                 self.assertEqual((preparation / "intent.json").read_bytes(), before)
                 with self.assertRaises(FileExistsError):
                     environment.prepare(root, preparation, resource_lock=lock)
+
+    def test_runtime_mask_is_removed_only_when_created_by_this_attempt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            root, initial, lock = self.fixture(directory)
+            state, commands = {"exists": False, "is_mask": False}, []
+            def execute(argv, **kwargs):
+                commands.append(argv)
+                if "mask" in argv:
+                    state.update(exists=True, is_mask=True)
+                if "unmask" in argv:
+                    state.update(exists=False, is_mask=False)
+                return {"returncode": 0}
+            with patch.object(environment, "drain", return_value={"populated": []}), \
+                 patch.object(environment, "unit_state", return_value={"active": False}), \
+                 patch.object(environment, "mask_state", side_effect=lambda: dict(state)), \
+                 patch.object(environment.shutil, "which", return_value="/fixture/tool"), \
+                 patch.object(environment.os, "geteuid", return_value=0), \
+                 patch.object(environment, "execute", side_effect=execute):
+                preparation = directory / "prepare"
+                environment.prepare(root, preparation, resource_lock=lock)
+                self.assertTrue(state["is_mask"])
+                environment.restore(root, preparation, directory / "restore", resource_lock=lock)
+                self.assertFalse(state["exists"])
+                self.assertEqual(environment.settings(root), initial)
+            self.assertIn(["systemctl", "mask", "--runtime", "--now", environment.UNIT], commands)
+            self.assertIn(["systemctl", "unmask", "--runtime", environment.UNIT], commands)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,9 @@
 
 准备输出新目录，先记录 `before.json`，确认 root 权限、必需工具、cgroup 排空和当前配置，再写 `intent.json`，最后执行配置差异和明确服务的停止。成功记录 `after.json`、`result.json`；失败保留实际文件和失败结果，不覆盖上次 attempt。
 
-本次准备仅允许配置当前实验 cgroup 的明确文件，以及暂时停止 `setroubleshootd.service`。不删除历史 tmpfs 目录，不按名称搜索并结束无关进程。已符合预期的设置不重复修改。恢复时重新持同一资源锁，确认 cgroup 为空，仅恢复账本中的设置差异和原来处于 active 的服务。若设置已被外部改变为既非原值也非本次设置值，则拒绝覆盖；恢复失败另留失败结果。
+准备配置当前实验 cgroup 的明确文件，对 `setroubleshootd.service` 使用可恢复的 runtime mask。目标节点发现 `mihumo.service` 以 ExecMainStatus=203 失败并由 Restart=always 反复激活；仅在重新观察到该明确失败重启状态时，才停止这个单元以消除反复触发诊断的来源。工作正常的同名单元不按此规则停止。恢复仅移除本次创建的 runtime mask，并恢复原激活意图；不把恢复原来的失败重启状态称为修复该服务。
+
+不删除历史 tmpfs 目录，不按名称搜索并结束无关进程。已符合预期的 cgroup 设置不重复修改。恢复时重新持同一资源锁，确认 cgroup 为空，仅恢复账本中的差异。若设置已被外部改变为既非原值也非本次设置值，或 runtime mask 被替换，则拒绝覆盖；恢复失败另留失败结果。不修改 SELinux 策略、永久 unit 文件或原产品源码。
 
 恢复依据是 `intent.json`，因此在操作部分执行后失败也可显式恢复。它不会自动继续测量、重放 PUT 或续写旧 epoch。服务启动命令成功与之后的现场状态分别记录。
 
@@ -79,3 +81,13 @@ python3 -m kvcbench environment-restore \
 锁身份检查和账本写入在实验控制路径，不在每次 SDK 调用的热路径。没有改变 payload、原生 batch 调用或直方图采样方式。锁持有者负责自己的操作，冻结部署代码不在运行时刷新。环境变更需要现场复核；历史 PASS、目录存在或配置写命令成功不能替代复核。
 
 本地测试检查不同构建域共享运行锁、锁被占用拒绝部署、锁类型与链接安全、原环境值恢复、服务停止失败后的恢复、必需工具缺失前置阻断及旧输出不覆盖。真实接口资格、资源覆盖、公平性能矩阵和公开报告验收必须使用各自证据，不能从这些测试推导。
+
+## 6. W01–W11 编排与验收边界
+
+`pipeline/runtime.py` 组合各 owner 的明确业务检查，`pipeline/steps.py` 只处理回执持久化，不决定产品或观测是否正确。`workflow all --spec <spec> --control <new-control>` 从冻结源码包执行 start，再用新运行目录的冻结 package 串行执行 gate、smoke、measure；步骤失败不重试请求，最终或失败恢复均产生独立记录。
+
+W07/W07.smoke/W08 入场先记录 current admission，重新核对资源锁、排空、配置、诊断 mask 和失败重启来源。原来的 W06 PASS 不代替现场复核。正式 Session.start 封存 W08 后才开始 W09；测量结束先封存 W09 case/结果，再停止 suite 观测并在实际排空后封存 W10。W11 引用原环境账本恢复。原始采样流不提前放进 ready 的固定 hash 中。
+
+W09 调用 `run/admission.verify_matrix`，重用 core 的完整原生 case 校验；不仅核对文件个数，还逐项检查协议参数、client 确认、数据验证、histogram、错误会计与失败账本。只读原生失败可保留为 finding；原生成功字段仍为 false。缺项或证据不合法则步骤验收失败。新 partial attempt 会阻断消费更早 PASS，且不凭 partial 目录推断进程活性。
+
+跨节点的 W12–W18 编排仍未完成，此处不将 runtime 部分的完成等同于最终报告交付。

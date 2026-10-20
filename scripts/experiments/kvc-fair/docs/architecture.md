@@ -1,6 +1,6 @@
 # 1. 模块化实施中的代码边界
 
-当前已接入 P1、P2a/P2b 及 P3a 的以下边界：
+当前已接入以下边界，实际验收进度以 RFC 实施记录为准：
 
 | 模块 | 文件 | 责任 |
 | --- | --- | --- |
@@ -16,6 +16,8 @@
 | observe | `environment.py`、`host.py`、`interference.py`、`light.py`、`session.py`、`validation.py` | 原始快照/采样、suite 观测会话、就绪快照和停止封存的独立复核 |
 | collect | `resources.py` | 读取封存采样并归约资源；缺失值与计数器回退保持未知，不依赖 HTML |
 | compat | `commands.py` | 临时旧参数转换与跨模块组合；构建/运行逻辑各归所属模块 |
+| pipeline | `runtime.py`、`steps.py` | 显式 W01–W11 组合、分域验收、失败清理与恢复；正常准入不回退复用旧 PASS |
+| run | `admission.py`、`environment.py`、`products/{datasystem,mooncake,lmcache}/` | 运行锁/门禁/矩阵证据校验、环境账本、产品 runtime 和 scalar/TCP adapter |
 | CLI | `cli.py` | 对外显式命令和错误状态；不导入产品 SDK 或自动运行实验 |
 
 正式部署与运行已改用独立的 digest/drain 公共能力，`profile_put` 保留导入别名供迁移期调用；主流程不再从特定 PUT 诊断中导入这两个机制。其余诊断耦合按后续阶段逐项迁移。

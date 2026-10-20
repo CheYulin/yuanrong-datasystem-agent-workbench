@@ -1,22 +1,37 @@
 """Launch-boundary regressions for two-worker metadata storage isolation."""
 import contextlib
-import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 
-SPEC = importlib.util.spec_from_file_location("batch_ds_runtime", Path(__file__).parent / "datasystem/runtime.py")
-runtime = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(runtime)
+from kvcbench.run.products.datasystem import runtime
 
 
 class RuntimeStorageTests(unittest.TestCase):
+    def test_compatibility_command_enters_the_parser_from_unrelated_cwd(self):
+        script = Path(__file__).resolve().parent / "datasystem/runtime.py"
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([sys.executable, str(script), "--help"], cwd=directory,
+                env=dict(os.environ, PYTHONPATH="", PYTHONDONTWRITEBYTECODE="1"), capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--task-root", result.stdout)
+        self.assertIn("{start,stop}", result.stdout)
+
+    def test_main_dispatches_the_requested_lifecycle_action(self):
+        for action in ("start", "stop"):
+            with self.subTest(action=action), mock.patch.object(runtime, "launch") as launch, mock.patch.object(runtime, "stop") as stop:
+                runtime.main([action])
+                called = launch if action == "start" else stop
+                self.assertEqual(called.call_args.args[0].action, action)
+
     def launch(self, root, run_dir, transport="tcp", profile="baseline"):
         commands = []
         original_open = Path.open

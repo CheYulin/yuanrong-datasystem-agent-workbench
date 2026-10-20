@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import io
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -216,6 +217,7 @@ class AdmissionTests(unittest.TestCase):
             out = root / "out"
             out.mkdir()
             runner = object.__new__(batch_runner.Runner)
+            runner.workflow_observer, runner.log = None, io.StringIO()
             runner.root, runner.out = root, out
             runner.args = SimpleNamespace(action="run", repeats=3, gate="gate")
             runner.products = {name: {} for name in ["datasystem", "mooncake", "lmcache"]}
@@ -291,6 +293,7 @@ class AdmissionTests(unittest.TestCase):
             out = root / "out"
             out.mkdir()
             runner = object.__new__(batch_runner.Runner)
+            runner.workflow_observer, runner.log = None, io.StringIO()
             runner.root, runner.out = root, out
             runner.args = SimpleNamespace(action="run", repeats=3, gate="gate")
             runner.event = lambda *args, **kwargs: None
