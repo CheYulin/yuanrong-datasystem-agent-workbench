@@ -10,7 +10,9 @@ from kvcbench.run.stage import stage
 
 
 def run_stage(args, *, drain_cgroups=drain):
-    return stage(args, verify_builds=catalog.validate_builds,
+    selected = getattr(args, "build_catalog", None)
+    verifier = catalog.validate_builds if selected is None else lambda root: catalog.validate_saved_catalog(selected, root)
+    return stage(args, verify_builds=verifier,
                  snapshot_builds=catalog.install_provenance,
                  install_inputs=install_package, drain_cgroups=drain_cgroups)
 
@@ -35,6 +37,7 @@ def bootstrap_main(argv=None, executor=run_stage):
     parser.add_argument("--builds-only-native-root", "--native-root", dest="builds_only_native_root", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--bundle", type=Path, required=True)
+    parser.add_argument("--build-catalog", type=Path, help="Explicit accepted catalog; rechecked before staging")
     parser.add_argument("--mooncake-queue", type=int, default=8192)
     parser.add_argument("--feature-profile", choices=["pure-kv"], default="pure-kv")
     parser.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))

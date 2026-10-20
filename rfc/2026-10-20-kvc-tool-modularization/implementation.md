@@ -143,3 +143,15 @@ LMCache probe 改用 `-I -B`，目标机实际复核加载了固定 source/lmcac
 P3 剩余环境/恢复和统一资源锁、P4/P5 工作流绑定、P6 入口清理、实际资格/全新正式矩阵、最终报告及公开验收仍保留在目标内。
 
 Mermaid vendor 从已使用的本地阅读器逐字节保留，vendor.json 记录 SHA/size；其 minified 模板字符串含尾随空白，.gitattributes 仅对这一文件关闭 whitespace 报错，不改写第三方字符串，其他源码继续执行完整 diff --check。
+
+## 13. 构建重验的独立中间结果
+
+新增 `python3 -m kvcbench.build.revalidate --root <native-root> --out <native-root>/revalidation/<fresh-attempt>`。它持原构建域锁，要求原命令成功、时间区间对应、构建已排空和移除，重新检查源版本、编译器和产物；新产物 hash/size 必须与原 metadata 一致。保留原 metadata、失败回执和命令日志，不重新执行 recipe。输出新的各产品 metadata、`build-catalog.json`、`result.json`，后者绑定原记录、命令日志、验证代码及本次耗时，明确 `compiled_in_this_attempt=false`。
+
+目标节点 native004 的 `revalidation/attempt-001` 因主项目 CMakeCache 含非 UTF-8 诊断内容而拒绝；原失败文件保留。读取改为 surrogateescape，仍对编译器路径逐字匹配。`attempt-002` 于原生目标节点通过，耗时 **4.072820486 秒**，绑定 10 个原输入，三个产品 `identity_valid=true`，未重编译、未修改原产物。
+
+部署入口新增显式 `--build-catalog`，消费时重新检查所选 metadata 与实际原生产物；部署快照及离线来源审计使用该明确路径。不会自动挑选最近一次目录。原默认 metadata 仍保留失败身份，未因重验改写历史结论。
+
+验证命令：在工具目录执行 `python3 -m unittest test_batch_build_stage test_batch_stage_overrides tests.contract.test_build_service tests.contract.test_toolchain`，**38 项通过，7.074 秒**。新增验证覆盖原件保持、重复输出目录拒绝、完整产品选择、安全路径、已保存 catalog 与原生产物篡改，以及包含非 UTF-8 字节的缓存。这里仅验收构建重用来源，不声称接口资格、正式性能或 W01–W18 全链已通过。
+
+本次修改不触及 SDK 测量热路径、产品源码、运行共享状态或持久化数据。并发约束为构建域独占锁；重验失败输出保留，重做使用新目录。下一步仍须解决跨运行根目录的共同资源锁，之后才进入新部署和资格验证。

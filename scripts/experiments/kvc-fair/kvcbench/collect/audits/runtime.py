@@ -128,7 +128,10 @@ def verify_source_build_provenance(stage, runtime_records, builds, *, products):
     expected_inputs = {f"builds/{product}.json" for product in PRODUCTS}
     native_inputs, expected_artifacts = set(), {}
     for product, spec in PRODUCTS.items():
-        metadata_name = f"build-metadata/{product}.json"
+        metadata_name = validation.get("metadata_paths", {}).get(product, f"build-metadata/{product}.json")
+        metadata_path = Path(metadata_name)
+        if metadata_path.is_absolute() or ".." in metadata_path.parts or str(metadata_path) in {"", "."}:
+            raise ValueError("Unsafe source-build metadata selection")
         recipe_name = spec["script"]
         native_inputs.update([metadata_name, recipe_name])
         copies = ["builds-provenance/inputs/" + relative for relative in [metadata_name, recipe_name]]

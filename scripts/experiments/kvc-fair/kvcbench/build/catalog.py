@@ -30,23 +30,27 @@ def build_root(native_root):
     return supplied.resolve(strict=True)
 
 
-def validate_builds(native_root, products=None):
+def validate_builds(native_root, products=None, record_paths=None):
     root = build_root(native_root)
     names = list(build_metadata.PRODUCTS) if products is None else list(products)
     if not names or len(set(names)) != len(names) or any(name not in build_metadata.PRODUCTS for name in names):
         raise ValueError("Unknown or duplicate product selection")
-    for name in names:
-        regular(root, f"build-metadata/{name}.json")
-    records = build_metadata.load_metadata(root) if products is None else {
-        name: build_metadata.read_json(root / "build-metadata" / (name + ".json")) for name in names}
-    artifacts, provenance = {}, {"native_root": str(root), "products": {}, "inputs": {}, "artifact_aliases": {}}
+    if record_paths is not None and set(record_paths) != set(names):
+        raise ValueError("Explicit metadata selection must identify every selected product")
+    paths = {name: str(regular(root, record_paths[name] if record_paths is not None
+                              else f"build-metadata/{name}.json").relative_to(root)) for name in names}
+    if len(set(paths.values())) != len(names):
+        raise ValueError("Products must select distinct metadata files")
+    records = {name: build_metadata.read_json(root / paths[name]) for name in names}
+    artifacts, provenance = {}, {"native_root": str(root), "products": {}, "inputs": {}, "artifact_aliases": {},
+                                 "metadata_paths": paths}
     for name in names:
         spec = build_metadata.PRODUCTS[name]
         row = records[name]
         if (row.get("product") != name or row.get("tag") != spec["tag"] or row.get("sha") != spec["sha"]
                 or row.get("build_exit") != 0 or row.get("identity_valid") is not True):
             raise ValueError("Successful pinned build identity is required: " + name)
-        metadata = regular(root, f"build-metadata/{name}.json")
+        metadata = regular(root, paths[name])
         provenance["inputs"][str(metadata.relative_to(root))] = identity(metadata)
         for relative, expected in row.get("compiler_inputs", {}).items():
             if Path(relative).parts[:2] != ("compiler-inputs", name):
@@ -116,7 +120,7 @@ def validate_builds(native_root, products=None):
                 raise ValueError("Two products claim the same native artifact")
             artifacts[str(path)] = observed
         provenance["products"][name] = {"tag": spec["tag"], "head": head, "tag_sha": tag, **state,
-                                       "metadata": f"build-metadata/{name}.json", "recipe": spec["script"],
+                                       "metadata": paths[name], "recipe": spec["script"],
                                        "smoke_exit": row.get("smoke_exit"), "legacy_suites_required": False}
     provenance.update(scope="Fresh HEAD/tag/status, recorded successful build identity, recipe bytes and native output hashes/sizes. This does not independently attest compiler execution; fresh batch gate and smoke remain required. No legacy performance or smoke success is synthesized.",
                       native_artifacts=artifacts)
@@ -124,15 +128,17 @@ def validate_builds(native_root, products=None):
 
 
 def install_provenance(root, temporary, records, provenance):
-    current, _, current_provenance = validate_builds(root)
+    current, _, current_provenance = validate_builds(root, products=list(records),
+                                                   record_paths=provenance.get("metadata_paths"))
     if current != records or current_provenance != provenance:
         raise ValueError("Source build identity changed while staging")
     for name in records:
-        source = regular(root, f"build-metadata/{name}.json")
+        metadata_name = provenance.get("metadata_paths", {}).get(name, f"build-metadata/{name}.json")
+        source = regular(root, metadata_name)
         destination = temporary / "builds" / (name + ".json")
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-        if identity(destination) != provenance["inputs"][f"build-metadata/{name}.json"]:
+        if identity(destination) != provenance["inputs"][metadata_name]:
             raise ValueError("Copied build metadata differs from its validated source")
     for relative, expected in provenance["inputs"].items():
         source = regular(root, relative)
@@ -151,3 +157,13 @@ def install_provenance(root, temporary, records, provenance):
     paths += [Path("builds-provenance/inputs") / relative for relative in provenance["inputs"]]
     return {"schema_version": 1, "path": "builds-provenance/validation.json", **identity(validation),
             "inputs": {path.as_posix(): identity(temporary / path) for path in paths}}
+
+
+def validate_saved_catalog(path, native_root):
+    saved = build_metadata.read_json(path)
+    provenance = saved.get("provenance", {})
+    records, artifacts, current = validate_builds(native_root, record_paths=provenance.get("metadata_paths"))
+    if (saved.get("schema_version") != 1 or saved.get("records") != records
+            or saved.get("artifacts") != artifacts or provenance != current):
+        raise ValueError("Saved build catalog differs from current selected build evidence")
+    return records, artifacts, current

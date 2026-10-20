@@ -51,7 +51,8 @@ class ToolchainTests(unittest.TestCase):
             row, dependency_cache = self.fixture(root)
             dependency_cache.unlink()
             project_cache = root / 'datasystem/build/CMakeCache.txt'
-            project_cache.write_text('CMAKE_CXX_COMPILER:FILEPATH=' + str(root / row['wrapper']['path']) + '\n')
+            project_cache.write_bytes(b'# non-UTF8 diagnostic: \xe1\n' +
+                                      ('CMAKE_CXX_COMPILER:FILEPATH=' + str(root / row['wrapper']['path']) + '\n').encode())
             self.assertEqual(len(verify(root)), 2)
 
     def test_changed_real_compiler_or_wrapper_is_rejected(self):

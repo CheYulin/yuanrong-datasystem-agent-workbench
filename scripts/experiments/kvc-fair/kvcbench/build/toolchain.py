@@ -58,7 +58,7 @@ def verify(root):
     cache = project_cache if project_cache.is_file() else root / 'datasystem/build/_deps/rocksdb-build/CMakeCache.txt'
     compiler_path = str(root / record['wrapper']['path'])
     if not any(line.startswith('CMAKE_CXX_COMPILER:') and line.split('=', 1)[-1] == compiler_path
-               for line in cache.read_text().splitlines()):
+               for line in cache.read_text(errors='surrogateescape').splitlines()):
         raise ValueError('DataSystem CMake did not use the recorded compatibility compiler driver')
     inputs = [root / record['wrapper']['path'], root / 'compiler-inputs/datasystem/record.json']
     c_path = root / 'compiler-inputs/datasystem/c-record.json'
@@ -74,11 +74,11 @@ def verify(root):
                 raise ValueError('C compiler input changed: ' + key)
         config = root / 'datasystem/build/_deps/iconv-src/config.log'
         if config.is_file():
-            c_verified = "CC='" + str(root / c_record['wrapper']['path']) + "'" in config.read_text()
+            c_verified = "CC='" + str(root / c_record['wrapper']['path']) + "'" in config.read_text(errors='surrogateescape')
         else:
             c_verified = project_cache.is_file() and any(
                 line.startswith('CMAKE_C_COMPILER:') and line.split('=', 1)[-1] == str(root / c_record['wrapper']['path'])
-                for line in project_cache.read_text().splitlines())
+                for line in project_cache.read_text(errors='surrogateescape').splitlines())
         if not c_verified:
             raise ValueError('iconv or DataSystem CMake did not use the recorded C17 driver')
         inputs.extend([c_path, root / c_record['wrapper']['path']])

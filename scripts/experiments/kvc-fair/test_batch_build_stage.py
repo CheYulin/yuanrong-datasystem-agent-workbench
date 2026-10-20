@@ -103,6 +103,66 @@ class BuildStageTests(unittest.TestCase):
         with mock.patch.object(batch_stage, "drain"):
             return batch_stage.stage(self.args)
 
+    def test_explicit_revalidation_preserves_original_metadata(self):
+        from kvcbench.build.catalog import validate_builds, install_provenance
+        paths = {name: f"revalidation/attempt-001/{name}.json" for name in self.specs}
+        for name, relative in paths.items():
+            original = self.native / f"build-metadata/{name}.json"
+            write(self.native / relative, original.read_text())
+            row = json.loads(original.read_text())
+            row["identity_valid"] = False
+            write(original, json.dumps(row))
+        original_bytes = {name: (self.native / f"build-metadata/{name}.json").read_bytes() for name in paths}
+        with self.assertRaises(ValueError):
+            validate_builds(self.native)
+        records, _, provenance = validate_builds(self.native, record_paths=paths)
+        self.target.mkdir()
+        install_provenance(self.native, self.target, records, provenance)
+        self.assertEqual(provenance["metadata_paths"], paths)
+        for name, relative in paths.items():
+            self.assertEqual((self.target / "builds-provenance/inputs" / relative).read_bytes(),
+                             (self.native / relative).read_bytes())
+            self.assertEqual((self.native / f"build-metadata/{name}.json").read_bytes(), original_bytes[name])
+        write(self.native / paths["datasystem"], "{}")
+        with self.assertRaises(ValueError):
+            install_provenance(self.native, self.target, records, provenance)
+
+    def test_explicit_metadata_selection_requires_complete_safe_paths(self):
+        from kvcbench.build.catalog import validate_builds
+        with self.assertRaises(ValueError):
+            validate_builds(self.native, record_paths={"datasystem": "build-metadata/datasystem.json"})
+        paths = {name: f"build-metadata/{name}.json" for name in self.specs}
+        paths["datasystem"] = "../outside.json"
+        with self.assertRaises(ValueError):
+            validate_builds(self.native, record_paths=paths)
+
+    def test_revalidation_is_read_only_for_original_build_attempt(self):
+        from kvcbench.build.revalidate import revalidate
+        from kvcbench.build.catalog import validate_saved_catalog
+        write(self.native / "build-result.json", json.dumps({"fatal": None, "cleanup": {
+            "removed": True, "drained": {"populated": []}}}))
+        for name, spec in self.specs.items():
+            write(self.native / f"commands/{name}/build-command.json", json.dumps({
+                "returncode": 0, "error": None, "argv": ["bash", str(self.native / spec["script"])],
+                "cwd": str(self.native), "start_wall_ns": 100, "end_wall_ns": 200,
+                "log": str(self.native / f"commands/{name}/build.log")}))
+            write(self.native / f"commands/{name}/build.log", "fixture completed; no real compilation\n")
+        before = snapshot(self.native)
+        out = self.native / "revalidation/attempt-001"
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = revalidate(self.native, out)
+        self.assertTrue(result["accepted"])
+        self.assertFalse(result["compiled_in_this_attempt"])
+        after = snapshot(self.native)
+        self.assertEqual(before, {path: value for path, value in after.items()
+                                 if not path.startswith("revalidation/") and path != "suite.lock"})
+        validate_saved_catalog(out / "build-catalog.json", self.native)
+        with self.assertRaises(FileExistsError):
+            revalidate(self.native, out)
+        write(self.native / "datasystem/output/sdk.whl", "changed native bytes")
+        with self.assertRaises(ValueError):
+            validate_saved_catalog(out / "build-catalog.json", self.native)
+
     def metadata(self, product="datasystem"):
         return self.native / f"build-metadata/{product}.json"
 
