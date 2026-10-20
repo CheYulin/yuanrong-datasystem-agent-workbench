@@ -21,7 +21,7 @@ try {
     page.on('pageerror',e=>state.pageErrors.push(String(e)));
     page.on('requestfailed',r=>state.networkErrors.push({url:r.url(),error:r.failure()?.errorText}));
     await page.goto(base,{waitUntil:'networkidle'});
-    await page.waitForFunction(()=>window.KVC_BATCH_DATA&&Object.keys(window.KVC_BATCH_CHARTS||{}).length===8);
+    await page.waitForFunction(()=>window.KVC_BATCH_DATA&&Object.keys(window.KVC_BATCH_CHARTS||{}).length===9);
     const data=await page.evaluate(()=>window.KVC_BATCH_DATA);
     state.rows=data.rows.length;
     check(`${width}: full observed matrix`,data.rows.length===180&&data.rows.filter(r=>r.valid).length===150&&data.rows.filter(r=>r.status==='not_supported').length===30&&data.passed===true,{counts:data.counts,passed:data.passed});
@@ -30,7 +30,7 @@ try {
     const dimensions=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth,headings:[...document.querySelectorAll('main h2')].map(e=>e.textContent),captions:[...document.querySelectorAll('figure')].map(f=>{const a=f.querySelector('figcaption'),b=f.querySelector('.chart'),x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return{align:getComputedStyle(a).textAlign,below:x.top>=y.bottom-1,center:Math.abs(x.left+x.width/2-y.left-y.width/2),text:a.textContent};}),charts:Object.entries(window.KVC_BATCH_CHARTS).map(([id,c])=>({id,width:c.getWidth(),dom:c.getDom().getBoundingClientRect().width}))}));
     state.dimensions=dimensions;
     check(`${width}: no horizontal page overflow`,dimensions.scroll<=width+1,dimensions);
-    check(`${width}: numbered sections and centered captions`,dimensions.headings.length===6&&dimensions.headings.every((h,i)=>h.startsWith(`${i+1}.`))&&dimensions.captions.length===8&&dimensions.captions.every(c=>c.align==='center'&&c.below&&c.center<2));
+    check(`${width}: numbered sections and centered captions`,dimensions.headings.length===7&&dimensions.headings.every((h,i)=>h.startsWith(`${i+1}.`))&&dimensions.captions.length===9&&dimensions.captions.every(c=>c.align==='center'&&c.below&&c.center<2));
     check(`${width}: all charts sized`,dimensions.charts.every(c=>c.width>100&&Math.abs(c.width-c.dom)<2));
     await page.screenshot({path:path.join(output,`${width}-initial.png`),fullPage:false});
     for(const operation of operations){

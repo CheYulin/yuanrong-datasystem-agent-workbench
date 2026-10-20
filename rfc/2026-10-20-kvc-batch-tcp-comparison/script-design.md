@@ -6,7 +6,8 @@
 python3 scripts/experiments/kvc-fair/batch_workflow.py stage
 python3 scripts/experiments/kvc-fair/batch_workflow.py prepare
 python3 scripts/experiments/kvc-fair/batch_workflow.py gate
-# 带 strace 的门禁若如本次在 Mooncake B4096 失败，保留原失败，不覆盖。
+# 以下 diagnose/compose 是默认r2失败链的独立复现；r3 gate1成功时跳过。
+# 如需原默认配置，stage显式 --mooncake-queue 0，且为每次重放设置全新目录。
 python3 scripts/experiments/kvc-fair/batch_workflow.py diagnose
 python3 scripts/experiments/kvc-fair/batch_workflow.py compose
 python3 scripts/experiments/kvc-fair/batch_workflow.py smoke
@@ -39,3 +40,7 @@ python3 scripts/experiments/kvc-fair/batch_workflow.py publish
 `batch_compose_gate.py` 只组合已完成的正确性证据：严格核对全部冻结输入/构建物、10份组件JSON及原生能力/完整步骤，生成新 `batch-gate-002`，保留组件路径/SHA/实际起止/原失败summary；组合本身耗时2.118175008s，不伪称重跑。后续 runner 显式使用 `--gate batch-gate-002`；正式性能测量无 strace。原 gate 与诊断的成功均不充当正式重复。
 
 本次 composer 真实执行源码 SHA 为 `4d0bba088f8de1cc0039ada8d997af9d0528b65b37774c1e9b5a095d03721bbf`；后续 canonical 版本仅补 helper 快照归档，不能把新版哈希标为旧执行源码。诊断真实源码 SHA 为 `393b16235fd633658feaa7f10df7e91c155f893ea8f4f46124b371a2169dda3a`。收集阶段需另取这两个外部 helper 原件，和 stage 文件列表分开校验。
+
+## 4.2 容量诊断入口
+
+`batch_queue_probe.py --root <已冻结root> --out <root/全新诊断目录>` 在同一锁和cgroup下，以独立fresh服务串行对default与queue8192做C8/B4096/1KiB更新验证。返回0表示两组均终止并清理成功，不表示default原生调用成功；native_valid逐组保存。该诊断不进入三轮性能重复，参数/环境/原始log/单调耗时/source快照全部留存。新主矩阵使用r3独立root、environment、local-output，默认gate=1；r2失败链全部放history/default-r2，不覆盖或复用其成功性能行。

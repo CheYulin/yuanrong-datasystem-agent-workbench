@@ -26,3 +26,15 @@
 - gate2为证据组合，不是新测量：2.118175008s。
 - 针对运行/门禁/协议审计/组合脚本的107项离线机制检查通过（2.583s）；QA脚本Node语法检查通过。报告分析器仍在独立审查，未将其草稿fixture当作此运行验收。
 - DS实际TCP审计：16组合中12满足指定key0前缀+字节量；4个B4096 GET均达到至少4MiB直接TCP成功读取，但-s2048截取未见指定key0前缀。此证据暂不完整，不把它改写成4个数据正确性失败；原门禁完整bytes/顺序已通过，保留原审计结果及范围。
+
+## 5.4 默认 C8 smoke 与容量适配决策
+
+默认r2 smoke在199.051957721s后终止：DS完整通过，Mooncake B4096首次PUT通过，但UPSERT在预热报TRANSFER_FAIL(-800)，未进入该op正式SDK窗口；两client失败具体keys在pool尾部。原始日志/JSON完整保留，未把失败当P99或吞吐零。四cgroup排空后恢复先前暂停的setroubleshootd，恢复操作0.219884131s、无错误、观察为active；随后新r3会重新准备并记录。
+
+容量适配仅增大Mooncake每peer queued/pending为8192，lane数、admission timeout、构建物、资源、客户端数不变。必须先通过新profile的原生门禁及C8 smoke后才开始主矩阵；不能把旧r2成功部分直接充当r3重复。具体QUEUE_FULL归因仍待warning诊断，不由尾部failed indices推断为已证明。
+
+## 5.5 容量机制诊断与严格 TCP 补验
+
+同冻结r2输入的queue-capacity-diagnostic-001共96.501955708s，default native_valid=false、queue8192 native_valid=true；两组均完成、清理成功。仅客户端声明GLOG1，旧server env.sh仍可设置2；未观察到明确QUEUE_FULL/rejection日志，不能把generic TRANSFER_FAIL直接写成已定位的queue-full。首版实际probe源码SHA为ec0b735a63c6f44d9125132b3d2ed19f8bbd1c0714179fb05ff6aa0dd3b405d4，原件在probe-source.py；canonical8e9后补静态controls与目录复用保护，后续复现使用，不能冒称本次执行源码。
+
+严格TCP离线补验以同case/version0任一完整1KiB payload、正确方向/endpoint/窗口、正返回实际字节范围和整批TCP字节下限为合同，16/16组合（32方向）通过，耗时15.667086592s。旧key0未捕获审计原件不改。新审计SHA0fa183e20cec830a0b1b0b54378786379864ad28e65b130c97a5ffcb49e84a12；不扩大为整批每字节均被跟踪打印证明。

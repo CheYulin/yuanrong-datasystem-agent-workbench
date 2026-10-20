@@ -2,6 +2,8 @@
 
 ## 3.1 固定矩阵
 
+主矩阵使用独立 r3 容量适配 profile：Mooncake per-peer queued/pending 均8192，lane 与 admission timeout 原值，全部 B 使用同一配置；DS/LM 及三方 cgroup/并发/协议/数据量均不变。默认 r2 下带跟踪门禁和 C8 无跟踪 smoke 的实际失败单列为诊断证据，不记为主矩阵的性能重复。
+
 每 key 1 KiB；B=1/16/256/4096；8 个独立客户端，各 endpoint 4 个；3 轮产品顺序依次 DS→Moon→LM、Moon→LM→DS、LM→DS→Moon。每轮各产品用相同的批量顺序；批量顺序按轮旋转。产品服务每轮启动一次，跨 B 保持热工作集，并明确这不是每格冷启动实验。
 
 | 操作 | DS | Mooncake | LMCache CPU TCP | 负载 |

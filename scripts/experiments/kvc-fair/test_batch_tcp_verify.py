@@ -50,7 +50,7 @@ def fixture_suite(root):
             for case in gate["cases"]:
                 count = case["batch_keys"]
                 key = case["key_prefix"] + "k0"
-                prefix = batch_gate.payload(key, 0, 1024)[:32]
+                prefix = batch_gate.payload(key, 0, 1024)
                 escaped = "".join(f"\\x{value:02x}" for value in prefix)
                 for name, syscall in [("put_initial_native_batch", "writev"), ("get_full_exact", "readv")]:
                     step = next(row for row in gate["steps"] if row.get("batch_keys") == count and row["name"] == name)
@@ -88,6 +88,11 @@ class TcpAuditTests(unittest.TestCase):
             for observed in case["wire"]["operations"].values():
                 self.assertEqual(observed["successful_bytes"], case["batch_keys"] * 1024)
                 self.assertTrue(observed["payload_prefix_observed"])
+                self.assertTrue(observed["full_payload_observed"])
+                sample = observed["payload_sample"]
+                self.assertEqual(sample["sample_key_index"], 0)
+                self.assertEqual(sample["sample_version"], 0)
+                self.assertEqual(sample["sample_size"], 1024)
                 self.assertNotIn("text", observed["anchors"][0])
                 self.assertFalse(Path(observed["anchors"][0]["path"]).is_absolute())
         json.dumps(result, allow_nan=False)
@@ -110,6 +115,66 @@ class TcpAuditTests(unittest.TestCase):
         result = audit.verify(self.root)
         self.assertFalse(result["valid"])
         self.assertTrue(any("insufficient" in error for case in result["cases"] for error in case["errors"]))
+
+    def test_only_32_byte_prefix_cannot_pass_even_with_large_tcp_count(self):
+        import re
+        path = self.cell / "wire-client-0-insert/strace.1234"
+        path.write_text(re.sub(r'iov_base="((?:\\x[0-9a-f]{2})+)"',
+                              lambda match: 'iov_base="' + match[1][:128] + '"', path.read_text()))
+        result = audit.verify(self.root)
+        self.assertFalse(result["valid"])
+        put = result["cases"][0]["wire"]["operations"]["put"]
+        self.assertTrue(put["payload_prefix_observed"])
+        self.assertFalse(put["full_payload_observed"])
+
+    def test_nonzero_same_batch_key_with_full_payload_is_valid_and_named(self):
+        import hashlib,re
+        path = self.cell / "wire-client-0-insert/strace.1234"
+        gate = json.loads((self.cell / "client-0-insert.json").read_text())
+        case = next(case for case in gate["cases"] if case["batch_keys"] == 4096)
+        old = batch_gate.payload(case["key_prefix"] + "k0", 0, 1024)
+        key = case["key_prefix"] + "k8"
+        body = batch_gate.payload(key, 0, 1024)
+        encode = lambda data: "".join(f"\\x{value:02x}" for value in data)
+        path.write_text(path.read_text().replace(encode(old), encode(body)))
+        result = audit.verify(self.root)
+        self.assertTrue(result["valid"], result.get("fatal"))
+        current = next(case for case in result["cases"] if case["client_index"] == 0 and case["write_mode"] == "insert" and case["batch_keys"] == 4096)
+        for observed in current["wire"]["operations"].values():
+            self.assertFalse(observed["legacy_first_key_prefix_observed"])
+            sample = observed["payload_sample"]
+            self.assertEqual(sample["sample_key"], key)
+            self.assertEqual(sample["sample_key_index"], 8)
+            self.assertEqual(sample["sample_binary_sha256"], hashlib.sha256(body).hexdigest())
+
+    def test_another_namespace_or_version_cannot_supply_payload_evidence(self):
+        import re
+        path = self.cell / "wire-client-0-insert/strace.1234"
+        original = path.read_text()
+        gate = json.loads((self.cell / "client-0-insert.json").read_text())
+        key = gate["cases"][0]["key_prefix"] + "k0"
+        for body in [batch_gate.payload("another-namespace-k0", 0, 1024), batch_gate.payload(key, 1, 1024)]:
+            encoded = "".join(f"\\x{value:02x}" for value in body)
+            path.write_text(re.sub(r'iov_base="(?:\\x[0-9a-f]{2})+"', lambda match: 'iov_base="' + encoded + '"', original, count=1))
+            result = audit.verify(self.root)
+            self.assertFalse(result["valid"])
+            self.assertFalse(result["cases"][0]["wire"]["operations"]["put"]["full_payload_observed"])
+
+    def test_full_printed_iov_beyond_successful_write_range_cannot_pass(self):
+        path = self.cell / "wire-client-0-insert/strace.1234"
+        lines = path.read_text().splitlines()
+        first = lines[0]
+        old = first[first.index("[{iov_base="):first.index("}], 1") + 1]
+        metadata = "".join("\\x00" for _ in range(512))
+        new = '[{iov_base="' + metadata + '", iov_len=512}, ' + old[1:]
+        lines[0] = first.replace(old, new).replace("}], 1)", "}], 2)")
+        path.write_text("\n".join(lines) + "\n")
+        result = audit.verify(self.root)
+        self.assertFalse(result["valid"])
+        put = result["cases"][0]["wire"]["operations"]["put"]
+        self.assertGreaterEqual(put["successful_bytes"], 1024)
+        self.assertTrue(put["payload_prefix_observed"])
+        self.assertFalse(put["full_payload_observed"])
 
     def test_unapproved_worker_endpoint_cannot_supply_tcp_proof(self):
         path = self.cell / "wire-client-0-insert/strace.1234"

@@ -87,6 +87,63 @@ def payload_identity(prefix, count):
             keys[0], payload(keys[0], 0, 1024)[:32].hex())
 
 
+@lru_cache(maxsize=8)
+def payload_candidates(prefix, count):
+    result = {}
+    for index in range(count):
+        key = prefix + "k" + str(index)
+        binary = payload(key, 0, 1024)
+        result.setdefault(binary[:8], []).append((index, key, binary))
+    return result
+
+
+def captured_segments(text):
+    vectors = list(re.finditer(r"\{iov_base=(.*?),\s*iov_len=(\d+)\}", text))
+    if vectors:
+        stream_offset = 0
+        for index, match in enumerate(vectors):
+            encoded = re.fullmatch(r'"((?:\\x[0-9a-fA-F]{2})*)"(?:\.\.\.)?', match[1].strip())
+            if encoded:
+                yield bytes.fromhex(encoded[1].replace("\\x", "")), stream_offset, index, int(match[2])
+            stream_offset += int(match[2])
+    else:
+        match = re.search(r'"((?:\\x[0-9a-fA-F]{2}){32,})"(?:\.\.\.)?,\s*(\d+)', text)
+        if match:
+            yield bytes.fromhex(match[1].replace("\\x", "")), 0, None, int(match[2])
+
+
+def full_payload_sample(suite, anchors, prefix, count, line_cache):
+    candidates = payload_candidates(prefix, count)
+    for anchor in anchors:
+        path = Path(anchor["path"])
+        if path not in line_cache:
+            line_cache[path] = path.read_bytes().splitlines()
+        lines = line_cache[path]
+        raw = lines[anchor["line"] - 1]
+        if hashlib.sha256(raw).hexdigest() != anchor["line_sha256"]:
+            raise ValueError("Trace line changed after directional parsing")
+        first = lines[anchor["first_line"] - 1]
+        text = (first + raw if anchor["first_line"] != anchor["line"] else raw).decode(errors="replace")
+        for binary, stream_start, iov_index, declared in captured_segments(text):
+            for offset in range(max(0, len(binary) - 1024 + 1)):
+                if stream_start + offset + 1024 > anchor["successful_bytes"] or offset + 1024 > declared:
+                    continue
+                for index, key, expected in candidates.get(binary[offset:offset + 8], []):
+                    if binary[offset:offset + 1024] != expected:
+                        continue
+                    return {"sample_key": key, "sample_key_index": index, "sample_version": 0,
+                            "sample_size": 1024, "sample_binary_sha256": hashlib.sha256(expected).hexdigest(),
+                            "input_path": str(path.relative_to(suite)), "input_line": anchor["line"],
+                            "input_line_sha256": anchor["line_sha256"], "input_first_line": anchor["first_line"],
+                            "input_first_line_sha256": hashlib.sha256(first).hexdigest(),
+                            "segment_byte_offset": offset, "syscall_stream_byte_offset": stream_start + offset,
+                            "iov_index": iov_index, "captured_segment_bytes": len(binary),
+                            "declared_buffer_bytes": declared, "successful_syscall_bytes": anchor["successful_bytes"],
+                            "timestamp_ns": anchor["timestamp_ns"], "tcp_endpoints": anchor["tcp_endpoints"],
+                            "syscall": anchor["syscall"], "actual_medium": "TCP"}
+    return None
+
+
 def compact_wire(wire, suite):
     result = {key: value for key, value in wire.items() if key != "trace_sha256"}
     for operation in result["operations"].values():
@@ -100,10 +157,10 @@ def compact_wire(wire, suite):
 def verify(suite):
     suite = Path(suite).resolve()
     directory = suite / "r0-datasystem"
-    result = {"schema_version": 1, "kind": "datasystem_native_batch_tcp_audit", "suite": str(suite),
+    result = {"schema_version": 2, "kind": "datasystem_native_batch_tcp_any_key_full_payload_audit", "suite": str(suite),
               "start_wall_ns": time.time_ns(), "start_mono_ns": time.monotonic_ns(),
               "cases": [], "inputs": {}, "valid": False,
-              "scope": "Captured gate clients only. Directional successful TCP syscall bytes include RPC overhead; a unique key-derived payload prefix must also occur. This does not prove every payload byte individually, RPC count, worker-worker transfers, or continuous tracing of formal performance runs."}
+              "scope": "Captured gate clients only. Every direction requires successful TCP syscall bytes >= batch_keys*1024, including RPC overhead, plus one complete 1024-byte version-0 payload derived from a key in this exact batch within the syscall's successful return range. Any-key presence does not prove every byte of all batch payloads, RPC count, worker-worker transfers, or continuous tracing of formal performance runs. Earlier key0-prefix-only audits are independent retained records."}
     def remember(path, expected=None):
         record = file_record(path)
         relative = str(path.relative_to(suite))
@@ -149,6 +206,7 @@ def verify(suite):
                     raise ValueError("No per-thread -ff strace files: " + str(traces))
                 for path in paths:
                     remember(path)
+                line_cache = {}
                 for count in BATCHES:
                     case = cases[count]
                     prefix = case.get("key_prefix")
@@ -174,10 +232,14 @@ def verify(suite):
                     errors = []
                     required = count * 1024
                     for operation, observed in wire["operations"].items():
+                        observed["legacy_first_key_prefix_observed"] = observed["payload_prefix_observed"]
+                        sample = full_payload_sample(suite, observed["anchors"], prefix, count, line_cache)
+                        observed["full_payload_observed"] = sample is not None
+                        observed["payload_sample"] = sample
                         if observed["successful_bytes"] < required:
                             errors.append(operation + " has insufficient successful TCP socket bytes")
-                        if observed["payload_prefix_observed"] is not True:
-                            errors.append(operation + " lacks its key-derived payload prefix on TCP")
+                        if sample is None:
+                            errors.append(operation + " lacks a complete same-case key-derived TCP payload; prefix-only is insufficient")
                     if wire["malformed"]:
                         errors.append("Malformed syscall evidence")
                     result["cases"].append({"client_index": index, "write_mode": mode, "batch_keys": count,

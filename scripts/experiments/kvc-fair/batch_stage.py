@@ -55,6 +55,9 @@ def stage(args):
                               preload_batch=1 if product["name"] == "lmcache" else 256,
                               get_check_batch=1 if product["name"] == "lmcache" else 4096)
                 product["adapter"] = str(root / ("batch_" + product["name"] + ".py"))
+                if product["name"] == "mooncake" and getattr(args, "mooncake_queue", 0):
+                    for name in ["MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER"]:
+                        product["env"][name] = str(args.mooncake_queue)
                 (temporary / "configs" / (product["name"] + ".json")).write_text(json.dumps(config, indent=2) + "\n")
             (temporary / "products.json").write_text(json.dumps(manifest, indent=2) + "\n")
             shutil.copytree(base / "formal-tcp-001/builds", temporary / "builds")
@@ -65,6 +68,7 @@ def stage(args):
             record = {"profile": "native-batch-tcp", "created_wall_ns": time.time_ns(), "root": str(root),
                       "base": str(base), "builds_reused": True, "build_artifacts": artifacts,
                       "shared_suite_lock_inode": (base / "suite.lock").stat().st_ino,
+                      "mooncake_queue_capacity": getattr(args, "mooncake_queue", 0),
                       "inputs": inputs, "old_experiment_inputs_modified": False}
             (temporary / "batch-stage.json").write_text(json.dumps(record, indent=2) + "\n")
             temporary.rename(root)
@@ -77,10 +81,13 @@ def stage(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base", type=Path, default=Path("/home/worktrees/kvc-fair-tcp-20261020"))
-    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r2"))
+    p.add_argument("--root", type=Path, default=Path("/home/worktrees/kvc-batch-tcp-20261020-r3"))
+    p.add_argument("--mooncake-queue", type=int, default=8192)
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--cgroup", type=Path, default=Path("/sys/fs/cgroup/kvcfair20261020"))
     args = p.parse_args()
+    if not 0 <= args.mooncake_queue <= 65535:
+        p.error("queue capacity must be 0 (native default) or at most 65535")
     record = stage(args)
     print(json.dumps({"root": record["root"], "inputs": len(record["inputs"]), "build_artifacts": len(record["build_artifacts"])}))
 

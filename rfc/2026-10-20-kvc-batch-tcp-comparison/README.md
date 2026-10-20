@@ -7,8 +7,9 @@
 - 目标：`tiantiyun-80c128g`，同节点两个服务，全部 TCP；沿用已构建的 DataSystem v0.9.2.rc44、Mooncake v0.3.13.post1、LMCache v0.5.6，重新核验构建物 SHA256，不宣称重新编译。
 - 服务器合计 8 CPU / 12 GiB，客户端合计 8 CPU / 12 GiB，监控 2 CPU / 1 GiB；沿用独立 CPU、NUMA 与无 swap 的 cgroup 配置，所有新旧实验共享同一个 flock inode。
 - 每 key 1024 bytes；并发客户端 8，分别接入两个端点；批量数 `[1,16,256,4096]`；3 轮。GET/EXIST/更新各 20 秒，前置 warmup 3 秒。顺序按轮换产品顺序、共同批量顺序执行，避免产品始终第一个执行。
+- 主矩阵为容量适配配置：Mooncake `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=8192`、`MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=8192`，所有批量大小一致；lane 数与 admission timeout 保持原值，CPU/内存不变。默认参数在独立 r2 smoke 的 C8/B4096 UPSERT 已发生 TRANSFER_FAIL，原始失败和无跟踪诊断单列，不混入适配后性能。
 - 热数据工作集总计 65536 keys / 64 MiB，各客户端私有 8192 keys，跨批量数保持同一组 key。4096 keys / 请求 = 4 MiB，不把 4096 × 1 MiB / 请求塞入 12 GiB 客户端配额。
-- 新根目录 `/home/worktrees/kvc-batch-tcp-20261020-r2`；公开目录 `perf/kvc-batch-tcp-20261020`。旧单 key 输入、结果、页面均保留。
+- 新根目录 `/home/worktrees/kvc-batch-tcp-20261020-r3`；公开目录 `perf/kvc-batch-tcp-20261020`。旧单 key 输入、结果、页面均保留。
 
 ## 1.2 语义优先
 
