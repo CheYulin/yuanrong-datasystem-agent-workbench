@@ -1,6 +1,6 @@
 # 1. 模块化命令与阶段验收
 
-从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。当前已实现 P1 回执/工具包与 P2a 构建元数据/部署的模块归属；新的正式 workflow 命令仍在接入，现有 batch 驱动暂时保留。
+从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。当前已实现 P1 回执/工具包、P2a 构建元数据/部署归属及 P2b 实际 source-build 入口；新的正式 workflow 命令仍在接入，现有 batch 驱动暂时保留。
 
 ## 2. 制作和复核完整代码包
 
@@ -37,3 +37,17 @@ python3 -m unittest discover -s . -p 'test_*.py'
 ```
 
 contract 测试只使用本地 fixture 与自有子进程，无产品 SDK、SSH、root 或目标节点依赖。原有测试暂留根目录，后续随各模块迁移归入对应 tests 子目录。安全验证与真实产品 smoke 的入口和依赖仍需明确选择，不混入默认离线测试。
+
+
+## 5. 从源码构建并逐产品验收
+
+先根据 `configs/hosts/build.example.json` 写入显式新根目录、缓存、CPython 3.11、编译器和 cgroup 资源配置；在实际构建节点执行：
+
+```bash
+python3 -m kvcbench build --spec /absolute/path/build-spec.json
+python3 -m kvcbench status --workflow /absolute/new-native-root/workflow
+```
+
+构建根目录和 `kvcbuild` cgroup 必须全新。命令按冻结版本顺序执行 Mooncake、DataSystem、LMCache，输出各产品 `commands/<product>/`、`build-metadata/<product>.json` 及 W02 产品子步骤回执；只有三产品通过身份/原生产物验证才写 `build-catalog.json`。构建总结果与清理分别为 `build-result.json`、`build-cleanup.json`。失败原件不覆盖，不根据目录存在推断成功。
+
+该 W01/W02 scope 是源码构建，不包含正式压测资格、采样覆盖或整个 W01–W18 实验验收。构建支持的 CPU/内存预算和现场可用性必须在目标机确认；现有缓存用于依赖加速，不把复用旧产物记录为新构建。

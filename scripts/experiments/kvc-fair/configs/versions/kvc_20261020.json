@@ -17,7 +17,8 @@
       "native_required": [
         "datasystem_worker"
       ],
-      "scope": "DataSystem worker and SDK built from pinned C++ source; ETCD and some OS/Python/third-party dependencies may be prebuilt binaries. No source build of ETCD is claimed."
+      "scope": "DataSystem worker and SDK built from pinned C++ source; ETCD and some OS/Python/third-party dependencies may be prebuilt binaries. No source build of ETCD is claimed.",
+      "recipe_source": "kvcbench/build/recipes/datasystem/build.sh"
     },
     "mooncake": {
       "tag": "v0.3.13.post1",
@@ -34,7 +35,8 @@
       "native_required": [
         "mooncake_transfer_engine-"
       ],
-      "scope": "Mooncake's native C++ implementation compiled into a wheel from the pinned source recipe; private xxHash is built from source; OS packages and Python build/runtime dependencies may be binary distributions."
+      "scope": "Mooncake's native C++ implementation compiled into a wheel from the pinned source recipe; private xxHash is built from source; OS packages and Python build/runtime dependencies may be binary distributions.",
+      "recipe_source": "kvcbench/build/recipes/mooncake/build.sh"
     },
     "lmcache": {
       "tag": "v0.5.6",
@@ -51,7 +53,8 @@
         "lmcache_fs.",
         "lmcache_redis."
       ],
-      "scope": "LMCache itself built from pinned source with NO_GPU_EXT=1, preserving lmcache_native/lmcache_fs/lmcache_redis C++ extensions. CPU PyTorch and other Python/OS dependencies are binaries; PyTorch and CUDA extensions are not built from source."
+      "scope": "LMCache itself built from pinned source with NO_GPU_EXT=1, preserving lmcache_native/lmcache_fs/lmcache_redis C++ extensions. CPU PyTorch and other Python/OS dependencies are binaries; PyTorch and CUDA extensions are not built from source.",
+      "recipe_source": "kvcbench/build/recipes/lmcache/build_lmcache.sh"
     }
   }
 }

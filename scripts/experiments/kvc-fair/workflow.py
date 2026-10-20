@@ -69,7 +69,7 @@ def main():
             started = time.time_ns()
             exit_code = 0
             try:
-                ssh(["env","TASK_ROOT="+root,"MOONCAKE_ROOT="+root+"/mooncake","LMCACHE_ROOT="+root+"/lmcache","bash",root+"/"+script])
+                ssh(["env","TASK_ROOT="+root,"MOONCAKE_ROOT="+root+"/mooncake","LMCACHE_ROOT="+root+"/lmcache","PYTHON_ROOT="+root+"/mooncake/python/cpython-3.11.15-linux-x86_64-gnu","bash",root+"/"+script])
             except subprocess.CalledProcessError as exc:
                 exit_code = exc.returncode
                 raise

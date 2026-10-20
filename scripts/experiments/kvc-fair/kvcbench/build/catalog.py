@@ -30,14 +30,22 @@ def build_root(native_root):
     return supplied.resolve(strict=True)
 
 
-def validate_builds(native_root):
+def validate_builds(native_root, products=None):
     root = build_root(native_root)
-    for name in build_metadata.PRODUCTS:
+    names = list(build_metadata.PRODUCTS) if products is None else list(products)
+    if not names or len(set(names)) != len(names) or any(name not in build_metadata.PRODUCTS for name in names):
+        raise ValueError("Unknown or duplicate product selection")
+    for name in names:
         regular(root, f"build-metadata/{name}.json")
-    records = build_metadata.load_metadata(root)
+    records = build_metadata.load_metadata(root) if products is None else {
+        name: build_metadata.read_json(root / "build-metadata" / (name + ".json")) for name in names}
     artifacts, provenance = {}, {"native_root": str(root), "products": {}, "inputs": {}, "artifact_aliases": {}}
-    for name, spec in build_metadata.PRODUCTS.items():
+    for name in names:
+        spec = build_metadata.PRODUCTS[name]
         row = records[name]
+        if (row.get("product") != name or row.get("tag") != spec["tag"] or row.get("sha") != spec["sha"]
+                or row.get("build_exit") != 0 or row.get("identity_valid") is not True):
+            raise ValueError("Successful pinned build identity is required: " + name)
         metadata = regular(root, f"build-metadata/{name}.json")
         provenance["inputs"][str(metadata.relative_to(root))] = identity(metadata)
         source = root / spec["source"]

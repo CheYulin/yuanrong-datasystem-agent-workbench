@@ -35,6 +35,8 @@ workspace/reliability/*.xlsx
 datasystem/
 !/scripts/experiments/kvc-fair/datasystem/
 !/scripts/experiments/kvc-fair/datasystem/**
+!/scripts/experiments/kvc-fair/kvcbench/build/recipes/datasystem/
+!/scripts/experiments/kvc-fair/kvcbench/run/products/datasystem/
 dashboard/__pycache__/
 
 /scripts/experiments/kvc-fair/datasystem/**/__pycache__/

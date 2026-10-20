@@ -1,3 +1,4 @@
+# Historical 2026-10-20 summary collector; not called by the source-build service.
 #!/usr/bin/env python3
 import datetime
 import hashlib

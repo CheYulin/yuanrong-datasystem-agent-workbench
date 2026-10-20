@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "root": "/absolute/artifacts/new-native-build",
+  "cache_root": "/absolute/shared-download-cache",
+  "python_root": "/absolute/shared-cpython-3.11-root",
+  "cc": "/absolute/toolchain/bin/gcc",
+  "cxx": "/absolute/toolchain/bin/g++",
+  "jobs": 8,
+  "cgroup": "/sys/fs/cgroup/kvcbuild-example",
+  "cpus": [0, 2, 4, 6, 8, 10, 12, 14],
+  "numa": 0,
+  "memory_bytes": 34359738368,
+  "timeout_s": 7200
+}

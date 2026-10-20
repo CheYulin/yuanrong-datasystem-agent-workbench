@@ -126,7 +126,7 @@ flowchart TB
 
 ## 7. 独立验收入口与实施顺序
 
-目标 CLI 在主设计入口基础上增加以下接口草案，**目前不可执行**：
+以下只读回执入口已在 P1 实现；它们能检查已接入步骤的持久化回执，**不表示 W01–W18 已全部接入或完成实际运行验收**：
 
 ```bash
 python3 -m kvcbench status --workflow <workflow-root>
