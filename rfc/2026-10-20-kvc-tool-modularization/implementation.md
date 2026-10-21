@@ -295,3 +295,9 @@ runtime004 外层真实命令已终止：returncode=0，5056.379312235 秒，W09
 以上命令/JSON/日志均在本地外部验证根 /home/t14s/workspace/scratch/2026-10-21-kvc-refactor，构建物和运行原件不提交仓库。仅清理工具旧 datasystem/mooncake/lmcache 三目录中已验证只包含 .pyc 的生成缓存，共 86811 bytes，未触碰产品源码或远端运行目录。
 
 按 ds-self-verify 复核：请求匹配模块化与逐步验收；本次未改 SDK 热循环、并发/进程生命周期、资源配额或原生产物；部署入口生成改为显式清单并拒绝缺失/符号链接，需在正式测量结束后再作目标节点新布局 gate/smoke。状态/回执仍封存后绑定、不覆盖旧 attempt。产品源码仓未改，无产品 .repo_context 结构变化；工具架构与迁移文档同步。Coordinator 正式候选仍使用其冻结 bundle-004，在 UTC 00:05 的实际 summary 已完成 r0 三产品与 r1 Mooncake，W09 未结束；不可用上述合成/本地通过提前宣布最终比较完成。
+
+## 21. 独立机械验证程序入口复核（2026-10-21）
+
+第 20 节已提交并推送 master：f2181b9a09394327d3bdd100b011651c47222e89。继续逐个检查非默认导入的独立程序时，发现 LMCache harness correctness 迁移后的 scalar 模块路径仍写成不存在的 run.benchmark；默认 567 项回归没有覆盖该独立入口。已改为 run.workers.scalar，子进程明确 cwd 为工具根并使用 -B。
+
+实际 --kind fake 运行通过四类调用及故意损坏 GET 拒绝，输出 p6-harness-fake-001。新增从无关目录启动该独立程序的回归，确认 rankable=false、四类调用齐全及 mismatch 被拒绝；连同布局/工具包契约共 **14 项通过，4.596 秒**（p6-harness-targeted-002.log）。假适配器仅验证工具机械行为，不计入产品结果。此修正只触及独立测试入口和清单，无 SDK 实现、并发、持久化或现场配置变化；diff 与文件范围已按 ds-self-verify 复核。

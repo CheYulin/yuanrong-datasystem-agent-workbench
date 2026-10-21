@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--output", type=Path, help="new local evidence directory; fake results are never product scores")
     args = parser.parse_args()
     adapter = TOOL_ROOT / ("tests/fixtures/fake_mechanics_backend.py" if args.kind == "fake" else "kvcbench/run/products/lmcache/adapter_lmcache.py")
-    for required in (TOOL_ROOT / "kvcbench/run/benchmark.py", adapter):
+    for required in (TOOL_ROOT / "kvcbench/run/workers/scalar.py", adapter):
         if not required.is_file():
             parser.error(f"Required helper file is missing: {required}")
     output = args.output or ROOT / ".evidence" / (f"harness-correctness-{args.kind}-{time.time_ns()}")
@@ -31,11 +31,11 @@ def main():
         run_id = f"correctness-{uuid.uuid4().hex}"
         for op in ("put", "get", "exist_hit", "exist_miss"):
             result_path = output / f"s{size}-c{concurrency}-{op}.json"
-            command = [sys.executable, "-m", "kvcbench.run.benchmark", "--adapter", str(adapter), "--config", str(config), "--op", op, "--size", str(size), "--concurrency", str(concurrency), "--duration", "0.05" if args.kind == "fake" else "2", "--warmup", "0", "--total-bytes", str(max(1 << 20, size * concurrency * 4)), "--preload-bytes", str(1 << 20), "--run-id", run_id, "--out", str(result_path)]
+            command = [sys.executable, "-B", "-m", "kvcbench.run.workers.scalar", "--adapter", str(adapter), "--config", str(config), "--op", op, "--size", str(size), "--concurrency", str(concurrency), "--duration", "0.05" if args.kind == "fake" else "2", "--warmup", "0", "--total-bytes", str(max(1 << 20, size * concurrency * 4)), "--preload-bytes", str(1 << 20), "--run-id", run_id, "--out", str(result_path)]
             if args.kind == "real" and op.startswith("exist"):
                 command.append("--skip-preload")
             with result_path.with_suffix(".log").open("w") as log:
-                completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=120)
+                completed = subprocess.run(command, cwd=TOOL_ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=120)
             result = json.loads(result_path.read_text())
             assert completed.returncode == 0 and result["valid"], result
             assert result["success"] == sum(c["success"] for c in result["clients"])
@@ -48,9 +48,9 @@ def main():
     if args.kind == "fake":
         config.write_text(json.dumps({"fault": "get_wrong_bytes"}))
         result_path = output / "intentional-corruption.json"
-        command = [sys.executable, "-m", "kvcbench.run.benchmark", "--adapter", str(adapter), "--config", str(config), "--op", "get", "--size", "1024", "--concurrency", "2", "--duration", "0.05", "--warmup", "0", "--run-id", "intentional-corruption", "--out", str(result_path)]
+        command = [sys.executable, "-B", "-m", "kvcbench.run.workers.scalar", "--adapter", str(adapter), "--config", str(config), "--op", "get", "--size", "1024", "--concurrency", "2", "--duration", "0.05", "--warmup", "0", "--run-id", "intentional-corruption", "--out", str(result_path)]
         with result_path.with_suffix(".log").open("w") as log:
-            completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=30)
+            completed = subprocess.run(command, cwd=TOOL_ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=30)
         result = json.loads(result_path.read_text())
         assert completed.returncode != 0 and not result["valid"] and "mismatch" in result["fatal"]
     summary = {"purpose": "harness correctness only, not performance comparison", "kind": args.kind, "rankable": False, "passed": True, "cases": rows}

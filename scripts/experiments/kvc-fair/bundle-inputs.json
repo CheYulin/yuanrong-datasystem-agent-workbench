@@ -276,6 +276,7 @@
     "tests/unit/run/test_batch_mooncake.py",
     "tests/unit/run/test_batch_runner_failure.py",
     "tests/unit/run/test_batch_stage_overrides.py",
+    "tests/unit/run/test_harness_correctness.py",
     "tests/unit/run/test_lmcache_profile.py",
     "tests/unit/run/test_mooncake_pure_kv_launcher.py",
     "tools/__init__.py",
