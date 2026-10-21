@@ -18,7 +18,7 @@ def html_core(content, profile):
         content = content.replace((asset + '?' + profile['query_prefix']).encode(), (asset + '?v=').encode())
     reader, beacon = profile['reader_block'].encode(), profile['beacon'].encode()
     counts = {'reader_blocks': content.count(reader), 'beacons': content.count(beacon)}
-    while content.endswith(b'\n' + reader + b'\n'):
+    while content.endswith(reader + b'\n'):
         content = content[:-len(reader) - 1]
     return content.replace(reader, b'').replace(beacon, b''), counts
 

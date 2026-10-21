@@ -405,3 +405,11 @@ coordinator-report-001 / coordinator-delivery-001 的 W15/W16 已真实通过；
 ## 29. W17 真正终止通过，W18 已开始（2026-10-21）
 
 全部21个分块命令返回0，目标端实际重组/ZIP/逐文件恢复通过，再由原installer完整核对4776文件manifest，源码与文件字节不改写。W17第四次attempt passed，**1734.650078315秒**，外部适配进程真正终止return0；安装目标perf/kvc-coordinator-modular-20261021。fresh首页基线290项→291项，CAS及gzip由原publisher执行，仅新增本报告，保留其他条目。前三次failed与暂存目录不覆盖。单次tail脚本核对原owner终态后已执行W18，现在进行实际公网下载，未把安装成功写成W18通过。
+
+## 30. W18 首次失败的真实定位与严格修正（2026-10-21）
+
+W18第一次实际failed，步骤71.375784849秒、外层80.618973176秒，错误Public HTML differs beyond the exact known site components；所有原始回执和独立tail001失败保留。实际捕获6个HTML：index通过；docs/build、index、results、scripts-design、test-cases都只有原件末尾没有换行而served core多1个换行。reader2/beacon1仍在精确profile范围内。修正html_core为剥离精确reader+伴随换行后缀，不要求该组件前已有换行；不对其他空白/未知脚本做归一化。
+
+实际6页捕获及旧已有页面对照在新校验下通过；4项针对性通过0.008秒，**全量580项通过57.975秒**。实际公网页面另经原正式browser.mjs三宽度测试通过，41.108270538秒，9图4文档/Mermaid/步骤目标/菜单/错误和N/A缺口均检查，已查看真实390截图。浏览器通过不代替完整ZIP下载。W18第二次只读验收已启动，新tail002只等待其真实终态再输出/验证独立附录，不重试SDK。
+
+此修正仅delivery只读校验及其测试/说明；包007、原报告、ZIP、native采样与数值分析完全不变。旧W18 validator-sources已封存，第二次使用的新源码也将独立封存并在附录提供，不混淆为包007原源码。按ds-self-verify无产品热路径/并发/持久化影响，产品.repo_context无须修改。

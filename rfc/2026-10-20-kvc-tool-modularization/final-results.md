@@ -12,7 +12,7 @@
 | Mooncake | 60 | 0 | 0 |
 | LMCache | 30 | 0 | 30 |
 
-DataSystem 的18条失败是 EXIST hit/miss 在B16/256/4096的三轮调用，原始错误为 RPC deadline exceeded。与历史ETCD基线的失败组合相同，不据此声称已完成TLS直接观测或新根因验证。LMCache的30条N/A是固定release没有等价的独立多key批量CPU/TCP PUT/UPSERT/GET接口；不以逐key循环替代后参与原生排名。
+DataSystem 的18条失败是 EXIST hit/miss 在B16/256/4096的三轮调用，原始错误为 RPC deadline exceeded。与历史ETCD基线的失败组合相同，不据此声称已完成TLS直接观测或新根因验证。LMCache的30条N/A细分为UPSERT全部B的12条，以及PUT/GET在B16/256/4096的18条；B1的fresh PUT/GET共6条有效，EXIST hit/miss全部B共24条有效。固定release的CPU接口不提供本实验要求的overwrite及独立多key批量PUT/GET语义；不以删除重写或逐key循环替代后参与原生排名。
 
 ## 3. 来源与复现边界
 
@@ -58,7 +58,7 @@ DataSystem 的18条失败是 EXIST hit/miss 在B16/256/4096的三轮调用，原
 
 ## 5. 已执行的验证与限制
 
-- 最新全量回归579项通过，62.309秒（public-html-all-002.log）；后续仅报告CSS/文档变动，对应实际浏览器预检通过，不为文档重复运行产品矩阵。
+- 最新全量回归580项通过，57.975秒（public-html-final-all-003.log）；新增精确HTML尾部校验测试。之前579项通过62.309秒保留；没有重跑SDK矩阵。
 - P6迁移映射142项，全部目标存在；工具源码根只保留README.md、bundle-inputs.json、requirements-report.txt三个文件。
 - SDK/共享worker的28个实现文件与24个部署shim资源字节一致；没有请求热循环改动。未执行旧/新源码交替性能基准，也不据目录调整声称性能提升。
 - W13/W14最终包完整审计通过，命令579.233766695秒；W15/W16外层命令658.028500788秒，返回0。原报告、干净解压、离线重生成的展示数据SHA一致：857900ac8b628cf1ca910161e482e0c49e527d05c8134d0606028823ee80f2e3。
@@ -70,3 +70,5 @@ DataSystem 的18条失败是 EXIST hit/miss 在B16/256/4096的三轮调用，原
 ## 6. 实际安装与公开验收状态
 
 [主报告](https://yche.me/perf/kvc-coordinator-modular-20261021/index.html)已安装。W17第四次attempt实际passed，1734.650078315秒；目标端完整4776文件manifest相同，首页290→291，只新增本报告。前三个操作员取消的failed保留。W18已开始实际公网下载，不以目标端SHA替代公网响应验证；独立逐步回执附录将在W18结束后生成，以避免主报告自引用hash。
+
+W18第一次71.375784849秒后failed，实际定位为5个无末尾换行的文档页所附精确阅读器组件的伴随换行。修正仅只读校验器；6个实际捕获HTML与旧基线、新增边界/篡改负例通过；第二次W18进行中。主报告源码包007不变，第二次实际W18源码以validator-sources另封存。实际公网页面三宽度浏览器已独立通过（41.108270538秒），仍不代替W18全量下载验收。

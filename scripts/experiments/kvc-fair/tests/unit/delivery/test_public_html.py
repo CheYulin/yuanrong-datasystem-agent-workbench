@@ -6,9 +6,9 @@ from kvcbench.platform.files import read_json
 
 
 class PublicHtmlTests(unittest.TestCase):
-    def fixture(self):
+    def fixture(self, ending=b'\n'):
         profile = read_json(SITE_PROFILE)
-        origin = b'<html><head><title>native results</title></head><body>132 valid, 18 failed</body></html>\n'
+        origin = b'<html><head><title>native results</title></head><body>132 valid, 18 failed</body></html>' + ending
         reader, beacon = profile['reader_block'].encode(), profile['beacon'].encode()
         served = origin.replace(b'</head>', reader + b'</head>').replace(b'</body>', beacon + b'</body>')
         served += reader + b'\n'
@@ -33,6 +33,16 @@ class PublicHtmlTests(unittest.TestCase):
         for content in corruptions:
             with self.subTest(content=content[-80:]), self.assertRaises(ValueError):
                 verify_html(origin, content)
+
+    def test_known_tail_preserves_the_origins_exact_final_newlines(self):
+        for ending in (b'', b'\n', b'\n\n'):
+            origin, served, _ = self.fixture(ending)
+            with self.subTest(ending=ending):
+                verify_html(origin, served)
+                with self.assertRaises(ValueError):
+                    verify_html(origin, served + b'\n')
+                with self.assertRaises(ValueError):
+                    verify_html(origin, served.replace(b'</body>', b' </body>'))
 
     def test_existing_reader_blocks_do_not_hide_core_changes_or_whitespace(self):
         origin, _, profile = self.fixture()
