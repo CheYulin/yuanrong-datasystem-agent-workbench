@@ -10,6 +10,37 @@ from kvcbench.platform.files import read_json
 from kvcbench.platform.files import digest
 
 
+SITE_PROFILE = Path(__file__).resolve().parents[2] / 'configs/reports/yche-html-20261021.json'
+
+
+def html_core(content, profile):
+    for asset in profile['assets']:
+        content = content.replace((asset + '?' + profile['query_prefix']).encode(), (asset + '?v=').encode())
+    reader, beacon = profile['reader_block'].encode(), profile['beacon'].encode()
+    counts = {'reader_blocks': content.count(reader), 'beacons': content.count(beacon)}
+    while content.endswith(b'\n' + reader + b'\n'):
+        content = content[:-len(reader) - 1]
+    return content.replace(reader, b'').replace(beacon, b''), counts
+
+
+def verify_html(origin, served):
+    source_sha = hashlib.sha256(origin).hexdigest()
+    if served == origin:
+        return {'source_sha256': source_sha, 'comparison': 'exact-origin'}
+    profile = read_json(SITE_PROFILE)
+    if profile.get('schema_version') != 1 or profile.get('id') != 'yche-reader-20261012-cloudflare-20261021':
+        raise ValueError('Unsupported known site HTML projection profile')
+    expected, before = html_core(origin, profile)
+    actual, after = html_core(served, profile)
+    bounded = (0 <= after['reader_blocks'] - before['reader_blocks'] <= profile['maximum_added_reader_blocks']
+               and 0 <= after['beacons'] - before['beacons'] <= profile['maximum_added_beacons'])
+    if actual != expected or not bounded:
+        raise ValueError('Public HTML differs beyond the exact known site components')
+    return {'source_sha256': source_sha, 'core_sha256': hashlib.sha256(expected).hexdigest(),
+            'comparison': 'exact-known-site-components-only', 'profile_sha256': digest(SITE_PROFILE),
+            'origin_components': before, 'served_components': after}
+
+
 def fetch(url, *, keep=False):
     checksum = hashlib.sha256()
     content = []
@@ -72,8 +103,14 @@ def verify(base, report, relative):
     expected = dict((line.split('  ', 1)[1], line.split('  ', 1)[0]) for line in raw.decode().splitlines())
     selected = dependencies(report, expected)
     for name in selected:
-        record, _ = fetch(base + quote(name) + '?sha256=' + expected[name])
-        if record['sha256'] != expected[name]:
+        is_html = name.endswith('.html')
+        record, content = fetch(base + quote(name) + '?sha256=' + expected[name], keep=is_html)
+        if is_html:
+            origin = (report / name).read_bytes()
+            if hashlib.sha256(origin).hexdigest() != expected[name]:
+                raise ValueError('Local HTML differs from the accepted manifest: ' + name)
+            record.update(verify_html(origin, content))
+        elif record['sha256'] != expected[name]:
             raise ValueError('Public dependency bytes differ: ' + name)
         records.append(record)
     home, content = fetch('https://yche.me/', keep=True)
@@ -82,4 +119,4 @@ def verify(base, report, relative):
         raise ValueError('Public homepage must register this report exactly once')
     records.append(home)
     return {'passed': True, 'url': base + 'index.html', 'downloads': records,
-            'scope': 'Actual public manifest, front-end/doc/provenance dependencies, all linked build/step intermediate files and full reproduction ZIP SHA; exactly one public homepage registration. Raw payload files are additionally hashed on the publication host during W17.'}
+            'scope': 'Actual public manifest, front-end/doc/provenance dependencies, all linked build/step intermediate files and full reproduction ZIP SHA; exactly one public homepage registration. HTML retains its actual served SHA and must match the origin core after only the bounded exact known site reader/beacon additions. Other bytes remain exact. Raw payload files are additionally hashed on the publication host during W17.'}

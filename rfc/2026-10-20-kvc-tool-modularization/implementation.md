@@ -352,3 +352,30 @@ coordinator-received-001 已取回并独立复核 **4517** 个文件：transport
 | 最新全量回归 | **576 项通过，61.091 秒**（resource-streaming-all-005.log）；此前版本 576 项通过，65.647 秒亦保留 |
 
 按 ds-self-verify：diff 限离线读取/哈希、其覆盖调用点、测试、清单与说明；SDK、运行并发、源构建、资源配额和已经冻结的测量/收集原件均未变。所有审计字段来源保持原文件，schema/缺失值和 PID 生命周期语义不变，工具架构说明同步。后续 W13/W14 将使用新冻结后处理包；P6 新布局现场验证也选择同一新包及全新 root/control002，先前为包004准备的 command001 未启动 SDK，保留为未执行准备记录。
+
+## 25. W14 首次全量通过与真实站点 HTML 预检（2026-10-21）
+
+coordinator-derived-001 使用包005的真实 W13/W14 已通过：counts=valid132/failed18/not_supported30；complete=true、evidence_verified=true、native_passed=false、issues=[]。**150 个已执行接口窗口**的资源覆盖全部达标、findings=0；21 个 distinct DataSystem Coordinator epoch 的独立来源/身份检查、构建/TCP/部署检查亦通过。原生失败仍为 rc44 EXIST hit/miss 的 B16/B256/B4096 × 三轮，原始错误均为 RPC deadline exceeded；与旧 ETCD 基线的失败组合相同，不据此声称直接观测了 TLS 内容或完成新的根因实验。
+
+该后处理命令 returncode=0，**monotonic 655.064008563 秒**；/usr/bin/time 单列的 wall elapsed 为 11:39.15、最大 RSS **2271140 KiB（约 2.17GiB）**。计时来源不同，保留原值，不相加或用一者覆盖另一者。全部 4.67GB 原始样本均参与，未采样缩减。真实前端投影另做大小预算检查，最终仍须 W15/W16 完整验收。
+
+发布前只读预检发现 yche.me 的 HTTP HTML 与站点磁盘原件不同：已部署 Nginx 添加阅读器标签并改写三个固定 query，公网另有固定 Cloudflare 统计标签和阅读器尾部。对旧已有页面取得原件 SHA d8443ca557c5274f4c555ab8f1fdcdf2ba08f8680e53b473b89fd0e912f56ce1、公网 SHA 9c45b122938aac5feda6f6a4574d1f9847319588bbab38647d4ef84be5a3801c；仅移除已逐字核验的公共组件后的核心 SHA 同为 14f40237fafb880cd2292e7088948000911af90d0e29f19975e58b3088ac6a5a。原件有1组阅读器，公网3组并增加1个公开统计组件。site profile 只描述这些已观察到的确定字节和数量上限，未修改站点配置。
+
+新增 configs/reports/yche-html-20261021.json 与 delivery.public 的精确校验；保留实际 served SHA，另记 source/core/profile SHA 和组件计数。其他 HTML 内容、未知 script、超量重复组件和统计组件变化均拒绝；非 HTML 依赖仍逐字节 SHA。profile 纳入 W18 实际验证源清单。实际预检对照通过（publication-existing-profile-check-002.json），7 项针对性通过（0.118 秒），**579 项全量通过（62.309 秒）**。按 ds-self-verify，diff 仅发布校验/profile、其测试与文档，不改 SDK/数值审计/原始证据。
+
+为使下载源码包包含此次站点验收修正，将使用新包006重新派生并独立验收最终报告输入；derived001 和包005的已通过证据仍保留，不改其原件或来源声明。
+
+## 26. P6 新布局目标节点实际验收通过（2026-10-21）
+
+全新 tiantiyun-80c128g:/home/worktrees/kvc-p6-layout-20261021-002（control 为 /home/cache/kvc-modular-20261021/p6-layout-control002）使用完整包005执行正式模块 CLI。外层命令 /home/cache/kvc-modular-20261021/p6-layout-command002/all-command.json 已真实终止：returncode=0、error=null，**731.933716645 秒**。独立 driver 检查 verified=true，W01–W07、资格/smoke入场、W07.smoke、W11 全部接受，no_formal_measurement=true、resource_domains_empty=true。
+
+| 实际 CLI 动作 | returncode | 耗时秒 |
+| --- | ---: | ---: |
+| workflow start | 0 | 15.214237635 |
+| workflow gate | 0 | 160.795617030 |
+| workflow smoke | 0 | 530.791468675 |
+| workflow restore | 0 | 1.370796573 |
+
+外层还包括前置原正式测量终态/回执核对，故不以四个动作之和代替外层耗时。root002 的冻结输入、入口物化、原生 Coordinator+两个 Workers、Mooncake/LMCache 实际启动和 SDK gate/smoke 均为这次真实新布局验证，未调用旧完整控制器。未再运行第二套正式性能矩阵，也未改写 coordinator003 的180个正式记录。
+
+本次 node proof 的包005与后续包006运行/SDK/观测相关实现保持相同；包006新增的是离线公网 HTML 适配和相应说明/测试/profile。相关版本分别记录，不把不同阶段的包写成同一执行来源。目标节点验证后的三个资源域为空、恢复通过；当前待最终报告与公开交付验收。

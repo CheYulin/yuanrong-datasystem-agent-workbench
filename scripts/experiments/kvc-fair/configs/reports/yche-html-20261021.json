@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "yche-reader-20261012-cloudflare-20261021",
+  "query_prefix": "sidebar-20261012-1&v=",
+  "assets": [
+    "/assets/css/document-reader-20261011.css",
+    "/assets/js/document-reader-20261011.js",
+    "/assets/js/document-layout-20261011.js"
+  ],
+  "reader_block": "<link rel=\"stylesheet\" href=\"/assets/css/document-reader-20261011.css?v=sidebar-20261012-1\"><script defer src=\"/assets/js/document-reader-20261011.js?v=sidebar-20261012-1\"></script><script defer src=\"/assets/js/document-layout-20261011.js?v=sidebar-20261012-1\"></script><link rel=\"stylesheet\" href=\"/assets/css/compact-navigation.css?v=sidebar-20261012-1\"><script defer src=\"/assets/js/compact-navigation.js?v=sidebar-20261012-1\"></script>",
+  "beacon": "<script type=\"module\" src=\"https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092\" integrity=\"sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==\" data-cf-beacon='{\"version\":\"2024.11.0\",\"token\":\"99e478818cfd48d09ae240cc5b677c84\",\"r\":1,\"spa\":2}' crossorigin=\"anonymous\"></script>\n",
+  "maximum_added_reader_blocks": 2,
+  "maximum_added_beacons": 1
+}

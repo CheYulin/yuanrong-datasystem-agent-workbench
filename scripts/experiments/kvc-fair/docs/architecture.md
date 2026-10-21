@@ -30,7 +30,7 @@
 
 commit 绑定回执文件，acceptance 绑定实际输入/结果/产物清单与验证代码快照，产物清单绑定真实文件 SHA/mode/size；上游也通过 commit hash 和实际文件绑定检查。修改 payload、权限、摘要、验证代码快照或上游来源都会使复核失败。
 
-P1 提供持久化和绑定机制；每个 W 步骤的业务验收函数仍随 build/run/observe/collect/report 模块逐步接入。通用回执不能替代产品正确性、采样覆盖、清理恢复或页面验收。
+P1 提供持久化和绑定机制；各 W 步骤由对应 build/run/observe/collect/report 模块提供业务验收。通用回执不能替代产品正确性、采样覆盖、清理恢复或页面验收。
 
 ## 3. 历史与部署边界
 
@@ -43,7 +43,7 @@ P1 提供持久化和绑定机制；每个 W 步骤的业务验收函数仍随 b
 
 `observe.Session.start()` 启动 host 和 interference，要求服务端/客户端 cgroup 首样本完整、必需外部工具存活且干扰采样已出现，再封存 `ready.json`。它包括独立的首样本、就绪样本和启动清单快照，不对开放流提前计算固定 hash。正式 runner 接收显式 observer factory，旧 CLI 的组合仅在兼容入口发生。
 
-`Session.stop()` 等待自有监控退出，关闭日志后写 `final.json`，绑定已停止的采样、工具日志、最终 manifest 和 ready。两种中间结果由 `observe.validation` 独立只读复核；final 通过仍不证明测量窗口覆盖，由 collect/audit 继续核验。目标节点已实际验证启动—采样—停止—封存，相关数据在工作区外；尚未据此宣称三产品正式压测完成。
+`Session.stop()` 等待自有监控退出，关闭日志后写 `final.json`，绑定已停止的采样、工具日志、最终 manifest 和 ready。两种中间结果由 `observe.validation` 独立只读复核；final 通过仍不证明测量窗口覆盖，由 collect/audit 继续核验。目标节点已实际验证启动—采样—停止—封存，相关数据在工作区外；这不替代三产品正式矩阵验收。
 
 
 ## 5. 收集与审计的模块边界
@@ -59,7 +59,7 @@ P1 提供持久化和绑定机制；每个 W 步骤的业务验收函数仍随 b
 
 新的 report/inputs.py 消费已落盘并绑定的中间结果；render.py、model.py、documents.py、offline.py 分别处理页面、图表投影、Markdown/Mermaid 阅读页和离线包，report 不导入 build/run/observe/collect。原来混合分析和生成的旧入口明确保留于 compat，用于旧格式复核，不作为新的 report 实现。
 
-源码 inventory、交付树 inventory、SHA/gzip/ledger 与原始 tar 检查归 platform；report/package 使用明确源码清单。发布、注册和历史导航维护归 delivery；W16–W18 回执写在报告树外；已接入编排，最终本轮实测交付尚待验收。历史本地 refresh 仍支持旧报告，对新不可变报告禁止原地刷新。
+源码 inventory、交付树 inventory、SHA/gzip/ledger 与原始 tar 检查归 platform；report/package 使用明确源码清单。发布、注册和历史导航维护归 delivery；W16–W18 回执写在报告树外；已接入编排，每轮实际交付结论以独立回执为准。历史本地 refresh 仍支持旧报告，对新不可变报告禁止原地刷新。
 
 新消费者按 audit 中的 SHA 绑定拒绝跨 run/profile 或错配组合，允许完整的原生失败矩阵保留 failed。离线 relocate 只增补到相同字节/权限的显式位置映射，不重写原始 audit/evidence；干净解压后的实际代码已完成 help、位置映射与重生成验证。
 
@@ -76,3 +76,8 @@ run/layout.py 以明确清单 materialize 运行入口，校验复制前后 SHA/
 ## 8. 大型观测原件的离线读取
 
 资源审计逐行解析 JSONL，保留每条样本的时间戳及计数器、PID/start_ticks、所需主机 CPU 行、工具状态和覆盖检查字段；不丢样本、不插值、不改变窗口或归约规则。用于诊断的完整 host/proc 文本仍在原始文件中保留并整体绑定 SHA，审计内存对象不复制这些未消费字段。大文件校验复用 platform.files 的分块 SHA。原始数据、已封存回执和 SDK 测量路径不因后处理修正而改写。
+
+
+## 9. 公网 HTML 与磁盘原件
+
+站点会给 HTML 加入固定公共阅读器和统计组件。delivery.public 对原件、实际公网响应分别保留 SHA；仅对 configs/reports/yche-html-20261021.json 中精确列出的组件和已核验 query 改写计算核心内容 SHA，组件增加数量也有上限。任何其他 HTML 内容变化均拒绝，JSON、脚本、原始证据和 ZIP 仍要求原始字节 SHA 相同。W18 回执绑定实际使用的 profile 文件。站点公共组件更新后须重新核验配置，不能改成通用 script 删除或任意空白归一化。
