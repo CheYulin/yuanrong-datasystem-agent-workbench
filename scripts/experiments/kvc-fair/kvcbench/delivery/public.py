@@ -8,6 +8,7 @@ from kvcbench.delivery.registration import home_array
 from kvcbench.delivery.acceptance import Links
 from kvcbench.platform.files import read_json
 from kvcbench.platform.files import digest
+from kvcbench.delivery import range_download
 
 
 SITE_PROFILE = Path(__file__).resolve().parents[2] / 'configs/reports/yche-html-20261021.json'
@@ -54,7 +55,11 @@ def fetch(url, *, keep=False):
             if keep:
                 content.append(block)
         record = {'url': response.url, 'status': response.status, 'bytes': size, 'sha256': checksum.hexdigest(),
-                  'content_encoding': response.headers.get('Content-Encoding')}
+                  'content_encoding': response.headers.get('Content-Encoding'),
+                  'content_length': response.headers.get('Content-Length')}
+        if record['content_length'] is not None and size != int(record['content_length']):
+            raise ValueError(f'Public download truncated: {urlsplit(url).path}; '
+                             f'bytes={size}/{record["content_length"]}, sha256={record["sha256"]}')
     return record, b''.join(content)
 
 
@@ -89,7 +94,7 @@ def dependencies(report, expected):
     return sorted(selected)
 
 
-def verify(base, report, relative):
+def verify(base, report, relative, *, on_segment=None):
     report = Path(report)
     parsed = urlsplit(base)
     if parsed.scheme != 'https' or parsed.netloc != 'yche.me' or parsed.path.rstrip('/') != '/' + relative:
@@ -104,14 +109,21 @@ def verify(base, report, relative):
     selected = dependencies(report, expected)
     for name in selected:
         is_html = name.endswith('.html')
-        record, content = fetch(base + quote(name) + '?sha256=' + expected[name], keep=is_html)
+        url = base + quote(name) + '?sha256=' + expected[name]
+        if name == 'reproduce.zip' and (report / name).stat().st_size >= 64 << 20:
+            record = range_download.download(url, (report / name).stat().st_size,
+                                             expected[name], progress=on_segment)
+            content = b''
+        else:
+            record, content = fetch(url, keep=is_html)
         if is_html:
             origin = (report / name).read_bytes()
             if hashlib.sha256(origin).hexdigest() != expected[name]:
                 raise ValueError('Local HTML differs from the accepted manifest: ' + name)
             record.update(verify_html(origin, content))
         elif record['sha256'] != expected[name]:
-            raise ValueError('Public dependency bytes differ: ' + name)
+            raise ValueError(f'Public dependency bytes differ: {name}; bytes={record.get("bytes")}, '
+                             f'observed_sha256={record["sha256"]}, expected_sha256={expected[name]}')
         records.append(record)
     home, content = fetch('https://yche.me/', keep=True)
     _, _, pages = home_array(content)

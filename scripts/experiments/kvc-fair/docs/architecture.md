@@ -83,3 +83,5 @@ run/layout.py 以明确清单 materialize 运行入口，校验复制前后 SHA/
 站点会给 HTML 加入固定公共阅读器和统计组件。delivery.public 对原件、实际公网响应分别保留 SHA；仅对 configs/reports/yche-html-20261021.json 中精确列出的组件和已核验 query 改写计算核心内容 SHA，组件增加数量也有上限。任何其他 HTML 内容变化均拒绝，JSON、脚本、原始证据和 ZIP 仍要求原始字节 SHA 相同。W18 回执绑定实际使用的 profile 文件。站点公共组件更新后须重新核验配置，不能改成通用 script 删除或任意空白归一化。
 
 已实测文档HTML可能没有末尾换行：只移除精确的阅读器尾部组件及其伴随换行，不要求它之前存在换行。原件自身0/1/2个末尾换行逐字节保留；额外尾部换行和正文空白变化仍拒绝，不执行一般strip/rstrip。最终报告包007保留当时源码；后续W18的只读校验器修正以其独立回执中的validator-sources为准，不重写原报告。
+
+`delivery/range_download.py` 负责已知长度归档的全量分段传输：no-cache、精确206/Content-Range/长度、稳定ETag、按偏移顺序计算完整SHA；不重试、不用本地字节补齐。CLI仅在全SHA通过及落盘后以不覆盖方式发布新输出，失败保留.partial。W18对大ZIP调用该owner并保存range-progress.jsonl，正式验收仍等待所有字节及浏览器；此源码单独封存在W18回执中。普通GET也校验Content-Length，并报告长度/SHA不符的实际值。

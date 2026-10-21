@@ -852,3 +852,177 @@ finally:
     atomic_json(out / 'result.json', {**result, **finished(begin)}, exclusive=True)
 print(json.dumps(result))
 ```
+
+## 10. 第三次W18：全量精确Range及后续封存
+
+规范模块为delivery/range_download.py，原报告包007不重写。普通GET失败、宿主机完整回读、精确Range探测及588项回归详见实施记录第31节。以下配方一次执行新W18；只有全部字节与总SHA、浏览器及首页检查完成才能封存通过并输出附录。下载增补源码由实际已封存validator-sources生成，不宣称旧包007含后续修正。
+
+```python
+"""One explicit W18 attempt using strict full-file segmented archive transfer."""
+import json
+import os
+from pathlib import Path
+import sys
+
+SOURCE = Path('/home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/scripts/experiments/kvc-fair')
+ROOT = Path('/home/t14s/workspace/scratch/2026-10-21-kvc-refactor')
+sys.path.insert(0, str(SOURCE))
+from kvcbench.platform.command import execute
+
+out = ROOT / 'coordinator-check-command003'
+row = execute(['/usr/bin/time', '-v', sys.executable, '-B', '-m', 'kvcbench', 'check-publication',
+    '--control', ROOT / 'coordinator-delivery-001'], cwd=SOURCE,
+    log=out / 'check.log', record=out / 'check-command.json',
+    env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), timeout=7200)
+print(json.dumps(row))
+sys.exit(0 if row['returncode'] == 0 and row['error'] is None else 1)
+```
+
+```python
+"""Finish accepted delivery steps exactly once; never retry SDK or failed attempts."""
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+import time
+import zipfile
+
+ROOT = Path('/home/t14s/workspace/scratch/2026-10-21-kvc-refactor')
+SOURCE = Path('/home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/scripts/experiments/kvc-fair')
+sys.path.insert(0, str(SOURCE))
+from kvcbench.platform.command import execute
+from kvcbench.platform.files import atomic_json, digest, read_json
+from kvcbench.core.timing import started, finished
+
+control = ROOT / 'coordinator-delivery-001'
+out = ROOT / 'coordinator-delivery-tail-command003'
+out.mkdir(exist_ok=False)
+begin = started()
+pid = 437573
+proc = Path('/proc') / str(pid)
+expected = [b'python3', b'-B', str(ROOT / 'coordinator-check-publication-003.py').encode()]
+assert (proc / 'cmdline').read_bytes().split(b'\0')[:-1] == expected
+ticks = (proc / 'stat').read_text().split(') ', 1)[1].split()[19]
+atomic_json(out / 'start.json', {'pid': pid, 'start_ticks': ticks,
+    'source_sha256': digest(__file__), 'purpose': 'Wait for exact third W18 owner terminal; export only accepted closed receipts and separate appendix.', **begin}, exclusive=True)
+
+def accepted(step):
+    root = control / 'workflow/steps' / step
+    assert not list(root.glob('.partial-*'))
+    candidates = sorted(root.glob('attempt-*/commit.json'))
+    assert candidates
+    commit = read_json(candidates[-1])
+    assert commit['acceptance'] in ('passed', 'passed_with_findings')
+    return candidates[-1]
+
+def command(name, argv):
+    row = execute(argv, cwd=SOURCE, log=out / (name + '.log'),
+        record=out / (name + '-command.json'), env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), timeout=10800)
+    if row['returncode'] != 0 or row['error'] is not None:
+        raise RuntimeError('Step stopped without acceptance: ' + name)
+    return row
+
+try:
+    while proc.exists():
+        try:
+            stat = (proc / 'stat').read_text().split(') ', 1)[1].split()
+            if stat[19] != ticks or stat[0] == 'Z':
+                break
+        except FileNotFoundError:
+            break
+        if time.monotonic_ns() - begin['start_mono_ns'] > 10800 * 10**9:
+            raise TimeoutError('Third W18 owner remains live; no restart attempted')
+        time.sleep(5)
+    w17 = accepted('W17')
+    assert w17.parent.name == 'attempt-000004'
+    w18 = accepted('W18')
+    assert w18.parent.name == 'attempt-000003'
+    artifacts = read_json(w18.parent / 'artifacts.json')['files']
+    downloads = [Path(row['root']) / row['path'] for row in artifacts if row['path'] == 'downloads.json']
+    assert len(downloads) == 1
+    public_out = downloads[0].parent
+    assert read_json(public_out / 'browser/result.json')['passed'] is True
+    extra = ROOT / 'coordinator-appendix-extras-001'
+    extra.mkdir()
+    names = ['coordinator-upload-cancel-intent001.json', 'coordinator-compressed-cancel-intent001.json',
+        'coordinator-zip-switch-intent001.json', 'coordinator-zip-switch-result001.json',
+        'coordinator-zip-remote-probe001-result.json', 'p6-source-bridge-005-007.json',
+        'p6-hotpath-equivalence-001.json', 'p6-layout-bundle-007.json',
+        'coordinator-chunked-publish-001.py', 'coordinator-chunked-publish-002.py',
+        'coordinator-zip-publish-001.py', 'prepare-zip-transport-001.py',
+        'cancel-compressed-transport-001.py', 'publish-receipt-appendix.py',
+        'receipt-appendix-browser.mjs', 'coordinator-final-delivery-001.py',
+        'coordinator-delivery-tail-001.py', 'coordinator-delivery-tail-002.py',
+        'coordinator-check-publication-002.py', 'coordinator-check-publication-003.py',
+        'coordinator-delivery-tail-003.py']
+    records = []
+    def copy(source, name):
+        target = extra / name
+        assert source.is_file() and not source.is_symlink() and not target.exists()
+        shutil.copy2(source, target)
+        assert digest(source) == digest(target)
+        records.append({'source': str(source), 'copy': name, 'sha256': digest(target)})
+    for name in names:
+        copy(ROOT / name, name)
+    for source, name in [
+        (ROOT / 'coordinator-zip-transport-plan001/plan.json', 'zip-reconstruction-plan.json'),
+        (ROOT / 'coordinator-derive-command003/derive-command.json', 'w13-w14-command.json'),
+        (ROOT / 'coordinator-report-command001/report-command.json', 'w15-w16-command.json'),
+        (ROOT / 'coordinator-check-command003/check-command.json', 'w18-command.json'),
+        (ROOT / 'coordinator-public-html-diagnostic001/result.json', 'w18-first-html-diagnostic.json'),
+        (ROOT / 'coordinator-public-html-recheck001.json', 'w18-html-recheck.json'),
+        (ROOT / 'public-ranges-all-004.log', 'unit-regression-final.log'),
+        (control / 'local-acceptance/result.json', 'w16-local-acceptance.json'),
+        (public_out / 'downloads.json', 'w18-public-downloads.json'),
+        (public_out / 'range-progress.jsonl', 'w18-range-progress.jsonl'),
+        (ROOT / 'coordinator-zip-http-diagnostic001/result.json', 'w18-zip-http-diagnostic.json'),
+        (ROOT / 'coordinator-zip-http-diagnostic001/no-cache-ranges.json', 'w18-no-cache-range-probes.json'),
+        (public_out / 'browser/result.json', 'w18-browser-result.json'),
+    ]:
+        copy(source, name)
+    validator_sources = read_json(w18.parent / 'acceptance.json')['validator']['sources']
+    overlay = ROOT / 'coordinator-w18-validator-overlay001.zip'
+    overlay_manifest = []
+    with zipfile.ZipFile(overlay, 'x', zipfile.ZIP_DEFLATED) as archive:
+        for n, record in enumerate(validator_sources):
+            source = Path(record['root']) / record['path']
+            assert digest(source) == record['sha256']
+            copy(source, 'w18-validator-' + str(n) + '-' + source.name)
+            relative = Path(record['original_path']).relative_to(SOURCE)
+            assert relative.parts[0] in ('kvcbench', 'configs') and '..' not in relative.parts
+            archive.write(source, relative.as_posix())
+            overlay_manifest.append({'path': relative.as_posix(), 'sha256': record['sha256'],
+                                     'bytes': record['bytes'], 'mode': record['mode']})
+        archive.writestr('W18-VALIDATOR-MANIFEST.json', json.dumps({'run_id': read_json(w18)['identity']['run_id'],
+            'source_bundle_sha256': read_json(ROOT / 'p6-layout-bundle-007.json')['archive_sha256'],
+            'scope': 'Actual closed W18 verification sources only; original SDK/runtime/analysis/report package007 stays immutable.',
+            'files': overlay_manifest}, ensure_ascii=False, indent=2) + '\n')
+        archive.writestr('W18-VALIDATOR-README.md', '# W18 公网验证源码增补\n\n在新的目录解压原源码包，再把本增补ZIP解压到kvc-fair根目录。增补只用于本次公网验证和分段下载，不改原始实验ZIP、SDK和数值结果。\n\n原代码包：https://yche.me/perf/kvc-coordinator-modular-20261021/provenance/source-bundle.zip\n\n在该kvc-fair目录执行（输出须为新路径）：\n\n```bash\npython3 -B -m kvcbench.delivery.range_download --url "https://yche.me/perf/kvc-coordinator-modular-20261021/reproduce.zip?sha256=ec27f4b92bd0b00006e095ea3351b284b551d8cb53b2f4d4e005958b2bf4e17c" --size 1350557425 --sha256 ec27f4b92bd0b00006e095ea3351b284b551d8cb53b2f4d4e005958b2bf4e17c --out /absolute/new-reproduce.zip\n```\n\n每段必须为206且Content-Range/长度精确，完整SHA匹配才发布输出；失败保留.partial，不覆盖现有文件。新实验使用workbench主干源码。\n')
+    copy(overlay, 'w18-validator-overlay.zip')
+    for width in (1440, 390, 320):
+        copy(public_out / 'browser' / ('report-' + str(width) + '.png'), 'w18-report-' + str(width) + '.png')
+    atomic_json(extra / 'extras-index.json', {'files': records}, exclusive=True)
+    appendix = ROOT / 'coordinator-acceptance-site-001'
+    argv = [sys.executable, '-B', ROOT / 'export-delivery-receipts.py', '--tool-root', SOURCE,
+        '--report', ROOT / 'coordinator-report-001', '--derived', ROOT / 'coordinator-derived-003',
+        '--control', control, '--out', appendix,
+        '--url', 'https://yche.me/perf/kvc-coordinator-modular-20261021/index.html']
+    for path in sorted(extra.iterdir()):
+        argv.extend(['--extra', path])
+    command('export-appendix', argv)
+    command('browser-appendix-local', ['node', ROOT / 'receipt-appendix-browser.mjs', appendix,
+        ROOT / 'coordinator-appendix-local-browser-001'])
+    command('publish-appendix', [sys.executable, '-B', ROOT / 'publish-receipt-appendix.py',
+        '--tool-root', SOURCE, '--source', appendix, '--control', ROOT / 'coordinator-appendix-publication-001'])
+    command('browser-appendix-public', ['node', ROOT / 'receipt-appendix-browser.mjs',
+        'https://yche.me/perf/kvc-coordinator-modular-20261021-acceptance/',
+        ROOT / 'coordinator-appendix-public-browser-001'])
+    result = {'passed': True, 'main_public_commit': str(w18), 'appendix': str(appendix)}
+except BaseException as error:
+    result = {'passed': False, 'error': str(error), 'type': type(error).__name__}
+    raise
+finally:
+    atomic_json(out / 'result.json', {**result, **finished(begin)}, exclusive=True)
+print(json.dumps(result))
+```

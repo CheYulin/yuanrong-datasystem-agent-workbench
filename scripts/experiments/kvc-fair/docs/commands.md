@@ -126,3 +126,17 @@ W15/W16 使用新的 delivery control：封存不可变报告、完整校验和�
 publication-spec.json 包含 host、site、relative、title、date、url，例如 host=xqyun-32c32g，site=/var/www/html，relative=perf/kvc-modular-20261021，url=https://yche.me/perf/kvc-modular-20261021。W17 上传到新暂存目录，逐文件核验后安装全新版本；首页注册使用站点锁和新鲜 CAS 基线，保留其他条目并同步 gzip。W18 分别下载公开 manifest、页面/文档/依赖/完整 ZIP 核对 SHA，并执行真实公开浏览器验收。W18 可以单独产生新的只读验收 attempt，不重传或覆盖既有报告版本。
 
 W14–W18 的回执和完整阶段耗时保存在 derived/delivery control，晚于报告输入快照的步骤不回填到原分析，避免循环 hash。实际源码运行、原生产品结论与交付验收状态分别记录。
+
+## 大型复现归档的完整下载
+
+在同一源码根目录执行以下独立delivery模块；size/SHA来自该版本清单，out必须为新路径。每段精确206且覆盖整个文件后核对一次完整SHA；失败保留.partial，不自动续写或覆盖。
+
+```bash
+python3 -B -m kvcbench.delivery.range_download \
+  --url 'https://yche.me/perf/kvc-coordinator-modular-20261021/reproduce.zip?sha256=ec27f4b92bd0b00006e095ea3351b284b551d8cb53b2f4d4e005958b2bf4e17c' \
+  --size 1350557425 \
+  --sha256 ec27f4b92bd0b00006e095ea3351b284b551d8cb53b2f4d4e005958b2bf4e17c \
+  --out /absolute/new-reproduce.zip
+```
+
+已冻结的报告包007保持原样；后续W18校验代码的实际版本和分段记录单独交付。使用新实验/新主干代码时重新制作源码包，不改旧实验的输入。

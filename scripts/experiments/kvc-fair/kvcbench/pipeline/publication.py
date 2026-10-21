@@ -1,5 +1,6 @@
 """Explicit W17 upload/registration and independently repeatable W18 public acceptance."""
 from pathlib import Path
+import json
 import re
 import shlex
 import uuid
@@ -71,7 +72,11 @@ def check(control):
     def action():
         out = control / ('public-acceptance-' + uuid.uuid4().hex)
         out.mkdir()
-        result = public.verify(spec['url'], local['report'], spec['relative'])
+        with (out / 'range-progress.jsonl').open('x') as stream:
+            def progress(part):
+                stream.write(json.dumps(part) + '\n')
+                stream.flush()
+            result = public.verify(spec['url'], local['report'], spec['relative'], on_segment=progress)
         atomic_json(out / 'downloads.json', result, exclusive=True)
         browser = Path(acceptance.__file__).with_name('browser.mjs')
         command(out, 'browser-public', [local['node'], browser, result['url'], out / 'browser', local['playwright'], local['chrome']], control)
@@ -80,5 +85,5 @@ def check(control):
         atomic_json(out / 'result.json', result, exclusive=True)
         return [Check('public_delivery', True, result['passed'], result['passed'])], files(out), result
     commit = perform(workflow, 'W18', action=action, scope='actual public downloads and responsive browser acceptance',
-        sources=[Path(__file__), Path(public.__file__), public.SITE_PROFILE, Path(acceptance.__file__), Path(acceptance.__file__).with_name('browser.mjs')], upstream=[parent])
+        sources=[Path(__file__), Path(public.__file__), Path(public.range_download.__file__), public.SITE_PROFILE, Path(acceptance.__file__), Path(acceptance.__file__).with_name('browser.mjs')], upstream=[parent])
     return {'public_acceptance_commit': str(commit), 'url': spec['url'].rstrip('/') + '/index.html'}
