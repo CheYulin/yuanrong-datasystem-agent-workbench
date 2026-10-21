@@ -313,3 +313,24 @@ runtime004 外层真实命令已终止：returncode=0，5056.379312235 秒，W09
 公开验收的下载集合增加所有前端文档链接目标及 workflow 动态证据链接，按已接受 manifest 核对实际下载 SHA；仅本地存在或上传成功不算公开可访问。其他未链接 raw payload 仍由 W17 在发布主机逐文件 hash。拒绝越界及不在 manifest 的链接，W18 验证源码清单也纳入使用的 HTML 链接解析器文件。真实公开验收仍待本轮最终发布。
 
 新增构建文档/公开链接选择及发布针对性 **6 项通过，0.205 秒**；最终当前源码全量 **572 项通过，63.513 秒**（p6-layout-all-007.log）。按 ds-self-verify 复核 diff：仅离线文档/公开下载验收及相关测试/清单变化，不改 SDK、现场进程、并发、持久化或资源配置；产品仓干净，工具实施文档同步。最终 Coordinator 正式矩阵和新布局现场验收仍未终结，不提前关闭目标。
+
+## 23. Coordinator 正式矩阵终态与 W12 冻结（2026-10-21）
+
+正式候选 coordinator003 已于 UTC **2026-10-21 00:46:55.453295** 写出 suite 终态：9/9 产品轮次、180 个 case 记录、execution_complete=true，failed=[]、fatal=null，host/interference 观测进程退出码均为 0。原生 valid=false，仍需 W13/W14 重算和核验，不将“执行完整”解释为“全部 API 成功”。
+
+| 已封存阶段 | 实际结论 | 原始 monotonic 耗时 |
+| --- | --- | ---: |
+| 外层 workflow all | returncode=0、error=null | 5279.143559577 秒 |
+| suite 完整生命周期 | execution_complete=true、native valid=false | 4481.155593257 秒 |
+| W09 正式测量 | completed、returncode=1，验收 passed_with_findings | 4457.367467702 秒 |
+| W10 停止与排空 | completed、returncode=0，验收 passed | 54.374696476 秒 |
+| W11 恢复 | completed、returncode=0，验收 passed | 23.137824022 秒 |
+| W12 原件冻结 | passed、4517 文件、命令 returncode=0 | 180.216223930 秒 |
+
+这些区间的起止边界不同且部分重叠，不能相加为“总运行时间”。W10/W11 后实际 server/client/monitor 及父 cgroup.procs 均空、populated=[]；随后才开始冻结，没有在 SDK 窗口中执行大规模收集或新布局实验。
+
+不可变快照：tiantiyun-80c128g:/home/worktrees/kvc-coordinator-snapshot-20261021-001，独立 W12 receipt 为同路径加 -receipt；collector 命令在 /home/cache/kvc-modular-20261021/coordinator-capture-command001。原始 root/control/运行代码包保持原样。
+
+W12 使用新 postprocessor/collector 包 p6-layout-bundle-004：310 项，manifest SHA f0657203e5c027e53e90c3b0ba8c8af6caff81a7537c8edfcc0c72d0a7bce480，ZIP SHA 8ccdb7171d8822946d61a76c70c936c71f6df168fb6b79fc5476f50ffbdfff31。全部源文件 SHA/size/mode 再与当前干净 checkout 对照相同。正式 SDK 测量仍绑定其原来的 coordinator-bundle-004（329 项），不把后处理包假写成执行源码。
+
+此时跨节点 receive 仍在运行，尚未宣布本地回执闭包核验通过。P6 新布局的独立 start/gate/smoke/restore 和 W13–W18 最终交付继续执行；新布局验证不复写本轮结果，不计入 180 个正式 case。脚本/文档提交已至 a0495ea，未修改产品源码。
