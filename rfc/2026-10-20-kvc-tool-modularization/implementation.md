@@ -401,3 +401,7 @@ coordinator-report-001 / coordinator-delivery-001 的 W15/W16 已真实通过；
 本地ZIP+overlay重建预验收 **59.770644596 秒**，原ZIP **1350557425字节**，差异包 **5691017字节**，全部4776文件SHA相同。进一步提取最终网络适配器实际使用的remote重建代码，用21个真实分块完整执行并通过原manifest，所有web目录0755/文件0644。真实源SHA：adapter 722cee2f92c77a5bd0f2fe8953fd8c120c2d7f2aa7ad626f6d8ee57a9b3b08ee，remote代码14709941913d55025506a42d2f190b5296d60cb9e6e85fdace66716d53d87b87。最终第四次 W17 使用该已验证配方，仅网络交付源单列，不冒充包007的原始rsync实现。配方见 [交付附录](delivery-receipt-appendix.md)，截至本节写入仍在上传，W18尚未执行。
 
 按 ds-self-verify：本节变更限RFC/旧入口说明；6个Python配方代码块语法核对、附录JS语法、142映射实际目标和根目录收敛均通过。产品仓无修改、无产品热路径/并发/持久化变化，不需要改产品.repo_context。最新579项回归和本次真实离线/浏览器证据各自列明，不为文档重跑SDK或把公网状态写成已通过。
+
+## 29. W17 真正终止通过，W18 已开始（2026-10-21）
+
+全部21个分块命令返回0，目标端实际重组/ZIP/逐文件恢复通过，再由原installer完整核对4776文件manifest，源码与文件字节不改写。W17第四次attempt passed，**1734.650078315秒**，外部适配进程真正终止return0；安装目标perf/kvc-coordinator-modular-20261021。fresh首页基线290项→291项，CAS及gzip由原publisher执行，仅新增本报告，保留其他条目。前三次failed与暂存目录不覆盖。单次tail脚本核对原owner终态后已执行W18，现在进行实际公网下载，未把安装成功写成W18通过。

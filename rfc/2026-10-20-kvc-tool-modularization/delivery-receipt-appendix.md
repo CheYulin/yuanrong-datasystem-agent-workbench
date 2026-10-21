@@ -93,9 +93,9 @@ for row in ordered:
         + row['acceptance'] + '</td><td>' + str(row['returncode']) + '</td><td>'
         + f"{row['duration_s']:.3f}" + '</td><td>' + hrefs + '</td></tr>')
 canonical = [rows['W%02d' % n] for n in range(1, 19)]
-style = 'aside[data-yche-native-toc]{display:block!important}aside [data-yche-native-chapter]{display:block!important}body{margin:0;background:#f4f7fb;color:#18354e;font:16px/1.7 system-ui}aside{position:fixed;width:210px;top:0;bottom:0;padding:20px;background:white}aside a{display:block}main{margin-left:250px;padding:24px;max-width:1200px}section{background:white;border:1px solid #dce5ef;border-radius:12px;padding:20px;margin:20px 0;min-width:0}a{color:#1958b5;overflow-wrap:anywhere}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%}td,th{padding:8px;text-align:left;border-bottom:1px solid #ddd}#chart{height:430px;width:100%}figcaption{text-align:center;color:#60738c}code{overflow-wrap:anywhere}@media(max-width:850px){aside{position:static;width:auto}main{margin:0;padding:12px}section{padding:12px}}'
+style = '#acceptance-navigation{display:block!important}#acceptance-navigation [data-yche-native-chapter]{display:block!important}body{margin:0;background:#f4f7fb;color:#18354e;font:16px/1.7 system-ui}aside{position:fixed;width:210px;top:0;bottom:0;padding:20px;background:white}aside a{display:block}main{margin-left:250px;padding:24px;max-width:1200px}section{background:white;border:1px solid #dce5ef;border-radius:12px;padding:20px;margin:20px 0;min-width:0}a{color:#1958b5;overflow-wrap:anywhere}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%}td,th{padding:8px;text-align:left;border-bottom:1px solid #ddd}#chart{height:430px;width:100%}figcaption{text-align:center;color:#60738c}code{overflow-wrap:anywhere}@media(max-width:850px){aside{position:static;width:auto}main{margin:0;padding:12px}section{padding:12px}}'
 # The appendix has its own immutable manifest, outside the main report hash cycle.
-page = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>工作流验收与耗时回执</title><style>' + style + '</style></head><body><aside><strong>逐步验收</strong><a href="#scope">1. 口径</a><a href="#timings">2. 耗时</a><a href="#receipts">3. 中间结果</a><a href="docs/acceptance.html">4. 设计说明</a><a href="' + html.escape(args.url, quote=True) + '">返回实验主报告</a></aside><main><section id="scope"><h1>1. W01–W18 验收回执</h1><p>执行、证据验收、原生接口结果分别记录。主矩阵：132 有效、18 失败、30 N/A。W09 退出码 1 与 passed_with_findings 同时保留。W17 的未压缩上传、压缩准备与较大压缩传输均被操作员中断，失败回执保留；终态以最新 attempt 为准。</p><p>此附录在 W18 结束后独立生成，不写入主报告，以避免自身验收 hash 循环。逐步回执是原件副本，原绝对引用不改写；完整证据与复现包见主报告。这里重新核对回执 SHA/身份/耗时，不声称独立重跑全部上游审计。</p></section><section id="timings"><h2>2. 各步骤实测耗时</h2><figure><div id="chart"></div><figcaption>图 1. 每步同进程 monotonic 耗时（秒）；步骤边界和嵌套关系不同，不相加为总耗时。</figcaption></figure></section><section id="receipts"><h2>3. 可复核的中间结果</h2><div class="scroll"><table><thead><tr><th>步骤</th><th>执行</th><th>验收</th><th>退出码</th><th>秒</th><th>原始回执</th></tr></thead><tbody>' + ''.join(table) + '</tbody></table></div></section><section><h2>4. 复现与完整性</h2><p><a href="docs/acceptance.html">设计和重建命令</a> · <a href="export-delivery-receipts.py">导出脚本</a> · <a href="data.json">结构化结果</a> · <a href="SHA256SUMS">文件 SHA256 清单</a></p>' + extra_links + '</section></main><script src="echarts.min.js"></script><script>const rows=' + json.dumps(canonical, ensure_ascii=False).replace('</', '<\\/') + ';const chart=echarts.init(document.getElementById("chart"));chart.setOption({grid:{left:65,right:20,bottom:65,top:25},tooltip:{trigger:"axis"},xAxis:{type:"category",data:rows.map(x=>x.step),axisLabel:{rotate:45}},yAxis:{type:"value",name:"秒"},series:[{type:"bar",data:rows.map(x=>x.duration_s),itemStyle:{color:"#267fb5"}}]});addEventListener("resize",()=>chart.resize());</script></body></html>'
+page = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>工作流验收与耗时回执</title><style>' + style + '</style></head><body><aside id="acceptance-navigation"><strong>逐步验收</strong><a href="#scope">1. 口径</a><a href="#timings">2. 耗时</a><a href="#receipts">3. 中间结果</a><a href="docs/acceptance.html">4. 设计说明</a><a href="' + html.escape(args.url, quote=True) + '">返回实验主报告</a></aside><main><section id="scope"><h1>1. W01–W18 验收回执</h1><p>执行、证据验收、原生接口结果分别记录。主矩阵：132 有效、18 失败、30 N/A。W09 退出码 1 与 passed_with_findings 同时保留。W17 的未压缩上传、压缩准备与较大压缩传输均被操作员中断，失败回执保留；终态以最新 attempt 为准。</p><p>此附录在 W18 结束后独立生成，不写入主报告，以避免自身验收 hash 循环。逐步回执是原件副本，原绝对引用不改写；完整证据与复现包见主报告。这里重新核对回执 SHA/身份/耗时，不声称独立重跑全部上游审计。</p></section><section id="timings"><h2>2. 各步骤实测耗时</h2><figure><div id="chart"></div><figcaption>图 1. 每步同进程 monotonic 耗时（秒）；步骤边界和嵌套关系不同，不相加为总耗时。</figcaption></figure></section><section id="receipts"><h2>3. 可复核的中间结果</h2><div class="scroll"><table><thead><tr><th>步骤</th><th>执行</th><th>验收</th><th>退出码</th><th>秒</th><th>原始回执</th></tr></thead><tbody>' + ''.join(table) + '</tbody></table></div></section><section><h2>4. 复现与完整性</h2><p><a href="docs/acceptance.html">设计和重建命令</a> · <a href="export-delivery-receipts.py">导出脚本</a> · <a href="data.json">结构化结果</a> · <a href="SHA256SUMS">文件 SHA256 清单</a></p>' + extra_links + '</section></main><script src="echarts.min.js"></script><script>const rows=' + json.dumps(canonical, ensure_ascii=False).replace('</', '<\\/') + ';const chart=echarts.init(document.getElementById("chart"));chart.setOption({grid:{left:65,right:20,bottom:65,top:25},tooltip:{trigger:"axis"},xAxis:{type:"category",data:rows.map(x=>x.step),axisLabel:{rotate:45}},yAxis:{type:"value",name:"秒"},series:[{type:"bar",data:rows.map(x=>x.duration_s),itemStyle:{color:"#267fb5"}}]});addEventListener("resize",()=>chart.resize());</script></body></html>'
 (out / 'index.html').write_text(page)
 docs = out / 'docs'
 docs.mkdir()
@@ -572,4 +572,129 @@ with (ROOT / 'coordinator-zip-switch-result001.json').open('x') as stream:
     json.dump({'intent': intent, 'signals': records, 'remaining_owned_children': active, 'end_wall_ns': time.time_ns()}, stream, indent=2)
 assert not active
 print(json.dumps({'signals': len(records), 'remaining_owned_children': active}))
+```
+
+## 8. 单次后续交付配方
+
+等待已核对PID/start_ticks的当前W17 owner真正终止，只有已封存的第四次W17通过才执行W18。随后从实际W18产物提取公开验收与浏览器结果，构建独立附录、本地浏览器验收、发布并逐文件核对、公开浏览器验收。所有命令有独立日志/耗时，不自动重试或重跑SDK。此为本次运行的显式操作配方；重新实验须使用新的run/root/control/进程身份，不能机械重复这些固定输出路径。
+
+```python
+"""Finish accepted delivery steps exactly once; never retry SDK or failed attempts."""
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+import time
+
+ROOT = Path('/home/t14s/workspace/scratch/2026-10-21-kvc-refactor')
+SOURCE = Path('/home/t14s/workspace/git-repos/yuanrong-datasystem-agent-workbench/scripts/experiments/kvc-fair')
+sys.path.insert(0, str(SOURCE))
+from kvcbench.platform.command import execute
+from kvcbench.platform.files import atomic_json, digest, read_json
+from kvcbench.core.timing import started, finished
+
+control = ROOT / 'coordinator-delivery-001'
+out = ROOT / 'coordinator-delivery-tail-command001'
+out.mkdir(exist_ok=False)
+begin = started()
+pid = 432670
+proc = Path('/proc') / str(pid)
+expected = [b'python3', b'-B', str(ROOT / 'coordinator-zip-publish-001.py').encode()]
+assert (proc / 'cmdline').read_bytes().split(b'\0')[:-1] == expected
+ticks = (proc / 'stat').read_text().split(') ', 1)[1].split()[19]
+atomic_json(out / 'start.json', {'pid': pid, 'start_ticks': ticks,
+    'source_sha256': digest(__file__), 'purpose': 'Wait for exact W17 owner terminal; then explicit W18 and separate receipt appendix.', **begin}, exclusive=True)
+
+def accepted(step):
+    root = control / 'workflow/steps' / step
+    assert not list(root.glob('.partial-*'))
+    candidates = sorted(root.glob('attempt-*/commit.json'))
+    assert candidates
+    commit = read_json(candidates[-1])
+    assert commit['acceptance'] in ('passed', 'passed_with_findings')
+    return candidates[-1]
+
+def command(name, argv):
+    row = execute(argv, cwd=SOURCE, log=out / (name + '.log'),
+        record=out / (name + '-command.json'), env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), timeout=10800)
+    if row['returncode'] != 0 or row['error'] is not None:
+        raise RuntimeError('Step stopped without acceptance: ' + name)
+    return row
+
+try:
+    while proc.exists():
+        try:
+            stat = (proc / 'stat').read_text().split(') ', 1)[1].split()
+            if stat[19] != ticks or stat[0] == 'Z':
+                break
+        except FileNotFoundError:
+            break
+        if time.monotonic_ns() - begin['start_mono_ns'] > 10800 * 10**9:
+            raise TimeoutError('Original W17 owner remains live; no restart attempted')
+        time.sleep(5)
+    w17 = accepted('W17')
+    assert w17.parent.name == 'attempt-000004'
+    command('check-main-publication', [sys.executable, '-B', ROOT / 'coordinator-final-delivery-001.py', 'check'])
+    w18 = accepted('W18')
+    artifacts = read_json(w18.parent / 'artifacts.json')['files']
+    downloads = [Path(row['root']) / row['path'] for row in artifacts if row['path'] == 'downloads.json']
+    assert len(downloads) == 1
+    public_out = downloads[0].parent
+    assert read_json(public_out / 'browser/result.json')['passed'] is True
+    extra = ROOT / 'coordinator-appendix-extras-001'
+    extra.mkdir()
+    names = ['coordinator-upload-cancel-intent001.json', 'coordinator-compressed-cancel-intent001.json',
+        'coordinator-zip-switch-intent001.json', 'coordinator-zip-switch-result001.json',
+        'coordinator-zip-remote-probe001-result.json', 'p6-source-bridge-005-007.json',
+        'p6-hotpath-equivalence-001.json', 'p6-layout-bundle-007.json',
+        'coordinator-chunked-publish-001.py', 'coordinator-chunked-publish-002.py',
+        'coordinator-zip-publish-001.py', 'prepare-zip-transport-001.py',
+        'cancel-compressed-transport-001.py', 'publish-receipt-appendix.py',
+        'receipt-appendix-browser.mjs', 'coordinator-final-delivery-001.py',
+        'coordinator-delivery-tail-001.py']
+    records = []
+    def copy(source, name):
+        target = extra / name
+        assert source.is_file() and not source.is_symlink() and not target.exists()
+        shutil.copy2(source, target)
+        assert digest(source) == digest(target)
+        records.append({'source': str(source), 'copy': name, 'sha256': digest(target)})
+    for name in names:
+        copy(ROOT / name, name)
+    for source, name in [
+        (ROOT / 'coordinator-zip-transport-plan001/plan.json', 'zip-reconstruction-plan.json'),
+        (ROOT / 'coordinator-derive-command003/derive-command.json', 'w13-w14-command.json'),
+        (ROOT / 'coordinator-report-command001/report-command.json', 'w15-w16-command.json'),
+        (ROOT / 'coordinator-check-command001/check-command.json', 'w18-command.json'),
+        (control / 'local-acceptance/result.json', 'w16-local-acceptance.json'),
+        (public_out / 'downloads.json', 'w18-public-downloads.json'),
+        (public_out / 'browser/result.json', 'w18-browser-result.json'),
+    ]:
+        copy(source, name)
+    for width in (1440, 390, 320):
+        copy(public_out / 'browser' / ('report-' + str(width) + '.png'), 'w18-report-' + str(width) + '.png')
+    atomic_json(extra / 'extras-index.json', {'files': records}, exclusive=True)
+    appendix = ROOT / 'coordinator-acceptance-site-001'
+    argv = [sys.executable, '-B', ROOT / 'export-delivery-receipts.py', '--tool-root', SOURCE,
+        '--report', ROOT / 'coordinator-report-001', '--derived', ROOT / 'coordinator-derived-003',
+        '--control', control, '--out', appendix,
+        '--url', 'https://yche.me/perf/kvc-coordinator-modular-20261021/index.html']
+    for path in sorted(extra.iterdir()):
+        argv.extend(['--extra', path])
+    command('export-appendix', argv)
+    command('browser-appendix-local', ['node', ROOT / 'receipt-appendix-browser.mjs', appendix,
+        ROOT / 'coordinator-appendix-local-browser-001'])
+    command('publish-appendix', [sys.executable, '-B', ROOT / 'publish-receipt-appendix.py',
+        '--tool-root', SOURCE, '--source', appendix, '--control', ROOT / 'coordinator-appendix-publication-001'])
+    command('browser-appendix-public', ['node', ROOT / 'receipt-appendix-browser.mjs',
+        'https://yche.me/perf/kvc-coordinator-modular-20261021-acceptance/',
+        ROOT / 'coordinator-appendix-public-browser-001'])
+    result = {'passed': True, 'main_public_commit': str(w18), 'appendix': str(appendix)}
+except BaseException as error:
+    result = {'passed': False, 'error': str(error), 'type': type(error).__name__}
+    raise
+finally:
+    atomic_json(out / 'result.json', {**result, **finished(begin)}, exclusive=True)
+print(json.dumps(result))
 ```

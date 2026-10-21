@@ -1,6 +1,6 @@
 # 1. 模块化重构与最终 Coordinator 测试结果
 
-**Status: In-Progress · W01–W16 已通过相应验收；W17 正在上传，W18 尚未执行，不将本地成功写成公开交付完成。**
+**Status: In-Progress · W01–W16 已通过相应验收；W17 目标端安装/注册已通过；W18 公网实际下载验收进行中，不将安装成功写成公开验收完成。**
 
 ## 2. 原生测试结果
 
@@ -53,8 +53,8 @@ DataSystem 的18条失败是 EXIST hit/miss 在B16/256/4096的三轮调用，原
 | W14 | passed | 0 | 474.589839736 |
 | W15 | passed | 0 | 254.680362641 |
 | W16 | passed | 0 | 376.913211987 |
-| W17 | running | — | — |
-| W18 | not_started | — | — |
+| W17 | passed | 0 | 1734.650078315 |
+| W18 | running | — | — |
 
 ## 5. 已执行的验证与限制
 
@@ -66,3 +66,7 @@ DataSystem 的18条失败是 EXIST hit/miss 在B16/256/4096的三轮调用，原
 - 主报告完整文件4776项，manifest b2a0d19efdd5ce79a0bd2b9c339391060b8989ac18ae4f342f5e407e0316310b；复现ZIP ec27f4b92bd0b00006e095ea3351b284b551d8cb53b2f4d4e005958b2bf4e17c。
 
 本次不改DataSystem产品源码、持久化格式或产品.repo_context；回执/控制IO不进入SDK热循环。新布局资格与Coordinator正式测量、离线/浏览器、公开交付是分开的证据，不能相互替代。
+
+## 6. 实际安装与公开验收状态
+
+[主报告](https://yche.me/perf/kvc-coordinator-modular-20261021/index.html)已安装。W17第四次attempt实际passed，1734.650078315秒；目标端完整4776文件manifest相同，首页290→291，只新增本报告。前三个操作员取消的failed保留。W18已开始实际公网下载，不以目标端SHA替代公网响应验证；独立逐步回执附录将在W18结束后生成，以避免主报告自引用hash。
