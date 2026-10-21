@@ -8,9 +8,9 @@
 | --- | --- |
 | `platform/locks.py` | 只打开普通文件锁，拒绝符号链接和非普通文件；不根据运行目录名推断资源域 |
 | `run/stage.py` | 同时持构建域锁和指定运行资源锁；新目录部署并冻结输入，输出 `batch-stage.json` |
-| `run/isolation.py` | 既有运行 cgroup 配置与进程放置；根 `cgroup.py` 为兼容入口 |
+| `run/isolation.py` | 既有运行 cgroup 配置与进程放置；部署所需兼容 shim 由 `run/layout.py` 从 `run/entrypoints/` 显式物化，源码根不保留完整旧实现 |
 | `run/environment.py` | 持指定运行资源锁，记录环境基线、变更意图、实际结果及恢复记录 |
-| `run/environment_restore.py` | 历史实验恢复协议的兼容实现；根 `finish_environment.py` 转入该实现，新实验使用 `run/environment.py` |
+| `run/environment_restore.py` | 历史实验恢复协议的兼容实现；源码根旧 `finish_environment.py` 已退出，新实验使用 `run/environment.py` |
 | `run/runner.py` | 开始前核对部署记录中的锁设备号/inode和实际资源锁，再运行资格或测量 |
 | `observe/environment.py` | 只读硬件与干扰基线观察；不停止服务、不清理文件 |
 
@@ -58,7 +58,7 @@ sequenceDiagram
 ```bash
 python3 -m kvcbench stage \
   --native-root /absolute/native-root \
-  --catalog /absolute/native-root/revalidation/attempt-002/build-catalog.json \
+  --catalog /absolute/native-root/revalidation/attempt-003/build-catalog.json \
   --bundle /absolute/frozen-source-payload \
   --resource-lock /absolute/shared-runtime/suite.lock \
   --cgroup /sys/fs/cgroup/kvcfair20261020 \
@@ -90,4 +90,4 @@ W07/W07.smoke/W08 入场先记录 current admission，重新核对资源锁、�
 
 W09 调用 `run/admission.verify_matrix`，重用 core 的完整原生 case 校验；不仅核对文件个数，还逐项检查协议参数、client 确认、数据验证、histogram、错误会计与失败账本。只读原生失败可保留为 finding；原生成功字段仍为 false。缺项或证据不合法则步骤验收失败。新 partial attempt 会阻断消费更早 PASS，且不凭 partial 目录推断进程活性。
 
-跨节点的 W12–W18 编排仍未完成，此处不将 runtime 部分的完成等同于最终报告交付。
+W12–W18 跨节点收集、独立审计、本地报告及公开交付编排已接入各自 owner 与 pipeline；每轮完成状态以实际回执为准，此处不从 runtime 部分通过推断最终报告交付。

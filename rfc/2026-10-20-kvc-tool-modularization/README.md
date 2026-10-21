@@ -13,6 +13,7 @@
 | [runtime-design.md](runtime-design.md) | 运行资源锁、环境准备与恢复账本、明确命令入口及验证边界 |
 | [migration-map.csv](migration-map.csv) | 基线 142 个文件的职责、目标路径、迁移动作和阶段；复合脚本列出多个拆分目标 |
 | [validation.md](validation.md) | 本次设计检查，以及后续实施必须通过的兼容性和复现验收 |
+| [delivery-receipt-appendix.md](delivery-receipt-appendix.md) | 独立逐步回执附录、受控取消、网络适配和原始清单不变的重建配方 |
 | [implementation.md](implementation.md) | 实施阶段、实际命令/耗时/中间结果、未完成项与后续验收 |
 
 设计的主线是 **构建 → 运行与观测 → 收集及离线核验 → 报告生成**。每一步遵循 **执行 → 中间产物落盘 → 独立验收 → 下游消费**，有可读摘要和机器可验收回执。发布网站单独执行，公共进程、锁、cgroup、路径与计时能力有明确归属。保留既有实验的原始输入、失败记录和证据来源，不用目录调整改写历史。
