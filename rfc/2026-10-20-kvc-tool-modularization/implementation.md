@@ -334,3 +334,21 @@ runtime004 外层真实命令已终止：returncode=0，5056.379312235 秒，W09
 W12 使用新 postprocessor/collector 包 p6-layout-bundle-004：310 项，manifest SHA f0657203e5c027e53e90c3b0ba8c8af6caff81a7537c8edfcc0c72d0a7bce480，ZIP SHA 8ccdb7171d8822946d61a76c70c936c71f6df168fb6b79fc5476f50ffbdfff31。全部源文件 SHA/size/mode 再与当前干净 checkout 对照相同。正式 SDK 测量仍绑定其原来的 coordinator-bundle-004（329 项），不把后处理包假写成执行源码。
 
 此时跨节点 receive 仍在运行，尚未宣布本地回执闭包核验通过。P6 新布局的独立 start/gate/smoke/restore 和 W13–W18 最终交付继续执行；新布局验证不复写本轮结果，不计入 180 个正式 case。脚本/文档提交已至 a0495ea，未修改产品源码。
+
+## 24. 接收完成与大型 JSONL 离线审计内存边界（2026-10-21）
+
+coordinator-received-001 已取回并独立复核 **4517** 个文件：transport-verification.valid=true，原始 W12、W01–W11 和 native build 回执闭包均匹配，旧失败验收仍保持失败。snapshot 传输 272.525017101 秒、receipt 传输 1.950185293 秒（commands/*-command.json）。未改写原件或远端路径。
+
+这轮 50ms 的正式 samples.jsonl 为 **4674945017 bytes**，smoke 为 515630027 bytes。本地实际内存仅 11GiB。源审计器使用 read_text().splitlines() 再保留全部 JSON 对象，并在文件 hash 时整体 read_bytes()；这会同时保留多份大文件内容，不能在当前数据规模下沿用。
+
+仅修正离线收集模块：JSONL 逐行读取，在构建审计对象时保留每一条 monotonic 时间戳、全部使用到的 cgroup 计数器/事件/IO存在性、工具返回码和 PID/start_ticks/CPU ticks/comm；host.stat 保留审计使用的 CPU 汇总行。未消费的大段 host/proc 文本仍完整保留在原始 JSONL，并整体绑定原 SHA，不进入审计内存副本。原有 window/group/process/coverage 算法不变，没有丢样本、降采样、插值、窗口放宽或删除未知值。大型文件 SHA 复用 platform.files.digest 的分块读取。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 流式/原资源/覆盖针对性 | **18 项通过，1.022 秒**（resource-streaming-targeted-004.log） |
+| 等价性 | 正常、缺失、计数器回退、PID复用、host缺失/null和未知额外 group 下，完整对象与字段投影的整个 window_audit 结果相同；输入不变 |
+| 内存上限 | 独立子进程在 **96MiB RLIMIT_AS** 下完整读取/hash **超过128MiB** 的 JSONL，128 条时间戳全部保留；不是 4.67GB 全量运行的内存峰值声明 |
+| 真实已封存样本对照 | 前 **1024** 条真实样本，完整对象与投影后的 window_audit 完全一致（resource-streaming-real-equivalence-002.json）；不是 W14 全量覆盖验收 |
+| 最新全量回归 | **576 项通过，61.091 秒**（resource-streaming-all-005.log）；此前版本 576 项通过，65.647 秒亦保留 |
+
+按 ds-self-verify：diff 限离线读取/哈希、其覆盖调用点、测试、清单与说明；SDK、运行并发、源构建、资源配额和已经冻结的测量/收集原件均未变。所有审计字段来源保持原文件，schema/缺失值和 PID 生命周期语义不变，工具架构说明同步。后续 W13/W14 将使用新冻结后处理包；P6 新布局现场验证也选择同一新包及全新 root/control002，先前为包004准备的 command001 未启动 SDK，保留为未执行准备记录。

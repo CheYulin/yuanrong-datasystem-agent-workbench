@@ -252,6 +252,7 @@
     "tests/unit/collect/test_batch_tcp_verify.py",
     "tests/unit/collect/test_build_documents.py",
     "tests/unit/collect/test_collect_timings_tcp.py",
+    "tests/unit/collect/test_resource_streaming.py",
     "tests/unit/compat/__init__.py",
     "tests/unit/compat/test_tcp_retry.py",
     "tests/unit/compat/test_tcp_workflow.py",

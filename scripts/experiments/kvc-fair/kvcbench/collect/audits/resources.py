@@ -8,6 +8,8 @@ import json
 import math
 from pathlib import Path
 
+from kvcbench.platform.files import digest
+
 
 ROLES = ("server", "client", "monitor", "parent")
 EVENTS = ("low", "high", "max", "oom", "oom_kill", "oom_group_kill")
@@ -154,18 +156,61 @@ def window_audit(samples, times, interference, start, end, clk_tck):
             "external_leader_affinity_estimate": interference_window(interference, start, end)}
 
 
-def read_jsonl(path, required=False):
+def sample_for_audit(raw):
+    def selected(record, keys):
+        return {key: record[key] for key in keys if key in record}
+    def counters(record, key, keys):
+        value = record.get(key)
+        return selected(value, keys) if isinstance(value, dict) else value
+    def compact_group(record):
+        result = selected(record, ('memory.current', 'memory.peak', 'memory.swap.current', 'io.stat'))
+        for key, fields in [('cpu.stat', CPU), ('memory.stat', ('anon', 'shmem')),
+                            ('memory.events', EVENTS), ('memory.events.local', EVENTS)]:
+            if key in record:
+                result[key] = counters(record, key, fields)
+        if 'processes' in record:
+            result['processes'] = [selected(process, ('pid', 'start_ticks', 'comm', 'utime_ticks', 'stime_ticks'))
+                                   for process in record['processes']]
+        return result
+    result = selected(raw, ('mono_ns', 'tool_returncodes'))
+    if 'host' in raw:
+        host = raw['host']
+        if isinstance(host, dict):
+            host = selected(host, ('stat',))
+            if isinstance(host.get('stat'), str):
+                host['stat'] = host['stat'].split('\n', 1)[0]
+        result['host'] = host
+    if 'parent' in raw:
+        result['parent'] = compact_group(raw['parent'])
+    if 'groups' in raw:
+        result['groups'] = {role: compact_group(raw['groups'][role])
+                            for role in ROLES if role != 'parent' and role in raw['groups']}
+    return result
+
+
+def read_jsonl(path, required=False, project=None):
     if not path.exists() and not required:
         return []
-    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    times = [record.get("mono_ns") for record in records]
-    if any(type(value) is not int for value in times) or any(right <= left for left, right in zip(times, times[1:])):
-        raise ValueError("Raw samples must have strictly increasing monotonic timestamps: " + str(path))
+    records, previous = [], None
+    with path.open() as stream:
+        for line in stream:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            at = record.get('mono_ns')
+            if type(at) is not int or previous is not None and at <= previous:
+                raise ValueError('Raw samples must have strictly increasing monotonic timestamps: ' + str(path))
+            previous = at
+            records.append(project(record) if project else record)
     return records
 
 
+def read_samples(path):
+    return read_jsonl(path, required=True, project=sample_for_audit)
+
+
 def file_record(path, suite):
-    return {"path": path.relative_to(suite).as_posix(), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": path.stat().st_size}
+    return {"path": path.relative_to(suite).as_posix(), "sha256": digest(path), "bytes": path.stat().st_size}
 
 
 def audit(suite):
@@ -174,7 +219,7 @@ def audit(suite):
     interference_file = suite / "resources/interference.jsonl"
     manifest_file = suite / "resources/monitor-manifest.json"
     summary_file = suite / "summary.json"
-    samples = read_jsonl(sample_file, required=True)
+    samples = read_samples(sample_file)
     interference = read_jsonl(interference_file)
     manifest = json.loads(manifest_file.read_bytes()) if manifest_file.exists() else {}
     summary = json.loads(summary_file.read_bytes())

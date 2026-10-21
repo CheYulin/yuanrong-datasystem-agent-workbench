@@ -170,7 +170,7 @@ def derive(received, out, source_bundle, *, device='253:2'):
         isolation = runtime.verify_datasystem_isolation(payload / 'batch-gate-001')
         deployment_proof, _ = postprocessing.verify_deployment_evidence(audits / 'deployment.json', suite, payload / 'runtime-inputs', TOOL_ROOT)
         resource_proof, _ = postprocessing.verify_resource_evidence(audits / 'resources', suite, analysis, TOOL_ROOT)
-        coverage_result = coverage.evaluate(analysis, resources.read_jsonl(suite / 'resources/samples.jsonl', required=True), resource)
+        coverage_result = coverage.evaluate(analysis, resources.read_samples(suite / 'resources/samples.jsonl'), resource)
         atomic_json(audits / 'coverage.json', coverage_result, exclusive=True)
         checks = [Check('native_matrix_recomputed', True, True, True),
                   Check('pinned_source_builds', True, source_builds, bool(source_builds and source_builds['verified'])),
