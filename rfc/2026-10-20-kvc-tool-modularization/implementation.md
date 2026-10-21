@@ -389,3 +389,15 @@ coordinator-derived-001 使用包005的真实 W13/W14 已通过：counts=valid13
 source006 对原始数据的 W13/W14 也已真实通过，命令 returncode=0、monotonic **584.358461883 秒**；去除生成时刻/来源展示字段后，source005 与 source006 的完整 analysis 数值数据一致。该 CSS 修正不改 SDK 或任何数值归约；使用包007生成并核验最终交付，保留前两份完整派生原件。
 
 按 ds-self-verify，本次 diff 仅报告 CSS 的手机目录作用域与实测说明；无运行热路径、并发/持久化或产品 context 变化。不为 CSS 添加镜像实现的单元测试，实际站点组件浏览器预检为对应证据；最新数值/发布规则全量579项通过仍见第25节，最终原生报告本地与公网验收继续执行。
+
+## 28. 最终包 W14/W15/W16 真实通过与交付链路适配（2026-10-21）
+
+package007 的 coordinator-derived-003 已真实终止，W13/W14 都 passed，外层 returncode=0、error=null、monotonic **579.233766695 秒**，峰值RSS **2275828 KiB**。数据仍为132有效、18原生失败、30不支持；完整审计不改原生结果。package005→007 byte/mode bridge 已验证运行/SDK/build/observe/core/platform/collect及运行pipeline不变，差异仅为明确的发布校验/profile/测试/说明和CSS。
+
+coordinator-report-001 / coordinator-delivery-001 的 W15/W16 已真实通过；步骤耗时分别 **254.680362641 / 376.913211987 秒**，外层命令 return0、error=null、**658.028500788 秒**。完整4776文件manifest为 b2a0d19efdd5ce79a0bd2b9c339391060b8989ac18ae4f342f5e407e0316310b；实际完整ZIP为 ec27f4b92bd0b00006e095ea3351b284b551d8cb53b2f4d4e005958b2bf4e17c。原始/干净解压/离线重生成展示数据 SHA 一致，本地与离线实际浏览器1440/390/320全部通过，9图4文档/Mermaid/步骤链接/菜单均核对；已经查看实际1440及390截图。W15完整render子区间与步骤/外层边界不同，不累加或覆盖。
+
+首次 W17 普通rsync实测172MB/170秒左右，7.4GiB不能满足1800秒命令超时；核对PID、完整argv、独占进程组后发送SIGINT，由owner封存failed。第二次压缩准备发现需显式恢复网页读取权限，发布前停止并保留failed。第三次2.89GB完整tar分块传输未带来共享总带宽提升；在完整本地重建预验收后停止其8个自有rsync，remaining_owned_children为空，由原owner封存第三个failed。相关intent/result及未完成暂存目录均保留；没有修改主报告、覆盖原attempt、安装不完整树或重跑SDK。
+
+本地ZIP+overlay重建预验收 **59.770644596 秒**，原ZIP **1350557425字节**，差异包 **5691017字节**，全部4776文件SHA相同。进一步提取最终网络适配器实际使用的remote重建代码，用21个真实分块完整执行并通过原manifest，所有web目录0755/文件0644。真实源SHA：adapter 722cee2f92c77a5bd0f2fe8953fd8c120c2d7f2aa7ad626f6d8ee57a9b3b08ee，remote代码14709941913d55025506a42d2f190b5296d60cb9e6e85fdace66716d53d87b87。最终第四次 W17 使用该已验证配方，仅网络交付源单列，不冒充包007的原始rsync实现。配方见 [交付附录](delivery-receipt-appendix.md)，截至本节写入仍在上传，W18尚未执行。
+
+按 ds-self-verify：本节变更限RFC/旧入口说明；6个Python配方代码块语法核对、附录JS语法、142映射实际目标和根目录收敛均通过。产品仓无修改、无产品热路径/并发/持久化变化，不需要改产品.repo_context。最新579项回归和本次真实离线/浏览器证据各自列明，不为文档重跑SDK或把公网状态写成已通过。

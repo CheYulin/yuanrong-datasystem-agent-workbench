@@ -23,6 +23,7 @@ import sys
 parser = argparse.ArgumentParser(description=__doc__)
 for name in ('tool-root', 'report', 'derived', 'control', 'out', 'url'):
     parser.add_argument('--' + name, required=True)
+parser.add_argument('--extra', action='append', default=[])
 args = parser.parse_args()
 sys.path.insert(0, args.tool_root)
 from kvcbench.report.documents import build
@@ -37,6 +38,17 @@ assert payload['run_id'] == 'kvc-native-batch-20261021-coordinator003'
 roots = [report / 'raw/snapshot/payload/controller/workflow/steps',
          report / 'raw/snapshot-receipt/steps', report / 'workflow/derived/steps',
          derived / 'workflow/steps', control / 'workflow/steps']
+extras = []
+if args.extra:
+    (out / 'extras').mkdir()
+for value in args.extra:
+    source = Path(value)
+    assert source.is_file() and not source.is_symlink()
+    target = out / 'extras' / source.name
+    assert not target.exists()
+    shutil.copy2(source, target)
+    extras.append(target.relative_to(out).as_posix())
+extra_links = '<ul>' + ''.join('<li><a href="' + html.escape(name, quote=True) + '">' + html.escape(name) + '</a></li>' for name in extras) + '</ul>'
 rows = {}
 history = {}
 for root in roots:
@@ -83,7 +95,7 @@ for row in ordered:
 canonical = [rows['W%02d' % n] for n in range(1, 19)]
 style = 'aside[data-yche-native-toc]{display:block!important}aside [data-yche-native-chapter]{display:block!important}body{margin:0;background:#f4f7fb;color:#18354e;font:16px/1.7 system-ui}aside{position:fixed;width:210px;top:0;bottom:0;padding:20px;background:white}aside a{display:block}main{margin-left:250px;padding:24px;max-width:1200px}section{background:white;border:1px solid #dce5ef;border-radius:12px;padding:20px;margin:20px 0;min-width:0}a{color:#1958b5;overflow-wrap:anywhere}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%}td,th{padding:8px;text-align:left;border-bottom:1px solid #ddd}#chart{height:430px;width:100%}figcaption{text-align:center;color:#60738c}code{overflow-wrap:anywhere}@media(max-width:850px){aside{position:static;width:auto}main{margin:0;padding:12px}section{padding:12px}}'
 # The appendix has its own immutable manifest, outside the main report hash cycle.
-page = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>工作流验收与耗时回执</title><style>' + style + '</style></head><body><aside><strong>逐步验收</strong><a href="#scope">1. 口径</a><a href="#timings">2. 耗时</a><a href="#receipts">3. 中间结果</a><a href="docs/acceptance.html">4. 设计说明</a><a href="' + html.escape(args.url, quote=True) + '">返回实验主报告</a></aside><main><section id="scope"><h1>1. W01–W18 验收回执</h1><p>执行、证据验收、原生接口结果分别记录。主矩阵：132 有效、18 失败、30 N/A。W09 退出码 1 与 passed_with_findings 同时保留。W17 的未压缩上传、压缩准备与较大压缩传输均被操作员中断，失败回执保留；终态以最新 attempt 为准。</p><p>此附录在 W18 结束后独立生成，不写入主报告，以避免自身验收 hash 循环。逐步回执是原件副本，原绝对引用不改写；完整证据与复现包见主报告。这里重新核对回执 SHA/身份/耗时，不声称独立重跑全部上游审计。</p></section><section id="timings"><h2>2. 各步骤实测耗时</h2><figure><div id="chart"></div><figcaption>图 1. 每步同进程 monotonic 耗时（秒）；步骤边界和嵌套关系不同，不相加为总耗时。</figcaption></figure></section><section id="receipts"><h2>3. 可复核的中间结果</h2><div class="scroll"><table><thead><tr><th>步骤</th><th>执行</th><th>验收</th><th>退出码</th><th>秒</th><th>原始回执</th></tr></thead><tbody>' + ''.join(table) + '</tbody></table></div></section><section><h2>4. 复现与完整性</h2><p><a href="docs/acceptance.html">设计和重建命令</a> · <a href="export-delivery-receipts.py">导出脚本</a> · <a href="data.json">结构化结果</a> · <a href="SHA256SUMS">文件 SHA256 清单</a></p></section></main><script src="echarts.min.js"></script><script>const rows=' + json.dumps(canonical, ensure_ascii=False).replace('</', '<\\/') + ';const chart=echarts.init(document.getElementById("chart"));chart.setOption({grid:{left:65,right:20,bottom:65,top:25},tooltip:{trigger:"axis"},xAxis:{type:"category",data:rows.map(x=>x.step),axisLabel:{rotate:45}},yAxis:{type:"value",name:"秒"},series:[{type:"bar",data:rows.map(x=>x.duration_s),itemStyle:{color:"#267fb5"}}]});addEventListener("resize",()=>chart.resize());</script></body></html>'
+page = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>工作流验收与耗时回执</title><style>' + style + '</style></head><body><aside><strong>逐步验收</strong><a href="#scope">1. 口径</a><a href="#timings">2. 耗时</a><a href="#receipts">3. 中间结果</a><a href="docs/acceptance.html">4. 设计说明</a><a href="' + html.escape(args.url, quote=True) + '">返回实验主报告</a></aside><main><section id="scope"><h1>1. W01–W18 验收回执</h1><p>执行、证据验收、原生接口结果分别记录。主矩阵：132 有效、18 失败、30 N/A。W09 退出码 1 与 passed_with_findings 同时保留。W17 的未压缩上传、压缩准备与较大压缩传输均被操作员中断，失败回执保留；终态以最新 attempt 为准。</p><p>此附录在 W18 结束后独立生成，不写入主报告，以避免自身验收 hash 循环。逐步回执是原件副本，原绝对引用不改写；完整证据与复现包见主报告。这里重新核对回执 SHA/身份/耗时，不声称独立重跑全部上游审计。</p></section><section id="timings"><h2>2. 各步骤实测耗时</h2><figure><div id="chart"></div><figcaption>图 1. 每步同进程 monotonic 耗时（秒）；步骤边界和嵌套关系不同，不相加为总耗时。</figcaption></figure></section><section id="receipts"><h2>3. 可复核的中间结果</h2><div class="scroll"><table><thead><tr><th>步骤</th><th>执行</th><th>验收</th><th>退出码</th><th>秒</th><th>原始回执</th></tr></thead><tbody>' + ''.join(table) + '</tbody></table></div></section><section><h2>4. 复现与完整性</h2><p><a href="docs/acceptance.html">设计和重建命令</a> · <a href="export-delivery-receipts.py">导出脚本</a> · <a href="data.json">结构化结果</a> · <a href="SHA256SUMS">文件 SHA256 清单</a></p>' + extra_links + '</section></main><script src="echarts.min.js"></script><script>const rows=' + json.dumps(canonical, ensure_ascii=False).replace('</', '<\\/') + ';const chart=echarts.init(document.getElementById("chart"));chart.setOption({grid:{left:65,right:20,bottom:65,top:25},tooltip:{trigger:"axis"},xAxis:{type:"category",data:rows.map(x=>x.step),axisLabel:{rotate:45}},yAxis:{type:"value",name:"秒"},series:[{type:"bar",data:rows.map(x=>x.duration_s),itemStyle:{color:"#267fb5"}}]});addEventListener("resize",()=>chart.resize());</script></body></html>'
 (out / 'index.html').write_text(page)
 docs = out / 'docs'
 docs.mkdir()
