@@ -70,3 +70,5 @@
 - 目录命名：`YYYY-MM-DD-<slug>/`（日期 + 短英文 slug，kebab-case）
 - 必备文件：`README.md`（含 Status + 目标 + 代码落点摘要）
 - 可选文件：`design.md`、`env-validation.md`、`test-walkthrough.md`、`results.md`、`issue-rfc.md`、`pr-description.md`
+
+- [2026-10-21 KVC 报告头栏与表格布局修正](2026-10-21-kvc-report-layout/README.md)

@@ -27,7 +27,7 @@ def build(sources, output, *, run_id):
                          for source, name in targets.items())
     records = []
     def wrapper(title, body, toc=''):
-        return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + html.escape(title) + '</title><link rel="stylesheet" href="_reader/reader.css"></head><body><header><a class="brand" href="../index.html">实验报告</a><a href="index.html">文档中心</a><button id="doc-menu" aria-controls="doc-navigation" aria-expanded="false">文档目录</button></header><aside id="doc-navigation"><h2>' + html.escape(run_id) + '</h2>' + navigation + toc + '</aside><main>' + body + '</main><script src="_reader/mermaid.min.js"></script><script src="_reader/reader.js"></script></body></html>'
+        return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + html.escape(title) + '</title><link rel="stylesheet" href="_reader/reader.css?v=layout-20261021-02"></head><body><header><a class="brand" href="../index.html">实验报告</a><a href="index.html">文档中心</a><button id="doc-menu" aria-controls="doc-navigation" aria-expanded="false">文档目录</button></header><aside id="doc-navigation"><h2>' + html.escape(run_id) + '</h2>' + navigation + toc + '</aside><main>' + body + '</main><script src="_reader/mermaid.min.js"></script><script src="_reader/reader.js"></script></body></html>'
     for source in sources:
         original = source.read_bytes()
         copied = output / source.name
