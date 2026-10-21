@@ -1,5 +1,7 @@
 # 网页文档转换与 Coordinator 术语约定
 
+> 目录重构说明：本专题历史脚本和模板已归档至工具的 tools/migrations/kvc_20261020/report-tools，历史浏览器检查在 tests/acceptance/legacy。下文原始执行命令与耗时保留其当时路径；新实验使用工具 README 中的模块入口。
+
 ## 1. 范围与入口
 
 用户要求把报告链接的 Markdown 构建文档、接口及测试细节改为可跳转的网页，并要求 DataSystem 后续统一使用 Coordinator。

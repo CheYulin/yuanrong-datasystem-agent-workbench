@@ -23,12 +23,10 @@ import sys
 
 sys.dont_write_bytecode = True
 
-import verify_results
-from build_metadata import PRODUCTS as BUILD_PINS, write_json
-from tcp_protocol_gate import trace_bytes
-import tcp_probe_ds_sizes as ds_medium_probe
-
-
+from kvcbench.collect.audits import legacy as verify_results
+from kvcbench.build.metadata import PRODUCTS as BUILD_PINS, write_json
+from kvcbench.collect.traces_legacy import trace_bytes
+from kvcbench.diagnostics import datasystem_sizes as ds_medium_probe
 PRODUCTS = {"datasystem", "mooncake", "lmcache"}
 
 

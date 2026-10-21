@@ -5,9 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import batch_analyze
-import batch_epoch_verify as subject
-import batch_runner
+from kvcbench.collect.analysis import batch as batch_analyze
+from kvcbench.collect.audits import epochs as subject
+from kvcbench.run import runner as batch_runner
 from tests.unit.collect.test_batch_analysis import raw_result
 
 

@@ -2,9 +2,7 @@
 from copy import deepcopy
 import unittest
 
-import batch_resource_audit as subject
-
-
+from kvcbench.collect.audits import resources as subject
 def sample(at, usage, events=73, memory=100):
     record = {"cpu.stat": {"usage_usec": usage, "nr_periods": at // 100000000,
                            "nr_throttled": 4, "throttled_usec": 900},

@@ -6,8 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import batch_analyze as subject
-import batch_runner
+from kvcbench.collect.analysis import batch as subject
+from kvcbench.run import runner as batch_runner
 from tests.unit.collect.test_batch_analysis import raw_result, refresh_totals
 
 

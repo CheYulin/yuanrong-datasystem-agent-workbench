@@ -8,9 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-import batch_stage
-
-
+from kvcbench.compat.entrypoints import batch_stage as batch_stage
 def write(path, data, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(data)

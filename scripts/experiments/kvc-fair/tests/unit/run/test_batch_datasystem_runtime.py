@@ -18,7 +18,7 @@ from kvcbench.run.products.datasystem import runtime
 
 class RuntimeStorageTests(unittest.TestCase):
     def test_compatibility_command_enters_the_parser_from_unrelated_cwd(self):
-        script = TOOL_ROOT / "datasystem/runtime.py"
+        script = TOOL_ROOT / "kvcbench/run/entrypoints/products/datasystem/runtime.py"
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run([sys.executable, str(script), "--help"], cwd=directory,
                 env=dict(os.environ, PYTHONPATH="", PYTHONDONTWRITEBYTECODE="1"), capture_output=True, text=True, timeout=10)

@@ -2,7 +2,7 @@
 
 **Status: In-Progress · 设计基线 2026-10-20 · P1 于 2026-10-21 启动，见 [实施记录](implementation.md)**
 
-现状基线为 workbench `d5907ed041f44261bff82c99ac41bc96e2f0d18d`。下文“现状”为该提交的源码事实，“目标”为待实施方案。完整文件去向见 [migration-map.csv](migration-map.csv)，验收要求见 [validation.md](validation.md)。
+现状基线为 workbench `d5907ed041f44261bff82c99ac41bc96e2f0d18d`。下文“现状”为该提交的源码事实（源码证据链接固定该提交），“目标”为设计方案；实际路径以迁移清单及实施记录为准。完整文件去向见 [migration-map.csv](migration-map.csv)，验收要求见 [validation.md](validation.md)。
 
 ## 1. 重构范围与目标
 
@@ -32,14 +32,14 @@
 
 | 当前问题 | 源码证据（均相对工具根目录） | 后果 |
 | --- | --- | --- |
-| 三代工作流共存，参数和路径直接写在入口 | [batch_workflow.py](../../scripts/experiments/kvc-fair/batch_workflow.py):17–38、[workflow.py](../../scripts/experiments/kvc-fair/workflow.py):29–75、[tcp_workflow.py](../../scripts/experiments/kvc-fair/tcp_workflow.py) | 新实验需改多个入口；batch 通过旧入口的全局变量记录耗时 |
-| 公共能力藏在具体诊断中 | [profile_put.py](../../scripts/experiments/kvc-fair/profile_put.py):29–93；stage、runner 都从它导入 | 正式运行依赖一个特定实验，难单独替换或验证 |
-| 在线运行反向依赖离线分析 | [batch_runner.py](../../scripts/experiments/kvc-fair/batch_runner.py):178–203 | 判断失败能否继续时，导入分析层的实现 |
-| 分析反向依赖报告 | [batch_analyze.py](../../scripts/experiments/kvc-fair/batch_analyze.py):15–16 | 资源和统计计算绑在 HTML 生成脚本上 |
-| 报告脚本兼做核验、复制、渲染、压缩与打包 | [batch_report.py](../../scripts/experiments/kvc-fair/batch_report.py):915–1216，共 1,248 行 | 修改展示可能影响证据校验和复现包 |
-| 目录结构被隐含的复制规则固化 | [batch_stage.py](../../scripts/experiments/kvc-fair/batch_stage.py):60–69；[capture_evidence.py](../../scripts/experiments/kvc-fair/capture_evidence.py):36–41；[report.py](../../scripts/experiments/kvc-fair/report.py):177–187 | 直接移动到新子目录，会漏部署、漏快照或漏打包 |
-| 构建复用与旧运行结果耦合 | [batch_stage.py](../../scripts/experiments/kvc-fair/batch_stage.py):45–52；[batch_build_stage.py](../../scripts/experiments/kvc-fair/batch_build_stage.py):38–113 | 旧路径要求先有成功的旧 TCP 正式实验；已有 builds-only 能力可作为正确拆分起点 |
-| 部署模块和构建辅助互相导入 | [batch_stage.py](../../scripts/experiments/kvc-fair/batch_stage.py):32、90、127；[batch_build_stage.py](../../scripts/experiments/kvc-fair/batch_build_stage.py):193 | 依靠函数内导入维持流程，职责关系不直观 |
+| 三代工作流共存，参数和路径直接写在入口 | [batch_workflow.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_workflow.py):17–38、[workflow.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/workflow.py):29–75、[tcp_workflow.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/tcp_workflow.py) | 新实验需改多个入口；batch 通过旧入口的全局变量记录耗时 |
+| 公共能力藏在具体诊断中 | [profile_put.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/profile_put.py):29–93；stage、runner 都从它导入 | 正式运行依赖一个特定实验，难单独替换或验证 |
+| 在线运行反向依赖离线分析 | [batch_runner.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_runner.py):178–203 | 判断失败能否继续时，导入分析层的实现 |
+| 分析反向依赖报告 | [batch_analyze.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_analyze.py):15–16 | 资源和统计计算绑在 HTML 生成脚本上 |
+| 报告脚本兼做核验、复制、渲染、压缩与打包 | [batch_report.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_report.py):915–1216，共 1,248 行 | 修改展示可能影响证据校验和复现包 |
+| 目录结构被隐含的复制规则固化 | [batch_stage.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_stage.py):60–69；[capture_evidence.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/capture_evidence.py):36–41；[report.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/report.py):177–187 | 直接移动到新子目录，会漏部署、漏快照或漏打包 |
+| 构建复用与旧运行结果耦合 | [batch_stage.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_stage.py):45–52；[batch_build_stage.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_build_stage.py):38–113 | 旧路径要求先有成功的旧 TCP 正式实验；已有 builds-only 能力可作为正确拆分起点 |
+| 部署模块和构建辅助互相导入 | [batch_stage.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_stage.py):32、90、127；[batch_build_stage.py](https://github.com/CheYulin/yuanrong-datasystem-agent-workbench/blob/d5907ed041f44261bff82c99ac41bc96e2f0d18d/scripts/experiments/kvc-fair/batch_build_stage.py):193 | 依靠函数内导入维持流程，职责关系不直观 |
 | 正式能力和一次性修补混在一起 | [相关 RFC](../2026-10-20-kvc-batch-tcp-comparison/README.md) 中的 reader、发布、移动端修补脚本 | 复用 reader 时会带入固定实验名、个人路径或历史修补策略 |
 
 ### 2.2 保留已经正确的实现

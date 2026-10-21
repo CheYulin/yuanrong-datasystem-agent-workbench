@@ -1,12 +1,12 @@
 # 1. 模块化命令与阶段验收
 
-从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。推荐使用 `python3 -m kvcbench`；构建、运行、收集和报告/交付入口按模块验收。实现存在与实际本次实验完成分别记录，实际进展见 RFC implementation.md。
+从 `scripts/experiments/kvc-fair/` 或解压后的 `kvc-fair/` 运行命令。推荐使用 `python3 -B -m kvcbench`；构建、运行、收集和报告/交付入口按模块验收。实现存在与实际本次实验完成分别记录，实际进展见 RFC implementation.md。
 
 ## 2. 制作和复核完整代码包
 
 ```bash
-python3 -m kvcbench bundle --out /path/to/new-results/code-bundle-001
-python3 -m kvcbench check-bundle --bundle /path/to/new-results/code-bundle-001
+python3 -B -m kvcbench bundle --out /path/to/new-results/code-bundle-001
+python3 -B -m kvcbench check-bundle --bundle /path/to/new-results/code-bundle-001
 ```
 
 `bundle-inputs.json` 是明确的源码文件清单。工具包包含嵌套模块、资源和测试；复制、ZIP 内容、原始 mode 与文件 SHA 都校验，缺模块、链接文件、覆盖已有输出或在源目录内生成包均拒绝。
@@ -18,9 +18,9 @@ python3 -m kvcbench check-bundle --bundle /path/to/new-results/code-bundle-001
 ## 3. 查看与只读复核回执
 
 ```bash
-python3 -m kvcbench status --workflow /path/to/new-results/code-bundle-001/workflow
-python3 -m kvcbench inspect-step --commit /path/to/step/commit.json
-python3 -m kvcbench verify-step --commit /path/to/step/commit.json --out /path/to/new-check-001
+python3 -B -m kvcbench status --workflow /path/to/new-results/code-bundle-001/workflow
+python3 -B -m kvcbench inspect-step --commit /path/to/step/commit.json
+python3 -B -m kvcbench verify-step --commit /path/to/step/commit.json --out /path/to/new-check-001
 ```
 
 `inspect-step` 读取记录，不宣称当前有效。`verify-step` 核对实际文件、权限、上游绑定、回执结论和同域耗时，输出新的 verification 与摘要；它不重放原动作，也不检查活的环境状态。`valid` 指记录绑定完整，`accepted_for_normal_use` 单列；失败证据记录绑定有效不等于该步骤可以放行。
@@ -33,7 +33,7 @@ python3 -m kvcbench verify-step --commit /path/to/step/commit.json --out /path/t
 
 ```bash
 python3 -m unittest discover -s tests/contract -p 'test_*.py' -v
-python3 -m unittest discover -s . -p 'test_*.py'
+python3 -B -m unittest discover -s tests -t . -p 'test_*.py'
 ```
 
 contract 测试只使用本地 fixture 与自有子进程，无产品 SDK、SSH、root 或目标节点依赖。普通回归已按 build/run/collect/report/delivery/diagnostics/compat 放在 tests/unit/ 下。安全验证与真实产品 smoke 的入口和依赖仍需明确选择，不混入默认离线测试。
@@ -44,8 +44,8 @@ contract 测试只使用本地 fixture 与自有子进程，无产品 SDK、SSH�
 先根据 `configs/hosts/build.example.json` 写入显式新根目录、缓存、CPython 3.11、编译器和 cgroup 资源配置；在实际构建节点执行：
 
 ```bash
-python3 -m kvcbench build --spec /absolute/path/build-spec.json
-python3 -m kvcbench status --workflow /absolute/new-native-root/workflow
+python3 -B -m kvcbench build --spec /absolute/path/build-spec.json
+python3 -B -m kvcbench status --workflow /absolute/new-native-root/workflow
 ```
 
 构建根目录和 `kvcbuild` cgroup 必须全新。命令按冻结版本顺序执行 Mooncake、DataSystem、LMCache，输出各产品 `commands/<product>/`、`build-metadata/<product>.json` 及 W02 产品子步骤回执；只有三产品通过身份/原生产物验证才写 `build-catalog.json`。构建总结果与清理分别为 `build-result.json`、`build-cleanup.json`。失败原件不覆盖，不根据目录存在推断成功。
@@ -58,7 +58,7 @@ python3 -m kvcbench status --workflow /absolute/new-native-root/workflow
 新的 report 入口消费显式 analysis/series/builds/workflow/evidence/audit 引用，校验 SHA、mode、run/profile 与审计绑定，正常报告要求完整矩阵和三个通过的构建记录。collect derive 生成已绑定 report-inputs，不能用空文件冒充审计通过。
 
 ```bash
-python3 -m kvcbench report --inputs /absolute/derived/report-inputs.json --out /absolute/new-report
+python3 -B -m kvcbench report --inputs /absolute/derived/report-inputs.json --out /absolute/new-report
 ```
 
 诊断预览显式增加 --diagnostic，保持 publication_eligible=false。原生失败证据完整与 API 成功分别呈现；失败聚合保留 null。report 不执行新的产品请求。
@@ -68,18 +68,18 @@ ZIP 包含 report/index.html、ECharts、Mermaid、文档网页与原件、原�
 ## 7. 明确选择构建目录、运行资源锁和环境账本
 
 ```bash
-python3 -m kvcbench.build.revalidate --root /absolute/native-root \
+python3 -B -m kvcbench.build.revalidate --root /absolute/native-root \
   --out /absolute/native-root/revalidation/new-attempt
-python3 -m kvcbench stage --native-root /absolute/native-root \
+python3 -B -m kvcbench stage --native-root /absolute/native-root \
   --catalog /absolute/native-root/revalidation/new-attempt/build-catalog.json \
   --bundle /absolute/frozen-source-payload \
   --resource-lock /absolute/shared-runtime/suite.lock \
   --cgroup /sys/fs/cgroup/kvcfair20261020 --out /absolute/new-runtime
-python3 -m kvcbench environment-prepare \
+python3 -B -m kvcbench environment-prepare \
   --cgroup /sys/fs/cgroup/kvcfair20261020 \
   --resource-lock /absolute/new-runtime/suite.lock \
   --out /absolute/new-runtime/environment-preparation
-python3 -m kvcbench environment-restore \
+python3 -B -m kvcbench environment-restore \
   --cgroup /sys/fs/cgroup/kvcfair20261020 \
   --resource-lock /absolute/new-runtime/suite.lock \
   --preparation /absolute/new-runtime/environment-preparation \
@@ -111,12 +111,12 @@ W12–W18 的完整跨节点收集、派生输入及交付验收编排仍待接�
 ## 9. 终态收集、离线分析与报告交付验收
 
 ```bash
-python3 -m kvcbench collect capture --control /absolute/control --out /absolute/snapshot --invocation /absolute/outer-command
-python3 -m kvcbench collect receive --host tiantiyun-80c128g --snapshot /absolute/snapshot --receipt /absolute/snapshot-receipt --out /absolute/received
-python3 -m kvcbench collect derive --received /absolute/received --source-bundle /absolute/current-bundle/bundle.zip --out /absolute/derived
-python3 -m kvcbench report-workflow --derived /absolute/derived --out /absolute/report --control /absolute/delivery-control --node /absolute/node --playwright /absolute/playwright/index.mjs --chrome /absolute/chrome
-python3 -m kvcbench publish-workflow --control /absolute/delivery-control --spec /absolute/publication-spec.json
-python3 -m kvcbench check-publication --control /absolute/delivery-control
+python3 -B -m kvcbench collect capture --control /absolute/control --out /absolute/snapshot --invocation /absolute/outer-command
+python3 -B -m kvcbench collect receive --host tiantiyun-80c128g --snapshot /absolute/snapshot --receipt /absolute/snapshot-receipt --out /absolute/received
+python3 -B -m kvcbench collect derive --received /absolute/received --source-bundle /absolute/current-bundle/bundle.zip --out /absolute/derived
+python3 -B -m kvcbench report-workflow --derived /absolute/derived --out /absolute/report --control /absolute/delivery-control --node /absolute/node --playwright /absolute/playwright/index.mjs --chrome /absolute/chrome
+python3 -B -m kvcbench publish-workflow --control /absolute/delivery-control --spec /absolute/publication-spec.json
+python3 -B -m kvcbench check-publication --control /absolute/delivery-control
 ```
 
 W12 必须在真实 W09/W10/W11 封存后执行，并重新锁定资源域，检查终态、恢复和输出身份。receive 保留远端原路径，通过显式根映射核验；derive 写新目录，重算矩阵、资源并独立审计，再生成构建、用例、脚本设计、结果四份文档。

@@ -10,8 +10,8 @@ import tempfile
 import unittest
 from argparse import Namespace
 
-import batch_deployment_audit as audit
-import batch_report as report
+from kvcbench.collect.audits import deployment as audit
+from kvcbench.compat import reports as report
 from tests.unit.collect.test_batch_deployment_audit import fixture
 import tests.unit.collect.test_batch_failures as failure_fixtures
 import tests.unit.build.test_batch_build_stage as build_fixtures
@@ -475,8 +475,8 @@ class SourceBuildProvenanceReportTests(unittest.TestCase):
         (docs / 'fixture.md').write_text('Offline packaging fixture; no native build executed.\n')
         archive = report.reproduction_archive(TOOL_ROOT, docs, self.fixture.parent)
         with zipfile.ZipFile(archive) as zipped:
-            self.assertEqual(zipped.read('kvc-fair/batch_build_stage.py'),
-                             (TOOL_ROOT / 'batch_build_stage.py').read_bytes())
+            self.assertEqual(zipped.read('kvc-fair/kvcbench/compat/entrypoints/batch_build_stage.py'),
+                             (TOOL_ROOT / 'kvcbench/compat/entrypoints/batch_build_stage.py').read_bytes())
 
 
 if __name__ == "__main__":

@@ -18,9 +18,7 @@ import time
 import traceback
 import uuid
 
-import benchmark
-
-
+from kvcbench.run.workers import scalar as benchmark
 VALUE_SIZE = 1 << 20
 
 

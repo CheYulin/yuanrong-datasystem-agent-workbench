@@ -5,9 +5,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-import batch_mooncake
-
-
+from kvcbench.run.products import mooncake_batch as batch_mooncake
 class FakeStore:
     instances = []
 

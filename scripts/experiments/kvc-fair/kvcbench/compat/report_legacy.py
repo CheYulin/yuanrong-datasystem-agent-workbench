@@ -111,7 +111,7 @@ def main():
     tcp_verification = None
     tcp_summary = None
     if args.transport_profile == "tcp":
-        from verify_tcp import verify_tcp
+        from kvcbench.compat.legacy.verify_tcp import verify_tcp
         tcp_verification = verify_tcp(argparse.Namespace(suite=args.suite,
             protocol_evidence=args.suite / "protocol-evidence", ds_medium=None))
         if not tcp_verification.get("passed"):
@@ -199,7 +199,7 @@ def main():
             target = args.out / "results" / path.parent.name / path.name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
-    template = Path(__file__).resolve().parents[2].joinpath("report-template.html").read_text()
+    template = Path(__file__).with_name("assets").joinpath("report-template.html").read_text()
     rendered = template.replace("{{VALID}}", str(len(valid))).replace("{{RECORDED}}", str(len(rows))).replace("{{FAILED}}", str(len(rows) - len(valid)))
     rendered = rendered.replace("{{STATUS}}", status)
     rendered = rendered.replace("{{PROFILE_DOWNLOAD}}", '<a href="put-profile.csv" download>PUT 补充资源 CSV</a>' if profile else "")
@@ -225,8 +225,8 @@ def main():
         rendered = rendered.replace('href="docs/validation.md"', 'href="docs/tcp-validation.md"')
     (args.out / "index.html").write_text(rendered)
     for name in ["report.js", "report.css"]:
-        shutil.copy2(Path(__file__).resolve().parents[2].joinpath(name), args.out / name)
-    vendor = Path(__file__).resolve().parents[2].joinpath("echarts.min.js")
+        shutil.copy2(Path(__file__).with_name("assets").joinpath(name), args.out / name)
+    vendor = Path(__file__).resolve().parents[1].joinpath("report/assets/echarts.min.js")
     if not vendor.is_file():
         raise RuntimeError("Missing packaged ECharts dependency; use the complete scripts directory")
     shutil.copy2(vendor, args.out / vendor.name)

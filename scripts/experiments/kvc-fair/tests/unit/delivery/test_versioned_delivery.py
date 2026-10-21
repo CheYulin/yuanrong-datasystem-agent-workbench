@@ -9,10 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import refresh_delivery
-import report
-
-
+from kvcbench.report import refresh as refresh_delivery
+from kvcbench.compat import report_legacy as report
 class VersionHrefTests(unittest.TestCase):
     checksum = "a" * 64
     anchor = '<a href="reproduce.zip" download>'

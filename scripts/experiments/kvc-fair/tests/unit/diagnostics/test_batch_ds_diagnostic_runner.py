@@ -9,9 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import batch_ds_diagnostic_runner as subject
-
-
+from kvcbench.diagnostics import datasystem_runner as subject
 class DiagnosticCleanupTests(unittest.TestCase):
     def fixture(self, parent):
         root = parent / "root";root.mkdir()

@@ -22,7 +22,7 @@
 
 正式部署与运行已改用独立的 digest/drain 公共能力，`profile_put` 保留导入别名供迁移期调用；主流程不再从特定 PUT 诊断中导入这两个机制。其余诊断耦合按后续阶段逐项迁移。
 
-`configs/versions/kvc_20261020.json` 是构建版本声明的唯一数据文件。旧的 build_metadata/batch_stage/batch_build_stage 路径暂留为薄参数适配，canonical 模块间没有原先的双向导入；新构建服务已可执行；正式 workflow 的 W 步骤回执和其余模块仍在接入。
+`configs/versions/kvc_20261020.json` 是构建版本声明的唯一数据文件。旧参数适配集中于 compat/entrypoints，历史完整控制器位于 tools/migrations/kvc_20261020。canonical 模块间没有原先的双向导入；W01–W18 已接入，最终 Coordinator 实测与公开交付仍须完整验收。
 
 ## 2. 中间结果如何交接
 
@@ -59,6 +59,15 @@ P1 提供持久化和绑定机制；每个 W 步骤的业务验收函数仍随 b
 
 新的 report/inputs.py 消费已落盘并绑定的中间结果；render.py、model.py、documents.py、offline.py 分别处理页面、图表投影、Markdown/Mermaid 阅读页和离线包，report 不导入 build/run/observe/collect。原来混合分析和生成的旧入口明确保留于 compat，用于旧格式复核，不作为新的 report 实现。
 
-源码 inventory、交付树 inventory、SHA/gzip/ledger 与原始 tar 检查归 platform；report/package 使用明确源码清单。发布、注册和历史导航维护归 delivery；新报告树外的 W16–W18 回执接入尚待完成。历史本地 refresh 仍支持旧报告，对新不可变报告禁止原地刷新。
+源码 inventory、交付树 inventory、SHA/gzip/ledger 与原始 tar 检查归 platform；report/package 使用明确源码清单。发布、注册和历史导航维护归 delivery；W16–W18 回执写在报告树外；已接入编排，最终本轮实测交付尚待验收。历史本地 refresh 仍支持旧报告，对新不可变报告禁止原地刷新。
 
 新消费者按 audit 中的 SHA 绑定拒绝跨 run/profile 或错配组合，允许完整的原生失败矩阵保留 failed。离线 relocate 只增补到相同字节/权限的显式位置映射，不重写原始 audit/evidence；干净解压后的实际代码已完成 help、位置映射与重生成验证。
+
+
+## 7. 源码布局与冻结运行布局
+
+源码根目录保留 README、配置、模块、测试、文档和明确归档目录。构建 recipe 在 build/recipes；运行 shell 在 run/products；薄 Python 入口资源在 run/entrypoints；ECharts 在 report/assets，历史模板在 compat/assets。测试 fixture 和旧浏览器检查分别在 tests/fixtures、tests/acceptance/legacy。
+
+run/layout.py 以明确清单 materialize 运行入口，校验复制前后 SHA/size/mode。部署目录仍使用已约定的 batch_benchmark.py、scripts/datasystem/runtime.py 等路径，保持冻结执行路径和证据解释。入口资源保留原字节，业务逻辑仍从 kvcbench 导入。历史完整控制器不加入正常主流程的依赖链。
+
+目录迁移不改写正在执行的冻结代码包。实际测量源码身份和后续离线处理源码身份分别记录，后处理使用新代码必须重新生成其验收回执。

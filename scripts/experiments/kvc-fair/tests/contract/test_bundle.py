@@ -113,7 +113,7 @@ class BundleTests(unittest.TestCase):
             path = groups / role / 'cgroup.procs'
             path.parent.mkdir(parents=True)
             path.write_text('')
-        command = [sys.executable, str(tool / 'capture_evidence.py'), '--root', str(runtime),
+        command = [sys.executable, "-m", "kvcbench.collect.snapshot", '--root', str(runtime),
                    '--suite', str(suite), '--cgroup-root', str(groups)]
         subprocess.run(command, check=True, capture_output=True, text=True)
         saved = suite / 'build-and-script-evidence'

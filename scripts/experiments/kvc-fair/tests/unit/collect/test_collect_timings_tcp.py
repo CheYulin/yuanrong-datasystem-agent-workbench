@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 
-from collect_timings import Collector
+from kvcbench.collect.timings import Collector
 
 
 BASE = 1792400000000000000
@@ -142,7 +142,7 @@ class TcpTimingTest(unittest.TestCase):
         before = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                   for path in self.suite.rglob("*") if path.is_file()}
         out = Path(self.temporary.name) / "output"
-        subprocess.run([sys.executable, str((TOOL_ROOT / "collect_timings.py")),
+        subprocess.run([sys.executable, "-m", "kvcbench.collect.timings",
                         "--suite", str(self.suite), "--out", str(out)], check=True, capture_output=True, text=True)
         raw = json.loads((out / "timings.json").read_text())
         with (out / "timings.csv").open() as stream:

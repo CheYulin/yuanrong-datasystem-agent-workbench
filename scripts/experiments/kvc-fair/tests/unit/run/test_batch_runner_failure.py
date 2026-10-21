@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import batch_runner as subject
+from kvcbench.run import runner as subject
 from tests.unit.collect.test_batch_analysis import raw_result
 from tests.unit.collect.test_batch_failures import failed_result
 

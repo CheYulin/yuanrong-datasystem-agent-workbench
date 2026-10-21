@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 
-WRAPPER = (TOOL_ROOT / "lmcache") / "start_server_tcp.sh"
+WRAPPER = (TOOL_ROOT / "kvcbench/run/products/lmcache") / "start_server_tcp.sh"
 
 
 class LMCacheProfileTests(unittest.TestCase):

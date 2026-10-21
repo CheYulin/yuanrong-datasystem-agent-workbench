@@ -46,7 +46,7 @@ def render(inputs, out, *, diagnostic=False):
     (out / 'assets').mkdir()
     for name in ('report.css', 'report.js'):
         shutil.copy2(ASSETS / name, out / 'assets' / name)
-    shutil.copy2(TOOL_ROOT / 'echarts.min.js', out / 'assets/echarts.min.js')
+    shutil.copy2(ASSETS / 'echarts.min.js', out / 'assets/echarts.min.js')
     encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
     if len(encoded.encode()) >= 20 << 20:
         raise ValueError('Report data exceeds the explicit 20 MiB budget')

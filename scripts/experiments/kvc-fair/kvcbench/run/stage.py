@@ -14,13 +14,15 @@ from kvcbench.platform.cgroup import drain
 from kvcbench.platform.files import regular, identity, real_directory
 from kvcbench.core.spec import PRODUCT_NAMES
 from kvcbench.platform.locks import open_lock, open_path
+from kvcbench.run import layout
 
 
 NATIVE_TEMPLATE_ROOT = "/home/worktrees/kvc-fair-20261020"
 
 
 def tcp_manifest(bundle, root):
-    source = regular(bundle, "products.json")
+    name = 'configs/templates/products.json' if (bundle / 'configs/templates/products.json').is_file() else 'products.json'
+    source = regular(bundle, name)
     manifest = json.loads(source.read_text().replace(NATIVE_TEMPLATE_ROOT, str(root)))
     if (not isinstance(manifest.get("products"), list) or len(manifest["products"]) != 3
             or {row.get("name") for row in manifest["products"]} != set(PRODUCT_NAMES)):
@@ -44,7 +46,7 @@ def tcp_manifest(bundle, root):
 
 
 def copy_datasystem_runtime(bundle, temporary):
-    source = bundle / "datasystem/runtime.py"
+    source = layout.datasystem_runtime_source(bundle)
     if source.is_symlink() or not source.is_file():
         raise ValueError("An explicit DataSystem runtime with per-worker RocksDB isolation is required")
     target = temporary / "scripts/datasystem/runtime.py"
@@ -95,13 +97,18 @@ def stage(args, *, verify_builds=None, snapshot_builds=None, install_inputs=None
                 raise RuntimeError("Pinned build artifact changed: " + path)
         temporary = Path(tempfile.mkdtemp(prefix="." + root.name + "-", dir=root.parent))
         try:
-            for path in bundle.glob("*.py"):
-                shutil.copy2(path, temporary / path.name)
+            if layout.available(bundle):
+                layout.materialize(bundle, temporary)
+            else:
+                for path in bundle.glob("*.py"):
+                    shutil.copy2(path, temporary / path.name)
             if install_inputs is not None:
                 install_inputs(bundle, temporary)
             elif (bundle / "kvcbench").exists():
                 raise ValueError("Explicit frozen code input installer is required")
-            for product, destination in [("datasystem", "scripts/datasystem"), ("mooncake", "mooncake"), ("lmcache", "lmcache")]:
+            legacy_products = [] if layout.available(bundle) else [
+                ("datasystem", "scripts/datasystem"), ("mooncake", "mooncake"), ("lmcache", "lmcache")]
+            for product, destination in legacy_products:
                 target = temporary / destination
                 target.mkdir(parents=True)
                 for path in (bundle / product if builds_only else base / destination).iterdir():

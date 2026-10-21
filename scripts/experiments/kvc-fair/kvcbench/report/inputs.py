@@ -72,6 +72,18 @@ def load(path, *, diagnostic=False):
         for key in ('evidence', 'outcome_evidence'):
             if row.get(key) and row[key] not in destinations:
                 raise ValueError('A reported evidence link is not in the bound inventory: ' + row[key])
+    step_files = {'inputs.json', 'result.json', 'artifacts.json', 'acceptance.json', 'summary.md', 'commit.json'}
+    for step in values['workflow'].get('steps', []):
+        links = step.get('evidence')
+        if links is None:
+            continue
+        if not isinstance(links, dict) or set(links) != step_files:
+            raise ValueError('Workflow evidence requires the complete step receipt files')
+        if len({str(Path(destination).parent) for destination in links.values()}) != 1:
+            raise ValueError('Workflow evidence files must belong to one step attempt')
+        for name, destination in links.items():
+            if Path(destination).name != name or destination not in file_destinations:
+                raise ValueError('Workflow evidence link is not in the bound file inventory')
     documents = []
     for record in spec.get('documents', []):
         source = resolve(record)

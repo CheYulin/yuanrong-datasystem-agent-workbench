@@ -21,7 +21,7 @@ import subprocess
 import time
 import traceback
 
-from profile_put import atomic_json, digest, drain, stop_process, utc
+from kvcbench.diagnostics.put import atomic_json, digest, drain, stop_process, utc
 
 QUEUE_ENV = ("MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER")
 CGROUP = Path("/sys/fs/cgroup/kvcfair20261020")

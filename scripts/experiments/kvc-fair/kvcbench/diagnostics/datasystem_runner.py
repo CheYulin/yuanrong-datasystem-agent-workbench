@@ -17,7 +17,7 @@ import sys
 import time
 import traceback
 
-from profile_put import atomic_json, digest, drain, stop_process
+from kvcbench.diagnostics.put import atomic_json, digest, drain, stop_process
 
 
 def run(args):

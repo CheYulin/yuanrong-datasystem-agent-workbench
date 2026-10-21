@@ -7,9 +7,7 @@ import tempfile
 import unittest
 
 from tests.unit.run.test_batch_gate import FakeAdapter
-import batch_gate
-
-
+from kvcbench.run import qualification as batch_gate
 from kvcbench.collect.audits import tcp as audit
 
 

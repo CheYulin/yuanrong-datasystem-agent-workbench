@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import batch_isolation_notice as subject
-from report import finalize_artifacts
+from kvcbench.delivery import isolation_notice as subject
+from kvcbench.compat.report_legacy import finalize_artifacts
 
 
 def snapshot(root):

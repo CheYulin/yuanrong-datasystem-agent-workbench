@@ -14,7 +14,7 @@ def generate(root, out, analysis, builds, configuration, coverage):
         build_lines.append(f"| {row['product']} | {row['tag']} | `{row['sha']}` | {row['build_wall_seconds']:.6f} |")
     build_lines += ['', '构建区间包括依赖、下载/缓存、配置、native 编译、安装和检查；不是纯编译计时或冷缓存排名。LMCache 的 PyTorch 二进制依赖与原生扩展构建分别记录。', '',
         '## 2. 可复现构建入口', '', '源码包包含版本声明、完整配方及依赖锁。先按实际构建主机配置填写 `configs/hosts/build.example.json`，再执行：', '',
-        '```bash', 'python3 -m kvcbench build --spec /absolute/build-spec.json', 'python3 -m kvcbench.build.revalidate --root /absolute/native-root --out /absolute/native-root/revalidation/new-attempt', '```', '',
+        '```bash', 'python3 -B -m kvcbench build --spec /absolute/build-spec.json', 'python3 -B -m kvcbench.build.revalidate --root /absolute/native-root --out /absolute/native-root/revalidation/new-attempt', '```', '',
         '原始失败验收保留，重验另生成 metadata/catalog。GCC 15 的第三方兼容 wrapper 使用 C++ 头预包含及 C17，不修改产品 Git 源码；依赖缓存复用明确保留。', '', '## 3. 本次关键配置', '']
     for row in configuration:
         build_lines += ['### ' + row['name'], '', '```json', json.dumps(row['value'], ensure_ascii=False, indent=2), '```', '']
@@ -31,7 +31,7 @@ def generate(root, out, analysis, builds, configuration, coverage):
         '## 2. 工作流', '', '```mermaid', 'flowchart LR', '    A[W01固定计划] --> B[W02构建验收]', '    B --> C[W03代码包]', '    C --> D[W04部署]', '    D --> E[W05预检与W06隔离]', '    E --> F[W07资格与smoke]', '    F --> G[W08观测就绪]', '    G --> H[W09正式矩阵]', '    H --> I[W10停止排空]', '    I --> J[W11恢复]', '    J --> K[W12冻结与接收]', '    K --> L[W13分析与W14审计]', '    L --> M[W15报告]', '    M --> N[W16本地验收]', '    N --> O[W17发布与W18公开验收]', '```', '<p align="center">图 1. 每步提交实际输入、结果、清单、验收、摘要、耗时与最终commit。</p>', '',
         '## 3. 生命周期与失败', '', '共同资源锁跨运行根目录共享；正常下游只消费已接受的绑定。测量不重放、不续写旧 epoch；失败另留 attempt。ready仅证明启动，观测流停止后才封存。W12在停止、恢复及重新排空后冻结，包含原生构建 bytes、版本/命令/源代码身份和原始回执。', '',
         'W13/W14 在收集副本上执行，保留远端路径并显式映射；历史失败验收不改写。W15报告树不可变，W16–W18及其耗时、截图和交付回执另存。', '',
-        '## 4. 重放入口', '', '```bash', 'python3 -m kvcbench workflow all --spec /absolute/run-spec.json --control /absolute/new-control', 'python3 -m kvcbench status --workflow /absolute/new-control/workflow', '```', '', '源码包和原始配置为复现依据；运行、分析和报告的源码身份分开保存。', '']))
+        '## 4. 重放入口', '', '```bash', 'python3 -B -m kvcbench workflow all --spec /absolute/run-spec.json --control /absolute/new-control', 'python3 -B -m kvcbench status --workflow /absolute/new-control/workflow', '```', '', '源码包和原始配置为复现依据；运行、分析和报告的源码身份分开保存。', '']))
     counts = analysis['counts']
     results = ['# 1. 测试验证结果', '', links, '', f'运行 `{run_id}`：有效 {counts.get("valid", 0)}，原生失败 {counts.get("failed", 0)}，N/A {counts.get("not_supported", 0)}，缺失 {counts.get("missing", 0)}，无效 {counts.get("invalid", 0)}。', '',
         '执行完整、证据核验与原生接口成功分别记录。构建重验、资格 PASS 或报告发布不改写原生失败。', '', '## 2. 各产品/API/批量结果', '',

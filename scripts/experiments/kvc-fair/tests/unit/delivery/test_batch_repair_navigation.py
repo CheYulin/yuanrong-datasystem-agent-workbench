@@ -9,9 +9,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-import batch_repair_navigation as repair
-
-
+from kvcbench.delivery import navigation as repair
 def checksum(content):
     return hashlib.sha256(content).hexdigest()
 

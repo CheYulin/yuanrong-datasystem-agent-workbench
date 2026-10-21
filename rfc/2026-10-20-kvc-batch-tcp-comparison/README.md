@@ -1,8 +1,10 @@
 # 1. 每次调用 1 / 16 / 256 / 4096 keys：TCP 原生批量补测
 
+> 目录重构说明：本专题历史脚本和模板已归档至工具的 tools/migrations/kvc_20261020/report-tools，历史浏览器检查在 tests/acceptance/legacy。下文原始执行命令与耗时保留其当时路径；新实验使用工具 README 中的模块入口。
+
 用户已确认 key 数指**一次 SDK API 调用的批量大小**，不是缓存总 key 数。本补测与已发布的单 key TCP 实验分开保存、分开统计。
 
-网页新增[附录 A：构建、版本与配置](https://yche.me/perf/kvc-batch-tcp-20261020/index.html#build-appendix)，同时补充旧单 key TCP 页面。内容模板为 [build-appendix.html](build-appendix.html)，发布与验证记录见 [build-appendix-publication.md](build-appendix-publication.md)。
+网页新增[附录 A：构建、版本与配置](https://yche.me/perf/kvc-batch-tcp-20261020/index.html#build-appendix)，同时补充旧单 key TCP 页面。内容模板为 [build-appendix.html](../../scripts/experiments/kvc-fair/tools/migrations/kvc_20261020/report-tools/build-appendix.html)，发布与验证记录见 [build-appendix-publication.md](build-appendix-publication.md)。
 
 构建、配置、测试与接口细节已提供网页阅读版：[批量文档中心](https://yche.me/perf/kvc-batch-tcp-20261020/docs/index.html)、[旧 TCP 文档中心](https://yche.me/perf/kvc-tcp-20261020/docs/index.html)。转换和验收见 [web-documents.md](web-documents.md)。DataSystem 后续说明统一称 Coordinator；历史源码、配置和日志按原件保留。
 

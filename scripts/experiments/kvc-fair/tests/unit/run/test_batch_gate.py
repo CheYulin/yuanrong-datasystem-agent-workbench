@@ -8,9 +8,7 @@ import tempfile
 import unittest
 
 
-SPEC = importlib.util.spec_from_file_location("batch_gate", (TOOL_ROOT / "batch_gate.py"))
-gate = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(gate)
+from kvcbench.run import qualification as gate
 
 
 class FakeAdapter:
@@ -250,7 +248,7 @@ class OutputTests(unittest.TestCase):
             config = root / "config.json"
             config.write_text("{}\n")
             out = root / "gate.json"
-            command = [sys.executable, str(Path(gate.__file__)), "--adapter", str(adapter), "--config", str(config),
+            command = [sys.executable, "-m", "kvcbench.run.qualification", "--adapter", str(adapter), "--config", str(config),
                        "--client-index", "1", "--run-id", "cli", "--out", str(out),
                        "--batch-sizes", "1", "16", "--value-size", "32"]
             first = subprocess.run(command, capture_output=True, text=True)

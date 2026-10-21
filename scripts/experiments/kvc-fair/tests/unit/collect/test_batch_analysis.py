@@ -16,9 +16,9 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-import batch_analyze as subject
-import batch_report
-from benchmark import bucket, percentile
+from kvcbench.collect.analysis import batch as subject
+from kvcbench.compat import reports as batch_report
+from kvcbench.run.workers.scalar import bucket, percentile
 
 
 def raw_result(operation="get", batch=16):
@@ -443,7 +443,7 @@ class RuntimeBindingTests(unittest.TestCase):
                     self.assertEqual(data, (runtime / name).read_bytes())
                     self.assertEqual(len(data), record["bytes"])
                     self.assertEqual(hashlib.sha256(data).hexdigest(), record["sha256"])
-                self.assertNotEqual(archive.read("kvc-fair/batch_benchmark.py"),
+                self.assertNotEqual(archive.read("kvc-fair/kvcbench/run/entrypoints/batch_benchmark.py"),
                                     archive.read(prefix + "batch_benchmark.py"),
                                     "Current tool source and frozen measured source are separate lineages")
                 self.assertFalse(any("DO_NOT_ARCHIVE" in name for name in archive.namelist()))
@@ -636,7 +636,7 @@ class ConfigurationHistoryTests(unittest.TestCase):
 
 class TCPProofBindingTests(unittest.TestCase):
     def fixture(self, parent):
-        from batch_gate import payload
+        from kvcbench.run.qualification import payload
         gate, scripts = parent / "gate", parent / "parsers"
         gate.mkdir(); scripts.mkdir()
         inputs, sources, cases = {}, {}, []
@@ -852,7 +852,7 @@ class IsolationAndFailedLineageTests(unittest.TestCase):
 
 class ResourceEvidenceBindingTests(unittest.TestCase):
     def fixture(self, parent):
-        import batch_resource_audit
+        from kvcbench.collect.audits import resources as batch_resource_audit
         suite, output = parent / "suite", parent / "resource-audit"
         (suite / "resources").mkdir(parents=True)
         (suite / "r0-datasystem").mkdir()
@@ -873,7 +873,7 @@ class ResourceEvidenceBindingTests(unittest.TestCase):
 
     @staticmethod
     def write(output, raw):
-        from batch_resource_audit import markdown
+        from kvcbench.collect.audits.resources import markdown
         (output / "resource-audit.json").write_text(json.dumps(raw))
         (output / "resource-audit.md").write_text(markdown(raw))
 

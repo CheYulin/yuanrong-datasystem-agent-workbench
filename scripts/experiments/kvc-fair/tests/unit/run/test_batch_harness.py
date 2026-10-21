@@ -10,11 +10,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import batch_benchmark
-import batch_runner
-import batch_stage
-
-
+from kvcbench.run.workers import batch as batch_benchmark
+from kvcbench.run import runner as batch_runner
+from kvcbench.compat.entrypoints import batch_stage as batch_stage
 class Clock:
     def __init__(self):
         self.ns = 0

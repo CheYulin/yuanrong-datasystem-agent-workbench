@@ -12,10 +12,8 @@ from unittest.mock import patch
 import warnings
 import zipfile
 
-import batch_refresh_delivery as subject
-import report
-
-
+from kvcbench.report import refresh_batch as subject
+from kvcbench.compat import report_legacy as report
 def snapshot(root):
     return {path.relative_to(root).as_posix(): (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
             for path in root.rglob("*") if path.is_file()}

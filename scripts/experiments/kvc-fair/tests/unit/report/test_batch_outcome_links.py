@@ -11,8 +11,8 @@ import subprocess
 import tempfile
 import unittest
 
-import batch_analyze
-import batch_report
+from kvcbench.collect.analysis import batch as batch_analyze
+from kvcbench.compat import reports as batch_report
 import tests.unit.collect.test_batch_failures as failure_fixtures
 
 
@@ -184,7 +184,7 @@ class OutcomeEvidenceTests(unittest.TestCase):
             analysis = batch_analyze.analyze(suite)
             failed = next(row for row in analysis["rows"] if row["identity"] == IDENTITY)
             failed["native_errors"][0]["errors"][0] += '</pre><script>untrusted_fixture()</script>&"'
-            rendered = node(RENDER, {"source": str(HERE / "batch-report.js"), "data": analysis})
+            rendered = node(RENDER, {"source": str(HERE / "kvcbench/compat/assets/batch-report.js"), "data": analysis})
             failures = Rows(rendered["failureHTML"]).rows
             self.assertFalse(rendered["hidden"])
             self.assertEqual(len(failures), 1)
@@ -205,7 +205,7 @@ class OutcomeEvidenceTests(unittest.TestCase):
                 table = [dict(status=row["status_text"], links=row["links"], text=row["text"]) for row in rows]
                 context = {"width": 1440, "operation": operation, "operationRows": expected, "table": table,
                            "failedRows": [failed], "failureTable": {"hidden": rendered["hidden"], "rows": failures}}
-                result = node(QA_PREDICATES, {"source": str(HERE / "qa_batch_report.mjs"), "context": context})
+                result = node(QA_PREDICATES, {"source": str(HERE / "tests/acceptance/legacy/qa_batch_report.mjs"), "context": context})
                 self.assertNotIn("error", result)
                 self.assertTrue(all(item["pass"] for item in result["checks"]), result)
                 if operation == "exist_hit":
@@ -217,7 +217,7 @@ class OutcomeEvidenceTests(unittest.TestCase):
                             broken["failureTable"]["rows"][0]["errors"] = "[]"
                         else:
                             next(row for row in broken["table"] if row["status"] == "原生失败")["status"] = "有效"
-                        result = node(QA_PREDICATES, {"source": str(HERE / "qa_batch_report.mjs"), "context": broken})
+                        result = node(QA_PREDICATES, {"source": str(HERE / "tests/acceptance/legacy/qa_batch_report.mjs"), "context": broken})
                         self.assertTrue(any(not item["pass"] for item in result["checks"]), (mode, result))
 
 

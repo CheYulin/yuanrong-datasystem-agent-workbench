@@ -15,11 +15,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-import batch_build_stage as bootstrap
-import batch_stage
-import build_metadata
-
-
+from kvcbench.compat.entrypoints import batch_build_stage as bootstrap
+from kvcbench.compat.entrypoints import batch_stage as batch_stage
+from kvcbench.build import metadata as build_metadata
 HERE = TOOL_ROOT
 
 
@@ -82,7 +80,7 @@ class BuildStageTests(unittest.TestCase):
             write(self.native / f"build-metadata/{name}.json", json.dumps(row))
         for name in ["mooncake/source", "mooncake/deps", "mooncake/venv", "mooncake/wheels", "lmcache/source", "lmcache/venv311"]:
             (self.native / name).mkdir(parents=True, exist_ok=True)
-        write(self.bundle / "products.json", (HERE / "products.json").read_text())
+        write(self.bundle / "products.json", (HERE / "configs/templates/products.json").read_text())
         write(self.bundle / "batch_fixture.py", "# fixture staged input\n")
         for name in ["datasystem", "mooncake", "lmcache"]:
             write(self.bundle / name / "runtime.py", "# fixture runtime, never executed\n")
@@ -244,7 +242,7 @@ class BuildStageTests(unittest.TestCase):
         stage = self.stage()
         self.assertEqual(len(stage["build_artifacts"]), 10)
         self.assertIn(str(master), stage["build_artifacts"])
-        import batch_report
+        from kvcbench.compat import reports as batch_report
         suite = self.parent / "consumer-suite"
         write(suite / "batch-stage.json", json.dumps(stage))
         checked_stage, runtime = batch_report.verify_runtime_inputs(suite, self.target)

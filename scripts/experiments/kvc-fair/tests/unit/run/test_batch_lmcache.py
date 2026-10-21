@@ -9,9 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import batch_lmcache as subject
-
-
+from kvcbench.run.products import lmcache_batch as subject
 class Future:
     def __init__(self, value=None, error=None):
         self.value, self.error = value, error

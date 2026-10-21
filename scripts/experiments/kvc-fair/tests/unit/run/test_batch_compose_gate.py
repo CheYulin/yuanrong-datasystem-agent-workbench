@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import unittest
 
-import batch_gate
+from kvcbench.run import qualification as batch_gate
 from tests.unit.run.test_batch_gate import FakeAdapter
 
 

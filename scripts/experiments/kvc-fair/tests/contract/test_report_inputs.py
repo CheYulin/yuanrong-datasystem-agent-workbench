@@ -35,6 +35,36 @@ class ReportInputsTests(unittest.TestCase):
                 self.assertTrue(entry.is_dir())
                 self.assertEqual(entry.external_attr >> 16 & 0o777, 0o750)
 
+    def test_workflow_links_require_complete_same_attempt_bound_files(self):
+        names = ['inputs.json', 'result.json', 'artifacts.json', 'acceptance.json', 'summary.md', 'commit.json']
+        for kind in ('valid', 'missing', 'mixed', 'partial'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                source, path, spec = self.fixture(Path(temporary))
+                links = {name: 'workflow/W01/attempt-001/' + name for name in names}
+                evidence = json.loads((source / 'evidence.json').read_text())
+                evidence += [{'destination': destination, 'source': reference(source, 'case.json')}
+                             for destination in links.values()]
+                if kind == 'missing':
+                    links['result.json'] = 'workflow/W01/attempt-001/absent.json'
+                elif kind == 'mixed':
+                    links['result.json'] = 'workflow/W02/attempt-001/result.json'
+                elif kind == 'partial':
+                    del links['result.json']
+                view = {'run_id': spec['run_id'], 'profile': spec['profile'], 'steps': [{'id': 'W01', 'evidence': links}]}
+                audit = json.loads((source / 'audit.json').read_text())
+                for name, value in [('workflow', view), ('evidence', evidence)]:
+                    atomic_json(source / (name + '.json'), value)
+                    spec['inputs'][name] = reference(source, name + '.json')
+                    audit['bindings'][name] = spec['inputs'][name]['sha256']
+                atomic_json(source / 'audit.json', audit)
+                spec['inputs']['audit'] = reference(source, 'audit.json')
+                atomic_json(path, spec)
+                if kind == 'valid':
+                    self.assertEqual(load(path, diagnostic=True)['values']['workflow']['steps'][0]['evidence'], links)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'Workflow evidence'):
+                        load(path, diagnostic=True)
+
     def fixture(self, parent):
         source = parent / 'inputs'
         source.mkdir()

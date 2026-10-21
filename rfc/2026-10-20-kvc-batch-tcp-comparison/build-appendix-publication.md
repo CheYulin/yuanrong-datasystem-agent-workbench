@@ -1,5 +1,7 @@
 # 构建附录发布与验证记录
 
+> 目录重构说明：本专题历史脚本和模板已归档至工具的 tools/migrations/kvc_20261020/report-tools，历史浏览器检查在 tests/acceptance/legacy。下文原始执行命令与耗时保留其当时路径；新实验使用工具 README 中的模块入口。
+
 ## 1. 请求与页面范围
 
 用户要求在网页增加附录，明确 DataSystem / Mooncake / LMCache 如何构建、关键配置与 tag。本次同时更新[旧单 key TCP 页面](https://yche.me/perf/kvc-tcp-20261020/index.html#build-appendix)及[R7 批量页面](https://yche.me/perf/kvc-batch-tcp-20261020/index.html#build-appendix)，增加目录和页首快捷入口。附录分 A.1 版本、A.2 构建、A.3 运行参数、A.4 证据。
@@ -23,7 +25,7 @@
 node /home/t14s/workspace/scratch/2026-10-20-kvc-build-appendix/qa-appendix.mjs /home/t14s/workspace/scratch/2026-10-20-kvc-build-appendix/browser-qa-004
 ```
 
-结果：66/66 PASS，45.812620781 秒；2 页面 × 1440/390 视口；版本身份、构建命令展开、配置、章节导航、无文档溢出、原 ECharts 图、手机 tag 不断行且表格横向滚动、所有附录链接 HEAD 200、无 pageerror。实际 QA 源码同 [qa-build-appendix.mjs](qa-build-appendix.mjs)，SHA `2ad89c08837aec99c93b19c9e20d7ab275ba83269bf6b0250f17bfd852b8ae7b`。截图已查看桌面和手机版本表。
+结果：66/66 PASS，45.812620781 秒；2 页面 × 1440/390 视口；版本身份、构建命令展开、配置、章节导航、无文档溢出、原 ECharts 图、手机 tag 不断行且表格横向滚动、所有附录链接 HEAD 200、无 pageerror。实际 QA 源码同 [qa-build-appendix.mjs](../../scripts/experiments/kvc-fair/tests/acceptance/legacy/qa-build-appendix.mjs)，SHA `2ad89c08837aec99c93b19c9e20d7ab275ba83269bf6b0250f17bfd852b8ae7b`。截图已查看桌面和手机版本表。
 
 语法与差异检查（workbench 根目录）：
 

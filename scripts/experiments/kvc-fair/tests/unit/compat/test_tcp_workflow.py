@@ -13,11 +13,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import tcp_protocol_gate
-import tcp_stage
-import tcp_workflow
-
-
+from tools.migrations.kvc_20261020 import tcp_protocol_gate as tcp_protocol_gate
+from tools.migrations.kvc_20261020 import tcp_stage as tcp_stage
+from tools.migrations.kvc_20261020 import tcp_workflow as tcp_workflow
 class StageTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="kvc-tcp-stage-fixture-")

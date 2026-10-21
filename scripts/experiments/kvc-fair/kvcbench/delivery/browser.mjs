@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {pathToFileURL,fileURLToPath} from 'node:url';
 
 const [report, output, playwright, executable] = process.argv.slice(2);
 if (!report || !output || !playwright || !executable) throw new Error('Require report URL/path, new output directory, Playwright module and Chrome executable');
@@ -24,10 +24,26 @@ try {
       failures:document.querySelectorAll('#failureRows tr').length,
       expectedFailures:window.KVC_DATA.rows.filter(row=>row.status!=='valid').length,
       documents:window.KVC_DATA.documents,
+      stepLinks:[...document.querySelectorAll('#stepRows a')].map(node=>node.getAttribute('href')),
+      expectedStepLinks:(window.KVC_DATA.workflow?.steps||[]).flatMap(row=>Object.values(row.evidence||{})),
       actualTags:window.KVC_DATA.builds.map(row=>({product:row.product,tag:row.tag,sha:row.sha})),
       headings:[...document.querySelectorAll('main section>h1,main section>h2')].every(node=>/^\d+\./.test(node.textContent))
     }));
-    let interaction=true;
+    const sameStepLinks=JSON.stringify([...reportState.stepLinks].sort())===JSON.stringify([...reportState.expectedStepLinks].sort());
+    let stepTargets=true;
+    if(viewport.width===1440) {
+      for(const href of new Set(reportState.stepLinks)) {
+        const target=new URL(href,base);
+        if(target.protocol==='file:') {
+          stepTargets=stepTargets&&(await fs.stat(fileURLToPath(target))).isFile();
+        } else {
+          const response=await page.request.get(target.href);
+          stepTargets=stepTargets&&response.ok();
+          await response.dispose();
+        }
+      }
+    }
+    let interaction=sameStepLinks&&stepTargets;
     for(const operation of ['put','upsert','get','exist_hit','exist_miss']) {
       await page.selectOption('#operation',operation);
       const valid=await page.evaluate(op=>{
@@ -64,7 +80,7 @@ try {
     await page.close();
   }
 } finally { await browser.close(); }
-const result={passed:cases.every(row=>row.passed),scope:'Actual rendered report and four linked documents: desktop/mobile layout, ECharts interaction, native failure/N/A gaps, Mermaid and JavaScript/resource loading',cases};
+const result={passed:cases.every(row=>row.passed),scope:'Actual rendered report and four linked documents: desktop/mobile layout, ECharts interaction, native failure/N/A gaps, bound intermediate step links, Mermaid and JavaScript/resource loading',cases};
 await fs.writeFile(path.join(output,'result.json'),JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify(result));
 if(!result.passed)process.exitCode=1;

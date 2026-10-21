@@ -1,22 +1,24 @@
 # KVC fair comparison scripts
 
-## Modularization in progress
+## Historical commands only
 
-P1 provides independently verifiable step receipts and complete source bundles.
-P2–P4 have migrated build/run/observation/collection ownership. P5 adds a report
-consumer for bound offline intermediates, linked Markdown/Mermaid pages and a
-portable offline package; the complete workflow remains in progress.
-See [modular commands](commands.md) and [current module boundaries](architecture.md).
-`python3 -m kvcbench --help` lists implemented commands only. The native, TCP and
-batch experiment drivers below remain the execution entries during migration;
-the full W01–W18 workflow is not yet wired to the new CLI.
+The commands below describe archived layouts and historical frozen packages.
+For new experiments use [the current commands](commands.md) and
+`python3 -B -m kvcbench`. W01–W18 orchestration and step receipts are connected;
+actual acceptance progress is recorded separately in the refactoring RFC.
 
-## Current entry: native batch TCP / pure KV
+Old controllers are archived under `tools/migrations/kvc_20261020/` for source
+reference and historical contract tests. Replay an old experiment from its own
+frozen package; moving its controller into today's source tree does not prove
+compatibility with that historical environment. Current deployment materializes
+only the explicit runtime resources in `kvcbench/run/entrypoints/`.
+
+## Historical entry: native batch TCP / pure KV
 
 For the 1 / 16 / 256 / 4096 independent-keys-per-call experiment, start with
 `docs/README.md`, `docs/build.md` and `docs/script-design.md` in the downloaded
 bundle. In the repository these are under `rfc/2026-10-20-kvc-batch-tcp-comparison/`.
-The current orchestration entry is `batch_workflow.py`; its `pure-kv` profile
+The historical orchestration entry was `batch_workflow.py`; its `pure-kv` profile
 turns off RocksDB writes and Stream Cache sockets. Choose fresh runtime,
 environment, local-output and publication paths for every replay.
 

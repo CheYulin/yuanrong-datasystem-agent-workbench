@@ -55,7 +55,7 @@ def zip_mutable(name):
 
 
 def source_snapshots(args, out):
-    sources = [Path(__file__).resolve(), Path(__file__).resolve().parents[2] / "qa_batch_report.mjs"]
+    sources = [Path(__file__).resolve(), Path(__file__).resolve().parents[2] / "tests/acceptance/legacy/qa_batch_report.mjs"]
     sources += [Path(path) for path in getattr(args, "delivery_tool", [])]
     records, contents, seen = [], {}, set()
     for source in sources:

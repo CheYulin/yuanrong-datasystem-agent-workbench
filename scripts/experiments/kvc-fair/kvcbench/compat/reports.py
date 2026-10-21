@@ -13,7 +13,7 @@ import tarfile
 import time
 import zipfile
 
-from batch_analyze import analyze, export
+from kvcbench.collect.analysis.batch import analyze, export
 from kvcbench.platform.artifacts import finalize_artifacts, operation_ledger, version_zip_href
 from kvcbench.report.package import reproduction_archive
 from kvcbench.platform.files import copy_file
@@ -35,7 +35,7 @@ def digest(path):
 
 
 def verify_source_build_provenance(stage, runtime_records, builds):
-    from build_metadata import PRODUCTS
+    from kvcbench.build.metadata import PRODUCTS
     from kvcbench.collect.audits.runtime import verify_source_build_provenance as verify
     return verify(stage, runtime_records, builds, products=PRODUCTS)
 
@@ -74,7 +74,7 @@ def render(args):
     out.mkdir(parents=True, exist_ok=True)
     export(analysis, out)
     for name in ["batch-report.js", "batch-report.css", "echarts.min.js"]:
-        copy_file(scripts / name, out, name)
+        copy_file((Path(__file__).with_name("assets") / name) if name != "echarts.min.js" else scripts / "kvcbench/report/assets/echarts.min.js", out, name)
     docs = sorted(rfc.glob("*.md"))
     if not docs:
         raise ValueError("The batch RFC directory has no Markdown documents")
@@ -274,7 +274,7 @@ def render(args):
                 for record in json.loads((out / "resource-audit/resource-audit.json").read_bytes())["inputs"]:
                     bind(suite.name + "/" + record["path"], record)
             verify_tar_inputs(out / "raw-evidence.tar.gz", archive_inputs)
-    template = (scripts / "batch-report.html").read_text()
+    template = (Path(__file__).with_name("assets") / "batch-report.html").read_text()
     count = analysis["counts"]
     status = ("部分预览 · " + str(analysis["summary"].get("action", "unknown")) + " · " + ("源阶段重算通过" if analysis["passed"] else "有未完成或原生失败证据")) if args.allow_partial else ("证据矩阵完整 · 含原生接口失败" if completion["native_failures"] else "矩阵完成 · 重算通过")
     build_rows = []

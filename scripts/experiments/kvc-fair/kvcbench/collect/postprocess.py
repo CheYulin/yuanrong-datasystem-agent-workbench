@@ -27,17 +27,22 @@ def workflow_view(payload, receipt, local_workflow, roots, run_id, profile):
               'W07.smoke-admission': 'smoke入场', 'W07.smoke': '观测smoke', 'W08.admission': '正式运行入场',
               'W08': '观测就绪', 'W09': '正式矩阵', 'W10': '停止与排空', 'W11': '恢复', 'W12': '收集冻结', 'W13': '离线分析'}
     rows = []
-    def append(path, root_mapping):
+    def append(path, root_mapping, destination):
         commit = verify_commit(path, roots=root_mapping)
         result = read_json(path.parent / 'result.json')
         step = commit['identity']['step_id']
         rows.append({'id': step, 'step_id': step, 'title': titles.get(step, step), 'execution': result['execution'],
                      'acceptance': commit['acceptance'], 'duration_s': result['duration_s'],
-                     'clock_domain': result['clock_domain'], 'commit_sha256': commit['commit_sha256']})
+                     'clock_domain': result['clock_domain'], 'commit_sha256': commit['commit_sha256'],
+                     'evidence': {name: destination + '/' + name for name in
+                         ('inputs.json', 'result.json', 'artifacts.json', 'acceptance.json', 'summary.md', 'commit.json')}})
     for step in REQUIRED_STEPS:
-        append(sorted((payload / 'controller/workflow/steps' / step).glob('attempt-*/commit.json'))[-1], roots)
-    append(sorted((receipt / 'steps/W12').glob('attempt-*/commit.json'))[-1], roots)
-    append(sorted((local_workflow.root / 'steps/W13').glob('attempt-*/commit.json'))[-1], None)
+        path = sorted((payload / 'controller/workflow/steps' / step).glob('attempt-*/commit.json'))[-1]
+        append(path, roots, 'raw/snapshot/payload/' + path.parent.relative_to(payload).as_posix())
+    path = sorted((receipt / 'steps/W12').glob('attempt-*/commit.json'))[-1]
+    append(path, roots, 'raw/snapshot-receipt/' + path.parent.relative_to(receipt).as_posix())
+    path = sorted((local_workflow.root / 'steps/W13').glob('attempt-*/commit.json'))[-1]
+    append(path, None, 'workflow/derived/' + path.parent.relative_to(local_workflow.root).as_posix())
     return {'run_id': run_id, 'profile': profile, 'steps': rows,
             'scope': 'Closed upstream steps before audit/render. W14–W18 receipts and final delivery timings are outside the immutable report input snapshot. Durations retain their own host/boot clock domains.'}
 
@@ -60,6 +65,10 @@ def report_evidence(snapshot, receipt, out):
     for path in sorted(suite.glob('r*-*/case-outcomes/*.json')):
         add(path, 'results/' + path.relative_to(suite).as_posix())
     add(out / 'analysis/summary.csv', 'results/summary.csv')
+    for commit in sorted((out / 'workflow/steps/W13').glob('attempt-*/commit.json')):
+        for path in sorted(commit.parent.iterdir()):
+            if path.is_file():
+                add(path, 'workflow/derived/' + path.relative_to(out / 'workflow').as_posix())
     for path in sorted((out / 'audits').rglob('*')):
         if path.is_file():
             add(path, 'audits/' + path.relative_to(out / 'audits').as_posix())

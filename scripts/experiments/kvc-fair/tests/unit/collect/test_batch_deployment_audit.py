@@ -9,9 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import batch_deployment_audit as audit
-
-
+from kvcbench.collect.audits import deployment as audit
 REMOTE = "/home/worktrees/kvc-batch-tcp-20261020-r5"
 
 
@@ -212,7 +210,7 @@ class DeploymentAuditTests(unittest.TestCase):
         phase, failure = self.readonly_failure()
         verified = {"evidence_verified": True, "counts": {"valid": 149, "failed": 1, "not_supported": 30},
                     "issues": [], "rows": [{"identity": failure, "status": "failed"}]}
-        with patch("batch_analyze.analyze", return_value=verified) as analyze:
+        with patch("kvcbench.collect.analysis.batch.analyze", return_value=verified) as analyze:
             result = self.result()
         analyze.assert_called_once_with(phase)
         self.assertTrue(result["valid"], result["errors"])
@@ -237,13 +235,13 @@ class DeploymentAuditTests(unittest.TestCase):
         _, failure = self.readonly_failure()
         for verified in [{"evidence_verified": False, "issues": ["fixture-tamper"], "rows": []},
                          {"evidence_verified": True, "issues": [], "rows": [{"identity": "other-case", "status": "failed"}]}]:
-            with patch("batch_analyze.analyze", return_value=verified):
+            with patch("kvcbench.collect.analysis.batch.analyze", return_value=verified):
                 self.assertFalse(self.result()["valid"])
         row = self.root / "formal-batch-001/r0-datasystem/epochs/read/epoch-summary.json"
         data = json.loads(row.read_text())
         data["measurement_failures"] = []
         save(row, data)
-        with patch("batch_analyze.analyze", return_value={"evidence_verified": True, "issues": [],
+        with patch("kvcbench.collect.analysis.batch.analyze", return_value={"evidence_verified": True, "issues": [],
                                                        "rows": [{"identity": failure, "status": "failed"}]}):
             self.assertFalse(self.result()["valid"])
 

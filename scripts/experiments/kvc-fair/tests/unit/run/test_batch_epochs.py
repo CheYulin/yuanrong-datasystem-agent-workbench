@@ -7,9 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import batch_runner as subject
-
-
+from kvcbench.run import runner as subject
 class EpochPlanTests(unittest.TestCase):
     def test_formal_grid_has_180_unique_slots_150_native_and_36_epochs(self):
         rows = subject.plan(3)

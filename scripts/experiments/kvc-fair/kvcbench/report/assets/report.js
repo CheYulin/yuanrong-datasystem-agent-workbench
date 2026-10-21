@@ -58,7 +58,7 @@
   byId("documents").innerHTML = (data.documents || []).map(doc => '<a href="' + escape(doc.href) + '">' + escape(doc.title) + "</a>").join("");
   const steps = data.workflow && data.workflow.steps || [];
   chart("steps", {grid: {left: 90, right: 20, top: 20, bottom: 40, containLabel: true}, xAxis: {type: "value", name: "秒"}, yAxis: {type: "category", inverse: true, data: steps.map(row => row.id || row.step_id)}, series: [{type: "bar", name: "步骤耗时", data: steps.map(row => finite(row.duration_s) ? row.duration_s : null)}]});
-  byId("stepRows").innerHTML = steps.map(row => '<div class="step"><b>' + escape(row.id || row.step_id) + "</b><span>" + escape(row.title) + "</span><span>执行 " + escape(row.execution) + "</span><span>验收 " + escape(row.acceptance) + "</span><span>" + fmt(row.duration_s) + " s</span></div>").join("");
+  byId("stepRows").innerHTML = steps.map(row => '<div class="step"><b>' + escape(row.id || row.step_id) + "</b><span>" + escape(row.title) + "</span><span>执行 " + escape(row.execution) + "</span><span>验收 " + escape(row.acceptance) + "</span><span>" + fmt(row.duration_s) + " s</span>" + Object.entries(row.evidence || {}).map(([name, href]) => '<a href="' + escape(href) + '">' + escape(({"inputs.json":"输入", "result.json":"中间结果", "artifacts.json":"产物清单", "acceptance.json":"逐项验收", "summary.md":"摘要", "commit.json":"完整性回执"})[name] || name) + "</a>").join(" · ") + "</div>").join("");
   const cpuServer = [], cpuClient = [], memory = [];
   let previous = null;
   for (const sample of data.samples || []) {

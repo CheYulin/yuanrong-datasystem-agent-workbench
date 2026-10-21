@@ -9,9 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import prepare_tcp_gate_retry as retry
-
-
+from tools.migrations.kvc_20261020 import prepare_tcp_gate_retry as retry
 def checksum(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
