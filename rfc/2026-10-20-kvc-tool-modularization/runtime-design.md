@@ -1,6 +1,6 @@
 # 1. 运行隔离与恢复模块设计
 
-状态：实施中。本文说明运行模块已经接入的能力；完整 W01–W18 验收仍见 [workflow-acceptance.md](workflow-acceptance.md)，现场执行记录见 [implementation.md](implementation.md)。
+状态：已实施并验收。运行资源、准备/恢复与最终交付证据见 [实施记录](implementation.md)第32节。
 
 ## 2. 模块与边界
 

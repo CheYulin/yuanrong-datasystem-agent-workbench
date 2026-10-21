@@ -1,10 +1,10 @@
 # KVC 对比工具模块化重构设计
 
-- **Status**: In-Progress
+- **Status**: Complete
 - **日期**: 2026-10-20
 - **现状基线**: workbench `d5907ed041f44261bff82c99ac41bc96e2f0d18d`
 - **范围**: `scripts/experiments/kvc-fair/` 及两个 KVC 实验 RFC 中与工具有关的代码和资源。
-- **实施进度**: W01–W18 编排与验收回执已接入；P6 目录收敛及本地/干净包验收已通过；目标节点新布局 gate/smoke、最终 Coordinator 独立审计及本地/离线交付已通过，W17已安装注册，W18公网实际验收进行中，见 [implementation.md](implementation.md)。
+- **实施进度**: W01–W18 编排与验收回执已接入；P6 目录收敛及本地/干净包验收已通过；目标节点新布局 gate/smoke、最终 Coordinator 独立审计及本地/离线交付已通过，W17安装注册、W18完整公网下载及浏览器验收均通过，独立逐步回执附录也已发布验收，见 [implementation.md](implementation.md)。
 
 | 文档 | 内容 |
 | --- | --- |

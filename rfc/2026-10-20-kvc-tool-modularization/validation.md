@@ -1,6 +1,6 @@
 # 1. 模块化重构验证计划与设计检查
 
-**Status: Draft · 本文区分已执行的文档检查与尚未执行的实现验收。**
+**Status: Complete · 历史阶段检查保留；最终实际验收见第8节及 final-results.md。**
 
 基线 `d5907ed041f44261bff82c99ac41bc96e2f0d18d`。主设计见 [design.md](design.md)，清单见 [migration-map.csv](migration-map.csv)。
 
@@ -146,3 +146,23 @@ JS
 ## P6 当前实证
 
 详见 implementation.md 第 20 节：567 项本地回归通过；干净解压回归和实际三视口本地/离线浏览器通过；142 项映射目标存在；28 个 SDK/产品/共享规则文件与 24 个运行薄入口字节不变。网页逐步结果链接有实际目标验证。最终 Coordinator 数据的 W12–W18 与目标节点新布局 gate/smoke 仍待执行，不能由上述检查代替。
+
+
+## 8. 最终实际验收（2026-10-21）
+
+历史章节描述各阶段当时状态，最终状态以本节、final-results.md与实际逐步回执为准。
+
+| 要求 | 实际验收 |
+| --- | --- |
+| 模块职责及目录收敛 | build/run/observe/collect/report及core/platform/pipeline/delivery明确归属；142项迁移目标存在，根仅3个说明/清单文件 |
+| 原生与资源证据 | 180条矩阵完整；132有效/18失败/30不支持；150个执行窗口覆盖通过，21个Coordinator epoch核验；资源排空及环境恢复通过 |
+| 重构兼容 | 28个实现文件、24个入口资源字节不变；新布局真实gate/smoke/restore通过 |
+| 报告与复现 | W13–W16独立审计、干净解压、离线重生成及本地/离线三视口通过，展示数据SHA相同 |
+| 发布及公网 | W17通过；W18实际149项下载、全量ZIP与三视口通过；附录247项下载及本地/公网三视口通过 |
+| 逐步中间结果 | 18个最终步骤分别有输入、产物、验收、摘要、提交身份和耗时；W09失败发现与5个失败交付attempt保留 |
+| 最终回归 | 588项通过，67.841秒；原始日志public-ranges-all-004.log |
+| 配方复现 | 附录重新导出完整清单一致；7文件W18 overlay干净bootstrap通过 |
+
+全量回归实际命令：在 `scripts/experiments/kvc-fair/` 下执行 `PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -t . -p 'test_*.py'`。最终只读总核对脚本为 `/home/t14s/workspace/scratch/2026-10-21-kvc-refactor/final-kvc-completion-audit001.py`，输出同目录 `final-completion-audit001.json`，包括源码字节、原生结果、独立审计、实际浏览器/下载、回归及master远端一致性。具体证据路径见implementation.md第32节。
+
+验证限制：未执行旧/新目录交替性能基准、GPU/RDMA或HA故障恢复；不得据现有结果扩展结论。产品失败不因工具验收通过而变为成功。

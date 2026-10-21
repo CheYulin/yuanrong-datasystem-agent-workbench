@@ -1,6 +1,6 @@
 # KVC 对比工具模块化重构设计
 
-**Status: In-Progress · 设计基线 2026-10-20 · P1 于 2026-10-21 启动，见 [实施记录](implementation.md)**
+**Status: Implemented · 设计基线 2026-10-20 · 最终实施与验收见 [实施记录](implementation.md)第32节。**
 
 现状基线为 workbench `d5907ed041f44261bff82c99ac41bc96e2f0d18d`。下文“现状”为该提交的源码事实（源码证据链接固定该提交），“目标”为设计方案；实际路径以迁移清单及实施记录为准。完整文件去向见 [migration-map.csv](migration-map.csv)，验收要求见 [validation.md](validation.md)。
 

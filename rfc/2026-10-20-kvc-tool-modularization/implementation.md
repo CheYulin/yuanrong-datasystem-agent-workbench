@@ -423,3 +423,12 @@ W18第一次实际failed，步骤71.375784849秒、外层80.618973176秒，错�
 **14项针对性通过0.044秒，全量588项通过67.841秒**（public-ranges-all-004.log）。覆盖完整偏移/整体SHA/写入、只读进度副本、忽略Range、错误区间/长度/编码/ETag、短读/超长、坏总SHA、短写、无效输入、现有文件保护与失败partial。第三次W18已开始实测，首批4个完整64MiB区间额外与本地原ZIP对应切片独立核对SHA全部一致；仅为部分覆盖证据，不写成完整通过。
 
 新的tail003只等待第三次W18真实终态通过后生成附录；它会提供实际已封存W18校验源码增补及下载命令。旧tail/旧W18失败和主报告包007全部保持原状。按ds-self-verify，此变更仅delivery HTTP传输/进度、相应测试与文档/包清单，未触及SDK、运行、采样、数值分析或产品源码；无需产品.repo_context更新。
+
+
+## 32. 全链路最终关闭（2026-10-21）
+
+W18第三次实际通过：步骤1697.475238972秒、外层1726.020424351秒，149项公网下载及21段完整ZIP的1350557425字节/SHA均核对。最终主报告与逐步回执附录URL、版本、原生180条分类及失败历史见 [最终结果](final-results.md)。附录247项公网下载、本地/公网三视口通过；27条回执行包含全部18步和5个失败历史，不覆盖旧attempt。
+
+实际W18校验源码7文件overlay已封存；从原源码包干净提取并应用overlay的SDK-free bootstrap通过，0.393125379秒。独立重新导出附录完整SHA256SUMS相同，证明已发布配方可复现。对应本地证据位于 `/home/t14s/workspace/scratch/2026-10-21-kvc-refactor/`：`coordinator-check-command003/check-command.json`、`coordinator-delivery-001/public-acceptance-eacf507142074fa2884f146b73d179b1/`、`coordinator-appendix-publication-001/downloads.json`、`coordinator-validator-bootstrap001-result.json`、`coordinator-acceptance-reexport-proof001.json`。
+
+最终工程验证为588项回归通过67.841秒；后续仅刷新RFC状态，不重跑SDK矩阵。按ds-self-verify核对diff、目录映射、配方语法及证据边界；产品仓无修改，未改变产品热路径、并发或持久化行为，无需产品.repo_context更新。冻结报告/源包不因最终文档刷新而改写。
