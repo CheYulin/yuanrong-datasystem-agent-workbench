@@ -301,3 +301,15 @@ runtime004 外层真实命令已终止：returncode=0，5056.379312235 秒，W09
 第 20 节已提交并推送 master：f2181b9a09394327d3bdd100b011651c47222e89。继续逐个检查非默认导入的独立程序时，发现 LMCache harness correctness 迁移后的 scalar 模块路径仍写成不存在的 run.benchmark；默认 567 项回归没有覆盖该独立入口。已改为 run.workers.scalar，子进程明确 cwd 为工具根并使用 -B。
 
 实际 --kind fake 运行通过四类调用及故意损坏 GET 拒绝，输出 p6-harness-fake-001。新增从无关目录启动该独立程序的回归，确认 rankable=false、四类调用齐全及 mismatch 被拒绝；连同布局/工具包契约共 **14 项通过，4.596 秒**（p6-harness-targeted-002.log）。假适配器仅验证工具机械行为，不计入产品结果。此修正只触及独立测试入口和清单，无 SDK 实现、并发、持久化或现场配置变化；diff 与文件范围已按 ds-self-verify 复核。
+
+## 22. 最终构建章节与公开证据链接覆盖（2026-10-21）
+
+独立机械验证修正已推送 master：e49c26e。该提交的完整源码包 p6-layout-bundle-003 共 308 项，manifest SHA 1302e96027d8260316e7bfc5f633d0dfcb35210793590c0b056b790c77b26867，ZIP SHA 14b1c4602da1df8a590c5cceb49dd88a264f99be8efa2b5f89b99d72e0a9f7b0；干净解压后 **568 项通过，61.737 秒**，1 项只适用于 Git 工作区的索引检查明确跳过。
+
+核对用户最初的构建附录要求后，补足 collect/documents：按产品列出原始实际 argv/cwd、编译器、构建耗时、构建与 metadata 各自退出码，并展开原始冻结 recipe。显示前对 recipe 重算 SHA，与当前已验收构建记录绑定；不是把今天的配方冒充当时执行版本。原始 DS metadata 退出码 1 保留，后续重新验收另有原件。原始命令记录、构建日志和冻结 recipe 均可从网页跳转。运行配置子章节也补上编号。
+
+使用已收集原始三产品 native 构建字节验证生成：rc44/post1/v0.5.6、Mooncake USE_CUDA=OFF、LMCache NO_GPU_EXT=1、DS -X/-M/-A off 和原始 metadata 失败均实际出现在 HTML。该构建章节预览三份 recipe 全展开，1440/390/320 三视口无页面溢出或 JS 错误（p6-native-build-doc-preview-001/checks.json、browser-checks.json）。只证明原始构建章节，不代表 Coordinator 最终性能或整页交付。
+
+公开验收的下载集合增加所有前端文档链接目标及 workflow 动态证据链接，按已接受 manifest 核对实际下载 SHA；仅本地存在或上传成功不算公开可访问。其他未链接 raw payload 仍由 W17 在发布主机逐文件 hash。拒绝越界及不在 manifest 的链接，W18 验证源码清单也纳入使用的 HTML 链接解析器文件。真实公开验收仍待本轮最终发布。
+
+新增构建文档/公开链接选择及发布针对性 **6 项通过，0.205 秒**；最终当前源码全量 **572 项通过，63.513 秒**（p6-layout-all-007.log）。按 ds-self-verify 复核 diff：仅离线文档/公开下载验收及相关测试/清单变化，不改 SDK、现场进程、并发、持久化或资源配置；产品仓干净，工具实施文档同步。最终 Coordinator 正式矩阵和新布局现场验收仍未终结，不提前关闭目标。

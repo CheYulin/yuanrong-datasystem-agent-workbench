@@ -1,10 +1,12 @@
 """Verify actual public bytes and navigation against the accepted local report."""
 import hashlib
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlsplit, unquote
 from urllib.request import Request, urlopen
 
 from kvcbench.delivery.registration import home_array
+from kvcbench.delivery.acceptance import Links
+from kvcbench.platform.files import read_json
 from kvcbench.platform.files import digest
 
 
@@ -25,6 +27,37 @@ def fetch(url, *, keep=False):
     return record, b''.join(content)
 
 
+def dependencies(report, expected):
+    report = Path(report).resolve(strict=True)
+    selected = {name for name in expected if name in {'index.html', 'index.html.gz', 'data.js', 'data.json', 'reproduce.zip'}
+                or name.startswith(('assets/', 'docs/', 'provenance/')) and name != 'provenance/source-bundle.zip'}
+    def include(source, link):
+        uri = urlsplit(link)
+        if uri.scheme or uri.netloc:
+            return
+        target = (source.parent / unquote(uri.path)).resolve() if uri.path else source
+        if report not in target.parents:
+            raise ValueError('Public report link escapes its accepted tree')
+        name = target.relative_to(report).as_posix()
+        if name == 'SHA256SUMS':
+            return
+        if name not in expected:
+            raise ValueError('Public report link is not in the accepted manifest: ' + name)
+        selected.add(name)
+    for name in sorted(expected):
+        if name.endswith('.html') and (name == 'index.html' or name.startswith('docs/')):
+            page = report / name
+            links = Links()
+            links.feed(page.read_text())
+            for link in links.links:
+                include(page, link)
+    data = read_json(report / 'data.json')
+    for step in data.get('workflow', {}).get('steps', []):
+        for link in step.get('evidence', {}).values():
+            include(report / 'index.html', link)
+    return sorted(selected)
+
+
 def verify(base, report, relative):
     report = Path(report)
     parsed = urlsplit(base)
@@ -37,8 +70,7 @@ def verify(base, report, relative):
         raise ValueError('Public manifest differs from the accepted local report')
     records.append(manifest)
     expected = dict((line.split('  ', 1)[1], line.split('  ', 1)[0]) for line in raw.decode().splitlines())
-    selected = [name for name in expected if name in {'index.html', 'index.html.gz', 'data.js', 'data.json', 'reproduce.zip'}
-                or name.startswith(('assets/', 'docs/', 'provenance/')) and name != 'provenance/source-bundle.zip']
+    selected = dependencies(report, expected)
     for name in selected:
         record, _ = fetch(base + quote(name) + '?sha256=' + expected[name])
         if record['sha256'] != expected[name]:
@@ -50,4 +82,4 @@ def verify(base, report, relative):
         raise ValueError('Public homepage must register this report exactly once')
     records.append(home)
     return {'passed': True, 'url': base + 'index.html', 'downloads': records,
-            'scope': 'Actual public manifest, front-end/doc/provenance dependencies and full reproduction ZIP SHA; exactly one public homepage registration. Raw payload files are additionally hashed on the publication host during W17.'}
+            'scope': 'Actual public manifest, front-end/doc/provenance dependencies, all linked build/step intermediate files and full reproduction ZIP SHA; exactly one public homepage registration. Raw payload files are additionally hashed on the publication host during W17.'}

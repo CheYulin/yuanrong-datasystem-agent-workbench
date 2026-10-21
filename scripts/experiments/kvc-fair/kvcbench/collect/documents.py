@@ -1,6 +1,32 @@
 """Generate current build, test, script and result documents from bound evidence."""
 import json
+import shlex
+
+from kvcbench.platform.files import regular, read_json, digest
 from pathlib import Path
+
+
+def build_details(root, builds):
+    native = Path(root) / 'native-build'
+    lines = ['## 3. 三产品实际构建命令与冻结配方', '',
+             '以下展示本次原始执行命令与当时配方，路径保留原运行身份。新环境通过第 2 节的 build spec 重新物化路径。原始 metadata 验收与后续重新验收分别记录，不把旧失败改写为成功。', '']
+    for index, row in enumerate(builds, 1):
+        product = row['product']
+        if product not in {'datasystem', 'mooncake', 'lmcache'}:
+            raise ValueError('Unknown product in build documentation')
+        recipe = regular(native, row['build_recipe'])
+        if digest(recipe) != row['build_recipe_sha256']:
+            raise ValueError('Build document recipe differs from accepted build metadata')
+        command = read_json(regular(native, f'commands/{product}/build-command.json'))
+        metadata = read_json(regular(native, f'commands/{product}/metadata-command.json'))
+        prefix = '../raw/snapshot/payload/native-build/'
+        lines += [f"### 3.{index}. {product} / {row['tag']}", '',
+                  f"编译器：`{row['compiler']}`。原始构建退出码 `{command['returncode']}`，原始 metadata 验收退出码 `{metadata['returncode']}`。实际构建耗时 `{command['duration_s']:.6f}` 秒。", '',
+                  '```bash', '# 原始 cwd: ' + command['cwd'], shlex.join(command['argv']), '```', '',
+                  f"[构建命令记录]({prefix}commands/{product}/build-command.json) · [构建日志]({prefix}commands/{product}/build.log) · [原始 metadata 验收]({prefix}commands/{product}/metadata-command.json) · [冻结配方]({prefix}{row['build_recipe']})", '',
+                  '<details markdown="1">', '<summary>展开本次实际配方、编译选项与依赖安装步骤</summary>', '',
+                  'SHA256：`' + row['build_recipe_sha256'] + '`', '', '```bash', recipe.read_text(), '```', '', '</details>', '']
+    return lines
 
 
 def generate(root, out, analysis, builds, configuration, coverage):
@@ -15,10 +41,12 @@ def generate(root, out, analysis, builds, configuration, coverage):
     build_lines += ['', '构建区间包括依赖、下载/缓存、配置、native 编译、安装和检查；不是纯编译计时或冷缓存排名。LMCache 的 PyTorch 二进制依赖与原生扩展构建分别记录。', '',
         '## 2. 可复现构建入口', '', '源码包包含版本声明、完整配方及依赖锁。先按实际构建主机配置填写 `configs/hosts/build.example.json`，再执行：', '',
         '```bash', 'python3 -B -m kvcbench build --spec /absolute/build-spec.json', 'python3 -B -m kvcbench.build.revalidate --root /absolute/native-root --out /absolute/native-root/revalidation/new-attempt', '```', '',
-        '原始失败验收保留，重验另生成 metadata/catalog。GCC 15 的第三方兼容 wrapper 使用 C++ 头预包含及 C17，不修改产品 Git 源码；依赖缓存复用明确保留。', '', '## 3. 本次关键配置', '']
-    for row in configuration:
-        build_lines += ['### ' + row['name'], '', '```json', json.dumps(row['value'], ensure_ascii=False, indent=2), '```', '']
-    build_lines += ['## 4. 原件入口', '', '[原始 native 构建证据](../raw/snapshot/payload/native-build/build-result.json) · [部署冻结输入](../raw/snapshot/payload/batch-stage.json)', '']
+        '原始失败验收保留，重验另生成 metadata/catalog。GCC 15 的第三方兼容 wrapper 使用 C++ 头预包含及 C17，不修改产品 Git 源码；依赖缓存复用明确保留。', '']
+    build_lines += build_details(root, builds)
+    build_lines += ['## 4. 本次关键配置', '']
+    for index, row in enumerate(configuration, 1):
+        build_lines += [f'### 4.{index}. ' + row['name'], '', '```json', json.dumps(row['value'], ensure_ascii=False, indent=2), '```', '']
+    build_lines += ['## 5. 原件入口', '', '[原始 native 构建证据](../raw/snapshot/payload/native-build/build-result.json) · [部署冻结输入](../raw/snapshot/payload/batch-stage.json)', '']
     (out / 'build.md').write_text('\n'.join(build_lines))
     (out / 'test-cases.md').write_text('\n'.join(['# 1. 测试脚本用例设计', '', links, '',
         '每次调用的独立 key 数为 1 / 16 / 256 / 4096，value=1024 bytes，8 客户端，两个服务端点，3 次重复。key 数是 API 批量大小，不是工作集总数。', '',

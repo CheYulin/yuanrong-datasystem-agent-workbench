@@ -80,5 +80,5 @@ def check(control):
         atomic_json(out / 'result.json', result, exclusive=True)
         return [Check('public_delivery', True, result['passed'], result['passed'])], files(out), result
     commit = perform(workflow, 'W18', action=action, scope='actual public downloads and responsive browser acceptance',
-        sources=[Path(__file__), Path(public.__file__), Path(acceptance.__file__).with_name('browser.mjs')], upstream=[parent])
+        sources=[Path(__file__), Path(public.__file__), Path(acceptance.__file__), Path(acceptance.__file__).with_name('browser.mjs')], upstream=[parent])
     return {'public_acceptance_commit': str(commit), 'url': spec['url'].rstrip('/') + '/index.html'}
