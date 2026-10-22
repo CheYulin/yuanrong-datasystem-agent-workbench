@@ -72,3 +72,5 @@
 - 可选文件：`design.md`、`env-validation.md`、`test-walkthrough.md`、`results.md`、`issue-rfc.md`、`pr-description.md`
 
 - [2026-10-21 KVC 报告头栏与表格布局修正](2026-10-21-kvc-report-layout/README.md)
+
+- [2026-10-22 KVC 结果覆盖与 EXIST 空白说明](2026-10-22-kvc-result-coverage/README.md)

@@ -23,16 +23,47 @@
   }
   function metric(product, batch, operation, key) {
     const row = aggregate(product, batch, operation);
-    const value = row && row.status === "complete" && row.metrics[key] ? row.metrics[key].median : null;
+    const rows = (data.rows || []).filter(item => item.product === product && item.batch === batch && item.operation === operation);
+    const complete = rows.length === data.repeats && Array.from({length: data.repeats}, (_, repeat) => rows.filter(item => item.repeat === repeat && item.status === "valid").length === 1).every(Boolean);
+    const value = complete && row && row.status === "complete" && row.metrics[key] ? row.metrics[key].median : null;
     return finite(value) ? value : null;
   }
   function bars(id, metricKey, unit, operation) {
     chart(id, {xAxis: {type: "category", data: batches.map(String), name: "每批 keys", nameLocation: "middle", nameGap: 25}, yAxis: {type: "value", name: unit, axisLabel: {formatter: value => value >= 1e6 ? (value / 1e6).toFixed(1) + "M" : value >= 1e3 ? (value / 1e3).toFixed(1) + "K" : value}},
       series: products.map(product => ({name: labels[product], type: "bar", barMaxWidth: 45, data: batches.map(batch => metric(product, batch, operation, metricKey))}))});
   }
+  function renderCoverage(operation) {
+    const selected = (data.rows || []).filter(row => row.operation === operation);
+    const expected = products.length * batches.length * data.repeats;
+    const count = status => selected.filter(row => row.status === status).length;
+    const operationName = byId("operation").selectedOptions[0].textContent;
+    byId("operationCoverage").textContent = operationName + "：预期 " + expected + " 条，实际 " + selected.length + " 条；有效 " + count("valid") + "，失败 " + count("failed") + "，不支持 " + count("not_supported") + "。下表逐组合说明图中空位，可展开每轮查看部分成功请求与错误。";
+    byId("resultRows").innerHTML = products.flatMap(product => batches.map(batch => {
+      const rows = selected.filter(row => row.product === product && row.batch === batch);
+      const repeats = Array.from({length: data.repeats}, (_, repeat) => rows.filter(row => row.repeat === repeat));
+      const complete = rows.length === data.repeats && repeats.every(items => items.length === 1);
+      const valid = rows.filter(row => row.status === "valid").length;
+      const failed = rows.filter(row => row.status === "failed").length;
+      const unsupported = rows.filter(row => row.status === "not_supported").length;
+      const accepted = complete && valid === data.repeats && aggregate(product, batch, operation)?.status === "complete";
+      const status = !complete ? "缺记录 / 重复记录" : failed ? "原生失败（" + failed + "/" + data.repeats + "）" : unsupported === data.repeats ? "不支持" : accepted ? "有效" : "未形成有效汇总";
+      const missing = !complete ? "无完整结果" : failed ? "失败，不计入有效性能" : unsupported ? "不支持" : "无有效汇总";
+      const metrics = ["keys_s", "batch_qps", "p99_us"].map(key => "<td>" + (accepted ? fmt(metric(product, batch, operation, key)) : escape(missing)) + "</td>").join("");
+      const evidence = repeats.map((items, repeat) => {
+        if (items.length !== 1) return "<p>R" + (repeat + 1) + "：" + (items.length ? "重复记录" : "缺记录") + "</p>";
+        const row = items[0];
+        const href = typeof row.evidence === "string" && /^results\/[^?#]*\.json$/.test(row.evidence) ? row.evidence : "";
+        const state = ({valid: "有效", failed: "失败", not_supported: "不支持"})[row.status] || row.status;
+        const reason = row.status === "failed" ? JSON.stringify(row.native_errors || row.issues || []) : row.reason || "";
+        return '<details><summary>R' + (repeat + 1) + "：" + escape(state) + '</summary><p>' + (href ? '<a href="' + escape(href) + '">原始 JSON</a>' : "原件未提供") + "</p><p>成功调用：" + escape(row.success) + "；失败调用：" + escape(row.failures) + "</p>" + (reason ? "<p>" + escape(reason) + "</p>" : "") + "</details>";
+      }).join("");
+      return '<tr data-product="' + product + '" data-batch="' + batch + '"><td>' + escape(labels[product]) + "</td><td>" + batch + '</td><td class="' + (accepted ? "" : "failure") + '">' + escape(status) + "</td><td>" + valid + "/" + data.repeats + "</td>" + metrics + "<td>" + evidence + "</td></tr>";
+    })).join("");
+  }
   function update() {
     const operation = byId("operation").value;
     const batch = Number(byId("batch").value);
+    renderCoverage(operation);
     bars("keys", "keys_s", "keys/s", operation);
     bars("qps", "batch_qps", "batch QPS", operation);
     bars("p99", "p99_us", "整批 P99 µs", operation);

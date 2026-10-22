@@ -5,3 +5,5 @@
 
 #site-nav .yche-legacy-links{display:none!important}
 .table-scroll{overscroll-behavior-x:contain}table{min-width:760px;table-layout:auto}th{min-width:110px;white-space:normal}td,th{word-break:normal}#failures table{min-width:900px}#failures th:first-child{min-width:220px}#failures th:nth-child(3){min-width:360px}#failures th:last-child{min-width:90px}#appendix table{min-width:820px}#appendix th:nth-child(2){min-width:250px}#appendix th:nth-child(3){min-width:260px}#configuration table{min-width:640px}#configuration th{min-width:210px;width:32%}#configuration td{min-width:380px}
+
+#resultCoverage{min-width:1180px}#resultCoverage th{min-width:110px}#resultCoverage th:nth-child(3){min-width:170px}#resultCoverage th:last-child{min-width:280px}#resultCoverage td:last-child{max-width:400px}#resultCoverage details{margin:5px 0}#resultCoverage summary{cursor:pointer}#resultCoverage details p{margin:6px 0;overflow-wrap:anywhere}
