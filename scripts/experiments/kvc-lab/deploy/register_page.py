@@ -6,8 +6,9 @@ Review plan_sha256, then pass it with --apply --expect-plan-sha256. Apply keeps
 private recovery copies, uses the shared publication lock, and compares all four
 source files and the target page_meta row before writing. It never pushes Git.
 
-page_meta.is_restricted controls homepage presentation. Actual authorization is
-the existing Flask lab-prefix gate, including UI assets, API and downloads.
+Only this card also reuses the homepage's existing administrator predicate so it
+stays hidden before administrator login, even when page_meta is unavailable.
+Actual authorization is the existing Flask lab-prefix gate for UI, API and files.
 """
 import argparse
 from datetime import date
@@ -94,6 +95,38 @@ def insert_metadata(content, item):
     return updated.encode(), True
 
 
+def restrict_home_card(content):
+    text = content.decode('utf-8')
+    prefix = 'var meta=pageMetaCache[p.p];if('
+    original = 'meta&&meta.is_hidden'
+    replacement = '(meta&&meta.is_hidden||p.p===' + json.dumps(PAGE) + ')'
+    suffix = r"&&!\(authState\.logged_in&&authState\.username===(?:'[^'\r\n]*'|\"[^\"\r\n]*\")\)\)return false;"
+    old_matches = list(re.finditer(re.escape(prefix + original) + suffix, text))
+    new_matches = list(re.finditer(re.escape(prefix + replacement) + suffix, text))
+    if (len(old_matches), len(new_matches)) not in ((1, 0), (0, 1)):
+        raise ValueError('Homepage administrator visibility predicate changed; review a fresh baseline')
+    match = (old_matches or new_matches)[0]
+    start = text.find('var F=P.filter(function(p){')
+    stop = text.find('F.sort(', start)
+    if start < 0 or stop < 0 or not start < match.start() < stop:
+        raise ValueError('Administrator visibility predicate is outside the expected homepage filter')
+    changed = bool(old_matches)
+    updated = text
+    if changed:
+        position = match.start() + len(prefix)
+        updated = text[:position] + replacement + text[position + len(original):]
+        restored = updated[:position] + original + updated[position + len(replacement):]
+        if restored != text:
+            raise AssertionError('Unrelated homepage filter bytes changed')
+    after = re.search(re.escape(prefix + replacement) + suffix, updated)
+    if after is None:
+        raise AssertionError('Control-card visibility predicate was not installed')
+    return updated.encode(), dict(scope=PAGE, changed=changed,
+                                  rule='Existing administrator login predicate; other page predicates unchanged',
+                                  original_gate_sha256=digest(match.group(0).encode()),
+                                  restricted_gate_sha256=digest(after.group(0).encode()))
+
+
 def file_snapshot(site):
     result = {}
     for name in FILES:
@@ -151,6 +184,7 @@ def build_plan(site, database, published_date):
                  tg=['DataSystem', 'Mooncake', '部署控制', '同机扩展', '受保护入口'])
     metadata = dict(c='ops', g='tools', group='运维工具', d=published_date, u=published_date, title=TITLE, parent=None)
     home, count, home_added = insert_home(sources[HOMEPAGE]['content'], entry)
+    home, visibility = restrict_home_card(home)
     meta, metadata_added = insert_metadata(sources[METADATA]['content'], metadata)
     outputs = {HOMEPAGE: home, METADATA: meta}
     for name in (HOMEPAGE, METADATA):
@@ -163,6 +197,7 @@ def build_plan(site, database, published_date):
     plan = dict(schema_version=1, page=PAGE, site=str(site), database=str(database), date=published_date,
                 entry=entry, metadata=metadata, pages_before=count, pages_after=count + int(home_added),
                 homepage_added=home_added, metadata_added=metadata_added,
+                homepage_visibility=visibility,
                 files_before=public_files(sources),
                 files_after={name: dict(sha256=digest(content), mode=(sources[name] or {}).get('mode', 0o644)) for name, content in outputs.items()},
                 database_before=dict(schema_sha256=before_db['schema_sha256'], row_sha256=before_db['row_sha256'],
@@ -170,7 +205,7 @@ def build_plan(site, database, published_date):
                                      is_restricted=before_db['row']['is_restricted'] if before_db['row'] else None),
                 database_after=dict(page_path=PAGE, is_restricted=1),
                 database_columns=[row['name'] for row in before_db['schema']],
-                access_control='page_meta is homepage UI metadata only; existing Flask lab-prefix authorization remains authoritative')
+                access_control='Only this homepage card reuses the existing administrator predicate; page_meta is UI metadata, Flask lab-prefix authorization remains authoritative')
     current = file_snapshot(site)
     current_db = readonly_db(database)
     if (public_files(current) != public_files(sources)

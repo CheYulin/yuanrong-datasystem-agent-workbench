@@ -68,7 +68,7 @@ def preview_plan(raw):
         raise ValueError('单任务最多384条case；请减少规格、批量或重复数后分组运行')
     return dict(schema_version=1, config=config, variants=records, expected_cases=total_cases,
                 estimated_measurement_s=sum(v['cases'] * v['config']['duration_s'] for v in records),
-                topology_scope='同物理机cgroup逻辑节点；不代表跨物理机网络扩展性',
+                topology_scope='同物理机loopback逻辑节点，cgroup按角色隔离共享总预算；不代表跨物理机网络扩展性',
                 success_criteria='原生结果完整、数据校验和每步验收通过；产品失败保持失败，不补零',
                 hypotheses=['DS PREFERRED_META_OWNER；标量写一跳需要独立资格证据',
                             'MC中心瓶颈需吞吐/延迟与master CPU、throttling及配额敏感性共同证明'])

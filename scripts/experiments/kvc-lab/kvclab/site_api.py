@@ -9,7 +9,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from flask import Blueprint, g, jsonify, make_response, request, send_file
+from flask import Blueprint, g, jsonify, make_response, redirect, request, send_file
 
 
 MAX_JSON_BYTES = 64 * 1024
@@ -186,7 +186,7 @@ def register_lab(
     @blueprint.route("/guide.html", methods=["GET"], provide_automatic_options=False)
     @protected(html_entry=True)
     def guide():
-        return ui_file("guide.html")
+        return redirect(prefix + "/ui/guide.html", code=302)
 
     @blueprint.route("/source/<name>", methods=["GET"], provide_automatic_options=False)
     @protected()

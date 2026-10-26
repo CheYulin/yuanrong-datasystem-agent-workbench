@@ -1,0 +1,26 @@
+{
+  "profile": "metadata_scaling",
+  "nodes": 1,
+  "workers_per_node": 2,
+  "clients": 32,
+  "server_cpus": 8,
+  "client_cpus": 8,
+  "master_cpus": 2,
+  "memory_gib": 16,
+  "products": [
+    "datasystem",
+    "mooncake"
+  ],
+  "batches": [
+    1
+  ],
+  "value_sizes": [
+    1024
+  ],
+  "operations": [
+    "exist_hit",
+    "exist_miss"
+  ],
+  "duration_s": 10,
+  "repeats": 1
+}

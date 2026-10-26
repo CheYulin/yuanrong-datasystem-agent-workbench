@@ -185,13 +185,23 @@ class SiteApiTests(unittest.TestCase):
         self.assertEqual({"phase": "idle"}, self.client.get(PREFIX + "/state").json)
         for path, expected in (
             ("/ui/", b"PRIVATE-CONTROLS"), ("/ui/app.js", b"privateControls"),
-            ("/ui/style.css", b"private-control"), ("/guide.html", b"PRIVATE-GUIDE"),
+            ("/ui/style.css", b"private-control"), ("/ui/guide.html", b"PRIVATE-GUIDE"),
         ):
             response = self.client.get(PREFIX + path)
             self.assertEqual(200, response.status_code)
             self.assertIn(expected, response.data)
             self.assert_private(response)
             response.close()
+
+    def test_guide_alias_redirects_to_protected_canonical_asset_base(self):
+        self.login()
+        response = self.client.get(PREFIX + "/guide.html")
+        self.assertEqual(302, response.status_code)
+        self.assertEqual(PREFIX + "/ui/guide.html", response.headers["Location"])
+        self.assert_private(response)
+        response = self.client.get(PREFIX + "/guide.html", follow_redirects=True)
+        self.assertIn(b"PRIVATE-GUIDE", response.data)
+        self.assertEqual(200, response.status_code)
 
     def test_head_requests_still_require_authentication(self):
         self.assertEqual(401, self.client.head(PREFIX + "/ui/app.js").status_code)

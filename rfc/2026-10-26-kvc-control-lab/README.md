@@ -2,7 +2,7 @@
 
 - **Status**: In-Progress
 - **范围**：现有 yche.me 管理账户授权的部署、原生用例执行、规格扩展与新运行记录页面。
-- **实验边界**：用户确认单物理机；用 cgroup 隔离逻辑节点。不能作为跨物理机网络扩展性结论。
+- **实验边界**：用户确认单物理机；逻辑节点使用独立 loopback / host ID，cgroup 隔离实验与角色，共享固定服务端总预算。不能作为跨物理机网络扩展性结论。
 - **源码**：`scripts/experiments/kvc-lab/`；复用 `../kvc-fair/` 已验证的原生批量测量循环、数据校验及SDK接口。
 
 ## 1. 目标与成功条件
@@ -70,4 +70,6 @@ sequenceDiagram
 
 - [构建身份与关键配置](01-build-and-config.md)
 - [脚本、工作流与用例设计](02-script-and-case-design.md)
-- 实测结果与恢复证据随正式任务完成追加；每个任务网页有独立日志、步骤耗时及源码包身份。
+- [独立离线审核设计](03-independent-audit-design.md)
+- [测试验证结果与操作耗时](04-validation-results.md)
+- 正式性能表随各任务终态验收追加，每个任务网页有独立日志、步骤耗时及源码包身份。

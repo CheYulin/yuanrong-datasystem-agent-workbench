@@ -47,7 +47,7 @@ sequenceDiagram
 
 ## 2.3 正确性与统计边界
 
-B 是一次原生批量调用的独立 keys 数；API/s 与 keys/s 分开。读/EXIST 共用预装载集合；EXIST miss 使用未写入 namespace，错误不等于 miss。PUT 使用独立 warm/insert namespace；每批后精确回读。
+B 是一次原生批量调用的独立 keys 数；API/s 与 keys/s 分开。读/EXIST 共用预装载集合；多B混合suite按相同顺序累计PUT命名空间，两产品在同轮次同B处的键数量与历史一致，跨B差异同时包含索引状态变化，不能全部归因为批处理；EXIST miss 使用未写入 namespace，错误不等于 miss。PUT 使用独立 warm/insert namespace；每批后精确回读。
 
 重复轮次从0开始，逐任务、变体、完整规格与接口独立验收；任何缺轮/重复/失败均阻断该聚合点。P99使用原生直方图桶的 upper_us，原始区间保留供复核，不将桶上界描述为精确分位值。缺数据不补零。
 
@@ -57,4 +57,4 @@ Stop 请求绕过满队列，先标记取消，等待原进程拥有者完成清
 
 控制器异常重启后核对原远端 PID 与终态，按持久 cursor 和前缀 SHA 回补完整 events.jsonl、去重入库；不能仅用尾30条日志恢复，也不能自动重放状态不明的写请求。
 
-下载 reproduce.sh 默认生成新 UUID 后执行新实验；`--original` 仅查询原任务。脚本在已安装站点上使用私有SSH配置。源码包按任务绑定 SHA，后续升级不替换历史任务的源码身份。
+下载 reproduce.sh 默认生成新 UUID 后执行新实验；`--original` 仅查询原任务。脚本在已安装站点上使用私有SSH配置。源码包按任务绑定 SHA，后续升级不替换历史任务的源码身份。历史行为复现前须先安装该任务对应的源码包与固定产品构建；脚本通过固定 gateway 调用当前安装版本，不会自动回滚服务端代码。
