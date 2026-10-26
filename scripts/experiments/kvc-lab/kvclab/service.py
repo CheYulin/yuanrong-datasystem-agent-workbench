@@ -4,7 +4,9 @@ from pathlib import Path
 import re
 import tempfile
 from . import spec
-from .store import Store
+from .store import Store, TERMINAL
+from .acceptance import reconcile
+from datetime import datetime, timezone
 
 
 class LabService:
@@ -17,7 +19,9 @@ class LabService:
 
     def catalog(self, user):
         return {**spec.catalog(), 'user': 'yche.me 管理账户', 'deployment_scope': '单物理机、顺序运行产品',
-                'guide_url': '/site-api/kvc-lab/ui/guide.html'}
+                'guide_url': '/site-api/kvc-lab/ui/guide.html',
+                'links': [{'title': '构建与用例设计文档网页', 'url': '/site-api/kvc-lab/ui/docs/'}, {'title': '安装源码包', 'url': '/site-api/kvc-lab/source/source.tar.gz'},
+                          {'title': '源码包SHA与文件清单', 'url': '/site-api/kvc-lab/source/source.json'}]}
 
     def preview_plan(self, config):
         return spec.preview_plan(config)
@@ -43,17 +47,28 @@ class LabService:
         import hashlib
         names = [step.get('artifact') for step in job.get('steps', [])]
         names += [row.get('raw_artifact') for row in job.get('results', [])]
-        return {'raw-' + hashlib.sha256(name.encode()).hexdigest()[:20] + '.json': name
+        names += [row.get('name') for row in job.get('completion', {}).get('artifacts', []) if row.get('downloadable')]
+        return {'raw-' + hashlib.sha256(name.encode()).hexdigest()[:20] + (Path(name).suffix if Path(name).suffix in {'.json', '.jsonl', '.log', '.bt', '.txt', '.gz'} else '.bin'): name
                 for name in names if isinstance(name, str) and name and not name.startswith('/')
                 and all(part not in ('', '.', '..') for part in name.split('/'))}
 
     def decorate(self, job):
+        if job['action'] == 'run':
+            checked = reconcile(job['plan'], job.get('results', []), include_missing=job['status'] in TERMINAL)
+            job['results'], job['coverage'] = checked['rows'], checked['coverage']
+        for field in ['created', 'updated']:
+            job[field + '_at'] = datetime.fromtimestamp(job[field], timezone.utc).isoformat()
         mapping = self.remote_artifacts(job)
         reverse = {value: key for key, value in mapping.items()}
         base = '/site-api/kvc-lab/jobs/' + job['id'] + '/artifacts/'
         job['artifacts'] = [{'name': name, 'title': label, 'url': base + name} for name, label in
                             [('results.json', '结果JSON'), ('steps.json', '逐步回执'),
                              ('events.jsonl', '事件日志'), ('reproduce.sh', '复现脚本')]]
+        if (job.get('provenance') or {}).get('source_sha256'):
+            job['artifacts'].append({'name': 'source.tar.gz', 'title': '本任务安装源码包', 'url': base + 'source.tar.gz'})
+        for name, original in mapping.items():
+            if original.endswith(('resources.jsonl', 'observe-iostat.log', 'observe-mpstat.log', 'observe-pidstat.log', 'observe-dstat.log', 'commands.json', 'probe.log', 'probe.bt', 'resources.jsonl.gz')):
+                job['artifacts'].append({'name': name, 'title': original, 'url': base + name})
         for step in job.get('steps', []):
             if step.get('artifact') in reverse:
                 step['artifact_url'] = base + reverse[step['artifact']]
@@ -67,6 +82,8 @@ class LabService:
         if not re.fullmatch(r'[a-f0-9]{32}', job_id):
             raise FileNotFoundError('任务不存在')
         root = self.root / 'jobs' / job_id
+        if name == 'source.tar.gz':
+            return self.source_file((job.get('provenance') or {}).get('source_sha256'), '.tar.gz'), name
         choices = {'results.json': job['results'], 'steps.json': job['steps'],
                    'job.json': {k: job[k] for k in ('id', 'action', 'status', 'config', 'plan', 'created', 'updated', 'error')}}
         if name in choices:
@@ -98,3 +115,17 @@ class LabService:
             temporary.replace(path)
             return path, name
         raise FileNotFoundError('产物尚未产生或不在下载白名单')
+
+    def source_file(self, identity, suffix):
+        if not isinstance(identity, str) or not re.fullmatch(r'[a-f0-9]{64}', identity):
+            raise FileNotFoundError('当前记录没有绑定源码包')
+        path = self.root / 'sources' / (identity + suffix)
+        if not path.is_file() or path.is_symlink():
+            raise FileNotFoundError('源码包尚未安装')
+        return path
+
+    def get_source(self, name):
+        suffix = {'source.tar.gz': '.tar.gz', 'source.json': '.json'}.get(name)
+        if suffix is None:
+            raise FileNotFoundError('下载名称不在白名单')
+        return self.source_file(self.settings.get('source_sha256'), suffix), name

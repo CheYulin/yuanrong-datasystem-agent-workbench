@@ -181,12 +181,18 @@ def register_lab(
     @blueprint.route("/ui/<path:asset>", methods=["GET"], provide_automatic_options=False)
     @protected(html_entry=True)
     def ui_asset(asset):
-        return ui_file(asset)
+        return ui_file(asset + "index.html" if asset.endswith("/") else asset)
 
     @blueprint.route("/guide.html", methods=["GET"], provide_automatic_options=False)
     @protected(html_entry=True)
     def guide():
         return ui_file("guide.html")
+
+    @blueprint.route("/source/<name>", methods=["GET"], provide_automatic_options=False)
+    @protected()
+    def source(name):
+        path, filename = service.get_source(name)
+        return send_file(path, as_attachment=True, download_name=filename, conditional=False, etag=False, max_age=0)
 
     @blueprint.route("/catalog", methods=["GET"], provide_automatic_options=False)
     @protected()

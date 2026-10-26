@@ -1,6 +1,6 @@
 const API = '/site-api/kvc-lab';
 const $ = (id) => document.getElementById(id);
-const statuses = { pending:'待执行', queued:'排队中', running:'运行中', passed:'验收通过', valid:'有效', success:'成功', succeeded:'成功', completed:'已完成', completed_with_failures:'完成（存在失败）', interrupted:'中断待核验', complete:'已完成', ready:'已就绪', failed:'失败', error:'错误', rejected:'拒绝', cancelled:'已停止', canceled:'已停止', not_supported:'不支持', na:'不适用', passed_with_findings:'通过并记录问题', missing:'未采集', invalid:'无效', stopped:'已停止' };
+const statuses = { pending:'待执行', queued:'排队中', running:'运行中', passed:'验收通过', valid:'有效', success:'成功', succeeded:'成功', completed:'已完成', completed_with_failures:'完成（存在失败）', interrupted:'中断待核验', complete:'已完成', ready:'已就绪', failed:'失败', error:'错误', rejected:'拒绝', cancelled:'已停止', canceled:'已停止', not_supported:'不支持', na:'不适用', passed_with_findings:'通过并记录问题', missing:'未采集', invalid:'无效', stopped:'已停止', aggregation_incomplete:'聚合未通过' };
 const successStatuses = new Set(['valid','passed','success','succeeded','complete','completed']);
 const activeStatuses = new Set(['running','queued','pending','starting','stopping']);
 const products = { datasystem:'DataSystem', mooncake:'Mooncake' };
@@ -37,7 +37,7 @@ function accessDenied(message, loginUrl) {
   $('access-title').textContent='请使用站点管理员账户登录'; $('access-message').textContent=message || '登录 yche.me 站点账户并通过管理员授权后，可读取部署状态、任务日志与性能结果。';
   $('login-link').href=safeLink(loginUrl) || `/login?next=${encodeURIComponent(location.pathname)}`;
   $('login-link').hidden=false; $('retry-auth').hidden=false;
-  ['presets','version-rows','job-overview','step-list','comparison-jobs','result-rows','catalog-links','run-records-list','plan-rows','plan-status','deployment-status','result-scope','result-quality','case-summary','estimate-summary','client-summary','client-budget','worker-summary','server-budget'].forEach((id)=>$(id)?.replaceChildren());
+  ['presets','version-rows','job-overview','job-coverage','step-list','comparison-jobs','result-rows','catalog-links','run-records-list','plan-rows','plan-status','deployment-status','result-scope','result-quality','aggregation-status','aggregation-rows','case-summary','estimate-summary','client-summary','client-budget','worker-summary','server-budget'].forEach((id)=>$(id)?.replaceChildren());
   if($('result-quality'))$('result-quality').hidden=true;
   $('result-counts')?.querySelectorAll('strong').forEach(node=>{node.textContent='—';});
   if ($('job-logs')) $('job-logs').textContent='登录后可查看日志。';
@@ -73,7 +73,7 @@ function applyConfig(config={}) {
   for (const name of groupFields) if (Array.isArray(config[name])) form.querySelectorAll(`input[name="${name}"]`).forEach((input)=>{input.checked=config[name].map(String).includes(input.value);});
   updateConfigSummary();
 }
-function configError(config) { for (const name of groupFields) if (!config[name].length) return `请至少选择一个${{products:'产品',batches:'批量大小',value_sizes:'数据大小',operations:'接口'}[name]}。`; if(config.server_cpus+config.client_cpus>38)return '服务端与客户端合计最多 38 个物理核；另留 2 核监控。'; if(config.master_cpus>config.server_cpus)return '中心组件预算不能超过服务端总预算。'; if(config.batches.some(batch=>config.value_sizes.some(size=>batch*size>16*1024*1024)))return '单次调用载荷最多 16 MiB。请将大值与大批量拆为不同实验。'; return null; }
+function configError(config) { for (const name of groupFields) if (!config[name].length) return `请至少选择一个${{products:'产品',batches:'批量大小',value_sizes:'数据大小',operations:'接口'}[name]}。`; if(config.nodes*config.workers_per_node>8)return '单产品 workers 总数最多 8；请减少逻辑节点数或每节点 workers。'; if(config.server_cpus+config.client_cpus>38)return '服务端与客户端合计最多 38 个物理核；另留 2 核监控。'; if(config.master_cpus>config.server_cpus)return '中心组件预算不能超过服务端总预算。'; if(config.batches.some(batch=>config.value_sizes.some(size=>batch*size>16*1024*1024)))return '单次调用载荷最多 16 MiB。请将大值与大批量拆为不同实验。'; return null; }
 function updateConfigSummary() {
   const metadata=$('experiment-form').elements.namedItem('profile').value==='metadata_scaling';
   $('experiment-form').querySelectorAll('input[name="operations"]').forEach(input=>{const unsupported=metadata && ['put','get'].includes(input.value);input.disabled=unsupported;if(unsupported)input.checked=false;});
@@ -83,7 +83,7 @@ function updateConfigSummary() {
   $('worker-summary').textContent=`${config.nodes} 逻辑节点 × ${config.workers_per_node} worker`;
   $('server-budget').textContent=`${config.server_cpus} 物理核 · ${config.memory_gib} GiB · Coordinator / Master 计入预算`;
   const variants=config.profile==='worker_scaling' ? [1,2,4,8].filter(workers=>workers%config.nodes===0).length : config.profile==='client_scaling' ? [1,2,4,8,16,32].filter(clients=>clients<=config.clients).length : 1;
-  const descriptions={baseline:'基础性能使用所选单一拓扑。服务端与客户端按物理核分配，监控另留 2 核；合计最多 38 核。',worker_scaling:`固定 ${config.server_cpus} 个服务端物理核与 ${config.nodes} 个逻辑节点，依次比较 workers 总数 ${[1,2,4,8].filter(workers=>workers%config.nodes===0).join(' / ')}；每节点 workers 由总数派生。`,client_scaling:`固定服务端拓扑与预算，依次比较 clients ${[1,2,4,8,16,32].filter(clients=>clients<=config.clients).join(' / ')}；上方 clients 为本次扫描上限。`,metadata_scaling:'仅比较 EXIST 命中 / 未命中；在 worker 扩展中扫描中心组件 1 / 2 / 4 核（不超过服务端总预算），测量 CPU、节流、吞吐与 P99。B 由下方选择，不预设瓶颈结论。'};
+  const descriptions={baseline:'基础性能使用所选单一拓扑。服务端与客户端按物理核分配，监控另留 2 核；合计最多 38 核。',worker_scaling:`固定 ${config.server_cpus} 个服务端物理核与 ${config.nodes} 个逻辑节点，依次比较 workers 总数 ${[1,2,4,8].filter(workers=>workers%config.nodes===0).join(' / ')}；每节点 workers 由总数派生。`,client_scaling:`固定服务端拓扑与预算，依次比较 clients ${[1,2,4,8,16,32].filter(clients=>clients<=config.clients).join(' / ')}；上方 clients 为本次扫描上限。`,metadata_scaling:'仅比较 EXIST 命中 / 未命中；在 worker 扩展中扫描中心 CPU 配额 1 / 2 / 4 核（不超过服务端总预算），测量 CPU、节流、吞吐与 P99。B 由下方选择，不预设瓶颈结论。'};
   $('profile-description').textContent=descriptions[config.profile];
   const count=variants*config.products.length*config.batches.length*config.value_sizes.length*config.operations.length*config.repeats;
   $('case-summary').textContent=`${config.nodes*config.workers_per_node} workers / 产品 · ${count} 个计时 case`;
@@ -187,9 +187,16 @@ function renderJob(job) {
   if (job.created_at || job.started_at) box.append(element('small',timestamp(job.created_at || job.started_at)));
   addLink(box,'原始任务 JSON',`${API}/jobs/${encodeURIComponent(job.id)}`);
   appendArtifactLinks(box,job);
+  renderCoverage($('job-coverage'),job.coverage);
   renderStepRows($('step-list'),job.steps || []);
   $('job-logs').textContent=formatLogs(job.logs || []); $('log-count').textContent=Array.isArray(job.logs) ? `(${job.logs.length})` : '';
   renderStepChart(job.steps || []); updateActionButtons();
+}
+function renderCoverage(container,coverage) {
+  if(!container)return;container.replaceChildren();
+  if(!coverage || typeof coverage!=='object'){container.append(element('p','矩阵覆盖情况尚未返回；目前不能据此确认结果齐全。','note'));return;}
+  const heading=element('div',null,'coverage-heading');heading.append(element('strong','结果矩阵覆盖'),element('span',coverage.complete===true ? '覆盖完整' : '覆盖尚未齐全',coverage.complete===true ? 'badge passed' : 'badge aggregation_incomplete'),element('small',coverage.complete===true ? '覆盖完整不代表所有性能 case 成功。' : '请核对缺项、重复、意外项和无效项，以及任务是否仍在运行。'));container.append(heading);
+  const counts=element('div',null,'coverage-counts');for(const [key,label] of [['expected','预期'],['observed','已观测'],['missing_count','缺失'],['duplicate_count','重复'],['unexpected_count','意外项'],['invalid_count','无效项']]){const item=element('div');item.append(element('span',label),element('strong',number(coverage[key],0)));counts.append(item);}container.append(counts);
 }
 function updateActionButtons() {
   const busy=Array.from(app.jobs.values()).some(job=>activeStatuses.has(job.status));
@@ -223,69 +230,148 @@ function renderStepChart(steps) {
   const instance=chart('step-chart'); if (!instance) {emptyChart('step-chart','');return;}
   instance.setOption({...baseChart(),legend:{show:false},grid:{left:90,right:35,top:15,bottom:35},xAxis:{type:'value',name:'秒',splitLine:{lineStyle:{color:'#edf1f6'}}},yAxis:{type:'category',inverse:true,data:rows.map(step=>step.title || step.name),axisLabel:{width:75,overflow:'truncate'},axisTick:{show:false},axisLine:{show:false}},series:[{type:'bar',barMaxWidth:18,data:rows.map(step=>({value:step.duration_s,itemStyle:{color:['failed','error','rejected'].includes(step.status) ? '#bb7061' : '#598bb9',borderRadius:[0,3,3,0]}}))}]},true);
 }
-function allResults() { return Array.from(app.selectedComparisons).flatMap(id=>(app.jobs.get(id)?.results || []).map(row=>({...row,job_id:id,config:app.jobs.get(id)?.config || {}}))); }
+function allResults() { return Array.from(app.selectedComparisons).flatMap(id=>(app.jobs.get(id)?.results || []).map(row=>({...row,job_id:id,expected_repeats:app.jobs.get(id)?.config?.repeats,config:app.jobs.get(id)?.config || {}}))); }
 function normalizeRow(row) {
-  return {...row,nodes:row.nodes ?? row.config.nodes,workers:row.workers ?? (finite(row.nodes ?? row.config.nodes) && finite(row.workers_per_node ?? row.config.workers_per_node) ? (row.nodes ?? row.config.nodes)*(row.workers_per_node ?? row.config.workers_per_node) : null),clients:row.clients ?? row.config.clients,server_cpus:row.server_cpus ?? row.config.server_cpus,client_cpus:row.client_cpus ?? row.config.client_cpus,master_cpus:row.master_cpus ?? row.config.master_cpus,memory_gib:row.memory_gib ?? row.config.memory_gib,batch:row.batch ?? row.batch_size,size:row.size ?? row.value_size,repeat:row.repeat ?? row.repetition,keys_s:row.keys_s ?? null,batch_qps:row.batch_qps ?? null,p99_us:row.p99_us ?? null};
+  return {...row,nodes:row.nodes ?? row.config.nodes,workers:row.workers ?? (finite(row.nodes ?? row.config.nodes) && finite(row.workers_per_node ?? row.config.workers_per_node) ? (row.nodes ?? row.config.nodes)*(row.workers_per_node ?? row.config.workers_per_node) : null),clients:row.clients ?? row.config.clients,server_cpus:row.server_cpus ?? row.config.server_cpus,client_cpus:row.client_cpus ?? row.config.client_cpus,master_cpus:row.master_cpus ?? row.config.master_cpus,memory_gib:row.memory_gib ?? row.config.memory_gib,requested_duration_s:row.config.duration_s,batch:row.batch ?? row.batch_size,size:row.size ?? row.value_size,repeat:row.repeat ?? row.repetition,keys_s:row.keys_s ?? null,batch_qps:row.batch_qps ?? null,p99_us:row.p99_us ?? null};
 }
 function median(values) { const sorted=values.slice().sort((a,b)=>a-b); const middle=Math.floor(sorted.length/2); return sorted.length%2 ? sorted[middle] : (sorted[middle-1]+sorted[middle])/2; }
 function groupLabel(row,axis) {
-  const parts=[products[row.product] || row.product,`中心${row.master_cpus ?? '?'}`,`CPU${row.server_cpus ?? '?'}/${row.client_cpus ?? '?'}`,`${row.memory_gib ?? '?'}GiB`];
+  const parts=[products[row.product] || row.product,`中心配额${row.master_cpus ?? '?'}`,`CPU${row.server_cpus ?? '?'}/${row.client_cpus ?? '?'}`,`${row.memory_gib ?? '?'}GiB`];
   for(const [key,label] of [['nodes','N'],['workers','W'],['clients','C']])if(key!==axis)parts.push(`${label}${row[key] ?? '?'}`);
   parts.push(`B${row.batch}`,sizeLabel(row.size));
+  if(finite(row.requested_duration_s))parts.push(`T${row.requested_duration_s}s`);
   if(row.build_sha || row.commit)parts.push(String(row.build_sha || row.commit).slice(0,10));
   return parts.join(' · ');
+}
+function resultIdentity(row,axis) {
+  return JSON.stringify(['product','operation','batch','size','nodes','workers','clients','server_cpus','client_cpus','master_cpus','memory_gib','requested_duration_s'].filter(key=>key!==axis).map(key=>row[key] ?? null));
+}
+function completeAggregates(rows,axis,accept) {
+  const leaves=new Map(),bySpec=new Map(),plannedJobs=new Set();
+  const register=(row,variant,planned)=>{
+    const key=JSON.stringify([row.job_id,variant,resultIdentity(row)]);
+    if(leaves.has(key))return leaves.get(key);
+    const leaf={row,variant,expected:row.expected_repeats,rows:[],issues:[],planned};leaves.set(key,leaf);
+    const specKey=JSON.stringify([row.job_id,resultIdentity(row)]);if(!bySpec.has(specKey))bySpec.set(specKey,[]);bySpec.get(specKey).push(leaf);return leaf;
+  };
+  for(const id of app.selectedComparisons){
+    const job=app.jobs.get(id);if(!job || (job.action!=='run' && !(job.results || []).length))continue;
+    let variants=job.plan?.variants;
+    if(!Array.isArray(variants) || !variants.length)variants=job.config?.profile==='baseline' ? [{id:'v01',config:job.config}] : [];
+    for(const [index,variant] of variants.entries()){
+      // Runtime uses the zero-based variant index; plan ids are display labels.
+      const runtimeVariant='v'+index;
+      const config={...job.config,...(variant.config || variant)};
+      if(!['products','operations','batches','value_sizes'].every(key=>Array.isArray(config[key])))continue;
+      plannedJobs.add(id);
+      for(const product of config.products)for(const operation of config.operations)for(const batch of config.batches)for(const size of config.value_sizes){
+        const row=normalizeRow({job_id:id,variant_id:runtimeVariant,plan_variant_id:String(variant.id || ''),product,operation,batch,size,config,expected_repeats:job.config?.repeats ?? config.repeats});
+        if(!accept(row))continue;
+        const leaf=register(row,runtimeVariant,true);
+        if(config.repeats!==row.expected_repeats)leaf.issues.push('计划与任务预期轮次不一致');
+      }
+    }
+  }
+  for(const row of rows){
+    if(!accept(row))continue;
+    const candidates=bySpec.get(JSON.stringify([row.job_id,resultIdentity(row)])) || [];
+    const variant=row.variant_id!==undefined && row.variant_id!==null ? String(row.variant_id) : candidates.length===1 ? candidates[0].variant : 'unresolved';
+    let leaf=candidates.find(item=>item.variant===variant);
+    if(!leaf){leaf=register(row,variant,false);leaf.issues.push(plannedJobs.has(row.job_id) ? '记录未匹配计划中的变体与规格' : '缺少执行计划，无法确认变体');}
+    leaf.rows.push(row);
+  }
+  for(const leaf of leaves.values()){
+    const ids=leaf.rows.map(row=>row.repeat),expected=leaf.expected;
+    if(!Number.isInteger(expected) || expected<1)leaf.issues.push('无法确认预期重复次数');
+    else {
+      const missing=Array.from({length:expected},(_,index)=>index).filter(index=>!ids.includes(index));
+      if(missing.length)leaf.issues.push('缺轮次 '+missing.join('/'));
+      if(ids.some(id=>!Number.isInteger(id) || id<0 || id>=expected))leaf.issues.push('轮次编号越界或格式异常');
+      const duplicates=Array.from(new Set(ids.filter((id,index)=>ids.indexOf(id)!==index)));
+      if(duplicates.length)leaf.issues.push('重复轮次 '+duplicates.join('/'));
+      if(leaf.rows.length!==expected)leaf.issues.push(`记录数 ${leaf.rows.length}/${expected}`);
+    }
+    const nonvalid=leaf.rows.filter(row=>!successStatuses.has(row.status)).length;
+    if(nonvalid)leaf.issues.push(`${nonvalid} 轮失败或尚未有效`);
+    const versions=new Set(leaf.rows.map(row=>row.build_sha || row.commit || ''));
+    if(versions.size>1)leaf.issues.push('组内版本身份不一致');
+    leaf.complete=leaf.issues.length===0;
+    if(leaf.rows.length)leaf.row={...leaf.row,...leaf.rows[0]};
+  }
+  const cells=new Map(),groups=new Map(),xValues=new Set();
+  for(const leaf of leaves.values()){
+    const row=leaf.row;if(!finite(row[axis]))continue;
+    const groupKey=resultIdentity(row,axis),key=JSON.stringify([groupKey,row[axis]]);
+    if(!cells.has(key))cells.set(key,{row,x:row[axis],groupKey,leaves:[],rows:[]});
+    const cell=cells.get(key);cell.leaves.push(leaf);cell.rows.push(...leaf.rows);
+  }
+  for(const cell of cells.values()){
+    const versions=new Set(cell.rows.map(row=>row.build_sha || row.commit || ''));
+    cell.complete=cell.leaves.every(leaf=>leaf.complete) && versions.size<=1;
+    cell.n=cell.rows.length;cell.jobs=new Set(cell.leaves.map(leaf=>leaf.row.job_id)).size;
+    if(!groups.has(cell.groupKey))groups.set(cell.groupKey,{name:groupLabel(cell.row,axis),points:new Map()});
+    groups.get(cell.groupKey).points.set(cell.x,cell);xValues.add(cell.x);
+  }
+  return {leaves:Array.from(leaves.values()),cells:Array.from(cells.values()),groups,xs:Array.from(xValues).sort((a,b)=>a-b)};
+}
+function aggregatePoint(cell,getValue) {
+  if(!cell?.complete)return null;
+  const values=cell.rows.map(getValue);if(!values.length || !values.every(finite))return null;
+  return {value:median(values),n:values.length,jobs:cell.jobs,subgroups:cell.leaves.length};
+}
+function aggregateTooltip(params) {
+  const rows=(Array.isArray(params) ? params : [params]).filter(item=>finite(item.data?.value));
+  const title=escapeHtml((Array.isArray(params) ? params[0] : params)?.axisValueLabel ?? '');
+  return title+'<br>'+ (rows.length ? rows.map(item=>`${escapeHtml(item.seriesName)}: ${number(item.data.value,3)}<br>n=${item.data.n} · ${item.data.jobs} 任务 / ${item.data.subgroups} 完整子组`).join('<br>') : '该位置尚无通过完整性验收的测量值');
+}
+function renderAggregationAcceptance(aggregation,axis) {
+  const passed=aggregation.leaves.filter(leaf=>leaf.complete).length,complete=aggregation.cells.filter(cell=>cell.complete).length;
+  $('aggregation-status').textContent=`重复组验收：${passed}/${aggregation.leaves.length} 个任务/变体子组完整且全有效；${complete}/${aggregation.cells.length} 个聚合规格点通过。缺轮、重复轮、失败、未完成或版本身份不一致均保留空值；n 为该点实际完整轮次数。`;
+  const tbody=$('aggregation-rows');tbody.replaceChildren();
+  for(const leaf of aggregation.leaves){const row=leaf.row,tr=element('tr');tr.append(element('td',`${row.job_id} / ${leaf.variant}${row.plan_variant_id ? '（计划 '+row.plan_variant_id+'）' : ''}`),element('td',`${products[row.product] || row.product} / ${operations[row.operation] || row.operation} / B${row.batch} / ${sizeLabel(row.size)}`),element('td',`${groupLabel(row,axis)} · ${axis}=${row[axis] ?? '—'}`),element('td',`${leaf.expected ?? '?'} / ${leaf.rows.length}`),element('td',leaf.rows.map(row=>String(row.repeat ?? '?')).join(', ') || '尚无记录'));const result=element('td');result.append(statusBadge(leaf.complete ? 'passed' : 'aggregation_incomplete'),element('span',leaf.complete ? ` 完整 n=${leaf.rows.length}` : ' '+leaf.issues.join('；')));tr.append(result);tbody.append(tr);}
 }
 function renderResults() {
   const all=allResults().map(normalizeRow);
   const counts=[all.length,all.filter(row=>successStatuses.has(row.status)).length,all.filter(row=>['failed','error','rejected','invalid'].includes(row.status)).length,all.filter(row=>!successStatuses.has(row.status) && !['failed','error','rejected','invalid'].includes(row.status)).length];
   $('result-counts').querySelectorAll('strong').forEach((node,index)=>{node.textContent=number(counts[index],0);});
   const operation=$('filter-operation').value,batch=$('filter-batch').value,size=$('filter-size').value,axis=$('filter-axis').value,metric=$('filter-metric').value;
-  const filtered=all.filter(row=>row.operation===operation && (batch==='all' || Number(row.batch)===Number(batch)) && (size==='all' || Number(row.size)===Number(size)));
-  const valid=filtered.filter(row=>successStatuses.has(row.status));
-  $('result-scope').textContent=`已选择 ${app.selectedComparisons.size} 个任务。当前性能筛选：${filtered.length} 条记录，其中 ${valid.length} 条有效、${filtered.length-valid.length} 条状态未进入成功性能图。`;
+  const accept=row=>row.operation===operation && (batch==='all' || Number(row.batch)===Number(batch)) && (size==='all' || Number(row.size)===Number(size));
+  const filtered=all.filter(accept),valid=filtered.filter(row=>successStatuses.has(row.status)),aggregation=completeAggregates(all,axis,accept);
+  $('result-scope').textContent=`已选择 ${app.selectedComparisons.size} 个任务。当前筛选：${filtered.length} 条记录，其中 ${valid.length} 条单轮有效；图表还需通过完整重复组验收，单轮有效不等于聚合有效。`;
   const shortCount=all.filter(row=>row.short_window===true).length,lowSampleCount=all.filter(row=>row.low_sample_p99===true).length;
   $('result-quality').hidden=shortCount===0&&lowSampleCount===0;
   $('result-quality').textContent=`所选任务包含 ${shortCount} 条短测量窗口、${lowSampleCount} 条 P99 样本不足记录。标记始终保留在完整表的证据列；短窗口吞吐和低样本 P99 请结合实际时长、样本量判断。`;
-  const groups=new Map(); const xValues=new Set();
-  for (const row of valid) if (finite(row[axis]) && finite(row[metric])) { const key=groupLabel(row,axis); if (!groups.has(key)) groups.set(key,new Map()); const values=groups.get(key); if (!values.has(row[axis])) values.set(row[axis],[]); values.get(row[axis]).push(row[metric]); xValues.add(row[axis]); }
-  const xs=Array.from(xValues).sort((a,b)=>a-b); const instance=chart('performance-chart');
-  if (!xs.length) emptyChart('performance-chart','该接口 / 负载尚无有效性能数据；请查看完整状态表');
-  else if (instance) instance.setOption({...baseChart(),xAxis:{type:'category',name:{clients:'Clients',workers:'Workers',nodes:'逻辑节点'}[axis],nameLocation:'middle',nameGap:27,data:xs,axisLine:{lineStyle:{color:'#cbd9e5'}},axisTick:{show:false}},yAxis:{type:'value',name:{keys_s:'keys / 秒',batch_qps:'API 调用 / 秒',p99_us:'P99 / μs'}[metric],splitLine:{lineStyle:{color:'#edf1f6'}}},series:Array.from(groups,([name,values])=>({name,type:xs.length>1 ? 'line' : 'bar',connectNulls:false,barMaxWidth:65,symbolSize:7,data:xs.map(x=>values.has(x) ? median(values.get(x)) : null)}))},true);
-  $('performance-caption').textContent=`图 3. ${operations[operation]} 的${{keys_s:'吞吐',batch_qps:'API 调用速率',p99_us:'P99 尾延迟'}[metric]}随${{clients:' clients',workers:' workers 总数',nodes:'逻辑节点'}[axis]}变化；仅对图中相同分组的有效轮次取中位数，缺失位置保留空值。`;
+  renderAggregationAcceptance(aggregation,axis);
+  const {groups,xs}=aggregation,instance=chart('performance-chart');
+  if(!xs.length)emptyChart('performance-chart','尚无已计划或已返回的可比较规格；请查看完整状态表');
+  else if(instance)instance.setOption({...baseChart(),tooltip:{...baseChart().tooltip,formatter:aggregateTooltip},xAxis:{type:'category',name:{clients:'Clients',workers:'Workers',nodes:'逻辑节点'}[axis],nameLocation:'middle',nameGap:27,data:xs,axisLine:{lineStyle:{color:'#cbd9e5'}},axisTick:{show:false}},yAxis:{type:'value',name:{keys_s:'keys / 秒',batch_qps:'API 调用 / 秒',p99_us:'P99 / μs'}[metric],splitLine:{lineStyle:{color:'#edf1f6'}}},series:Array.from(groups.values(),group=>({name:group.name,type:xs.length>1 ? 'line' : 'bar',connectNulls:false,barMaxWidth:65,symbolSize:7,data:xs.map(x=>aggregatePoint(group.points.get(x),row=>row[metric]))}))},true);
+  $('performance-caption').textContent=`图 3. ${operations[operation]} 的${{keys_s:'吞吐',batch_qps:'API 调用速率',p99_us:'P99 尾延迟'}[metric]}随${{clients:' clients',workers:' workers 总数',nodes:'逻辑节点'}[axis]}变化；每个参与任务/变体的预期轮次必须齐全且全有效，才显示中位数，每点 n 见提示。`;
   const scatterGroups=new Map();
-  for (const row of valid) if (finite(row.keys_s) && finite(row.p99_us)) { const key=groupLabel(row,axis); if (!scatterGroups.has(key)) scatterGroups.set(key,[]); scatterGroups.get(key).push([row.keys_s,row.p99_us,row.job_id,row[axis],row.repeat ?? '—']); }
+  for(const cell of aggregation.cells){if(!cell.complete || !cell.rows.every(row=>finite(row.keys_s)&&finite(row.p99_us)))continue;if(!scatterGroups.has(cell.groupKey))scatterGroups.set(cell.groupKey,{name:groupLabel(cell.row,axis),data:[]});for(const row of cell.rows)scatterGroups.get(cell.groupKey).data.push([row.keys_s,row.p99_us,row.job_id,row[axis],row.repeat,cell.n,cell.leaves.length]);}
   const scatter=chart('latency-chart');
-  if (!scatterGroups.size) emptyChart('latency-chart','尚无同时包含吞吐与 P99 的有效记录');
-  else if (scatter) scatter.setOption({...baseChart(),tooltip:{trigger:'item',confine:true,extraCssText:'max-width:260px;white-space:normal;overflow-wrap:anywhere',formatter:(params)=>`${escapeHtml(params.seriesName)}<br>keys/s: ${number(params.value[0])}<br>P99: ${number(params.value[1])} μs<br>${escapeHtml(params.value[2])} · 轮次 ${escapeHtml(params.value[4])}`},xAxis:{type:'value',name:'keys / 秒',nameLocation:'middle',nameGap:27,splitLine:{lineStyle:{color:'#edf1f6'}}},yAxis:{type:'value',name:'P99 / μs',splitLine:{lineStyle:{color:'#edf1f6'}}},series:Array.from(scatterGroups,([name,data])=>({name,type:'scatter',symbolSize:10,data,itemStyle:{opacity:.8}}))},true);
-  renderCenterResources(valid,axis);
+  if(!scatterGroups.size)emptyChart('latency-chart','尚无完整且全有效、同时包含吞吐与 P99 的重复组');
+  else if(scatter)scatter.setOption({...baseChart(),tooltip:{trigger:'item',confine:true,extraCssText:'max-width:260px;white-space:normal;overflow-wrap:anywhere',formatter:params=>`${escapeHtml(params.seriesName)}<br>keys/s: ${number(params.value[0])}<br>P99: ${number(params.value[1])} μs<br>${escapeHtml(params.value[2])} · 轮次 ${escapeHtml(params.value[4])}<br>完整点 n=${params.value[5]} · ${params.value[6]} 子组`},xAxis:{type:'value',name:'keys / 秒',nameLocation:'middle',nameGap:27,splitLine:{lineStyle:{color:'#edf1f6'}}},yAxis:{type:'value',name:'P99 / μs',splitLine:{lineStyle:{color:'#edf1f6'}}},series:Array.from(scatterGroups.values(),group=>({name:group.name,type:'scatter',symbolSize:10,data:group.data,itemStyle:{opacity:.8}}))},true);
+  renderCenterResources(aggregation);
   renderResultTable(all);
 }
-function renderCenterResources(rows,axis) {
-  const groups=new Map(),xValues=new Set();let hasValues=false;
-  for(const row of rows){
-    if(!finite(row[axis]))continue;
-    xValues.add(row[axis]);const key=groupLabel(row,axis);
-    if(!groups.has(key))groups.set(key,new Map());const group=groups.get(key);
-    if(!group.has(row[axis]))group.set(row[axis],{cpu:[],throttled:[]});const values=group.get(row[axis]);
-    if(finite(row.master_cpu_cores)&&finite(row.master_cpus)&&row.master_cpus>0){values.cpu.push(row.master_cpu_cores/row.master_cpus*100);hasValues=true;}
-    if(finite(row.master_throttled_usec)){values.throttled.push(row.master_throttled_usec/1000);hasValues=true;}
-  }
-  if(!hasValues){emptyChart('center-resource-chart','当前筛选尚无有效中心 CPU / 节流观测；缺失值不补零');return;}
+function renderCenterResources(aggregation) {
+  const {groups,xs}=aggregation,axis=$('filter-axis').value;
+  if(!xs.length){emptyChart('center-resource-chart','当前筛选尚无计划规格或中心观测；缺失值不补零');return;}
   const instance=chart('center-resource-chart');if(!instance){emptyChart('center-resource-chart','');return;}
-  const xs=Array.from(xValues).sort((a,b)=>a-b),series=[];
-  for(const [index,[name,values]]of Array.from(groups).entries()){
+  const series=[];
+  for(const [index,group]of Array.from(groups.values()).entries()){
     const color=colors[index%colors.length];
-    series.push({name:`CPU% · ${name}`,type:'line',yAxisIndex:0,connectNulls:false,symbolSize:7,itemStyle:{color},lineStyle:{color},data:xs.map(x=>values.get(x)?.cpu.length ? median(values.get(x).cpu) : null)});
-    series.push({name:`节流ms · ${name}`,type:'bar',yAxisIndex:1,barMaxWidth:25,itemStyle:{color,opacity:.28},data:xs.map(x=>values.get(x)?.throttled.length ? median(values.get(x).throttled) : null)});
+    series.push({name:`CPU% · ${group.name}`,type:'line',yAxisIndex:0,connectNulls:false,symbolSize:7,itemStyle:{color},lineStyle:{color},data:xs.map(x=>aggregatePoint(group.points.get(x),row=>finite(row.master_cpu_cores)&&finite(row.master_cpus)&&row.master_cpus>0 ? row.master_cpu_cores/row.master_cpus*100 : null))});
+    series.push({name:`节流ms · ${group.name}`,type:'bar',yAxisIndex:1,barMaxWidth:25,itemStyle:{color,opacity:.28},data:xs.map(x=>aggregatePoint(group.points.get(x),row=>finite(row.master_throttled_usec) ? row.master_throttled_usec/1000 : null))});
   }
-  instance.setOption({...baseChart(),grid:{left:48,right:52,top:40,bottom:70},xAxis:{type:'category',name:{clients:'Clients',workers:'Workers',nodes:'逻辑节点'}[axis],nameLocation:'middle',nameGap:27,data:xs,axisLine:{lineStyle:{color:'#cbd9e5'}},axisTick:{show:false}},yAxis:[{type:'value',name:'CPU利用 / %',min:0,splitLine:{lineStyle:{color:'#edf1f6'}}},{type:'value',name:'节流 / ms',min:0,splitLine:{show:false}}],series},true);
+  instance.setOption({...baseChart(),tooltip:{...baseChart().tooltip,formatter:aggregateTooltip},grid:{left:48,right:52,top:40,bottom:70},xAxis:{type:'category',name:{clients:'Clients',workers:'Workers',nodes:'逻辑节点'}[axis],nameLocation:'middle',nameGap:27,data:xs,axisLine:{lineStyle:{color:'#cbd9e5'}},axisTick:{show:false}},yAxis:[{type:'value',name:'CPU利用 / %',min:0,splitLine:{lineStyle:{color:'#edf1f6'}}},{type:'value',name:'节流 / ms',min:0,splitLine:{show:false}}],series},true);
 }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
 function renderResultTable(rows) {
   const tbody=$('result-rows'); tbody.replaceChildren();
   for (const row of rows) {
     const tr=element('tr');
-    tr.append(element('td',`${row.job_id} / ${row.repeat ?? '—'}`),element('td',products[row.product] || row.product || '—'),element('td',`${row.nodes ?? '—'} / ${row.workers ?? '—'} / ${row.clients ?? '—'}`),element('td',`服务 ${row.server_cpus ?? '—'} / 客户端 ${row.client_cpus ?? '—'} / 中心 ${row.master_cpus ?? '—'} 核；${row.memory_gib ?? '—'} GiB`),element('td',operations[row.operation] || row.operation || '—'),element('td',`${row.batch ?? '—'} / ${row.size===undefined ? '—' : sizeLabel(row.size)}`));
+    tr.append(element('td',`${row.job_id} / ${row.repeat ?? '—'}`),element('td',products[row.product] || row.product || '—'),element('td',`${row.nodes ?? '—'} / ${row.workers ?? '—'} / ${row.clients ?? '—'}`),element('td',`服务 ${row.server_cpus ?? '—'} / 客户端 ${row.client_cpus ?? '—'} 物理核；中心配额 ${row.master_cpus ?? '—'} 核；${row.memory_gib ?? '—'} GiB`),element('td',operations[row.operation] || row.operation || '—'),element('td',`${row.batch ?? '—'} / ${row.size===undefined ? '—' : sizeLabel(row.size)}`));
     const status=element('td'); status.append(statusBadge(row.status || 'missing')); tr.append(status);
     const valid=successStatuses.has(row.status); tr.append(element('td',valid ? number(row.keys_s) : '—'),element('td',valid ? number(row.batch_qps) : '—'),element('td',valid ? number(row.p99_us) : '—'));
     tr.append(element('td',number(row.server_cpu_cores,3)),element('td',number(row.client_cpu_cores,3)),element('td',number(row.master_cpu_cores,3)),element('td',finite(row.master_throttled_usec) ? number(row.master_throttled_usec/1000,3) : '—'),element('td',number(row.peak_charged_memory_gib,3)));
@@ -332,7 +418,7 @@ function renderRunRecords() {
   for (const job of sortedJobs()) {
     const card=element('article',null,'record-card'); const heading=element('div',null,'record-heading'); heading.append(element('strong',job.id),statusBadge(job.status)); addLink(heading,'原始任务 JSON',`${API}/jobs/${encodeURIComponent(job.id)}`); card.append(heading,element('p',`${{deploy:'部署',run:'运行',stop:'停止'}[job.action] || job.action || '—'} · ${timestamp(job.created_at || job.started_at)} · 实测耗时 ${duration(job.duration_s)}`));
     const button=element('button','展开步骤、配置与日志','button'); const details=element('div'); details.hidden=true;
-    const fill=(full)=>{details.replaceChildren();const links=element('div',null,'links');appendArtifactLinks(links,full);const steps=element('div',null,'step-list');renderStepRows(steps,full.steps || []);const config=element('details');config.append(element('summary','提交的配置'),element('pre',JSON.stringify(full.config || {},null,2)));const logs=element('details');logs.append(element('summary','运行日志'),element('pre',formatLogs(full.logs || []),'log-view'));details.append(links,steps,config,logs);details.hidden=false;button.textContent='收起记录';};
+    const fill=(full)=>{details.replaceChildren();const links=element('div',null,'links');appendArtifactLinks(links,full);const coverage=element('div',null,'job-coverage');renderCoverage(coverage,full.coverage);const steps=element('div',null,'step-list');renderStepRows(steps,full.steps || []);const config=element('details');config.append(element('summary','提交的配置'),element('pre',JSON.stringify(full.config || {},null,2)));const logs=element('details');logs.append(element('summary','运行日志'),element('pre',formatLogs(full.logs || []),'log-view'));details.append(links,coverage,steps,config,logs);details.hidden=false;button.textContent='收起记录';};
     if(app.expandedRecords.has(job.id))fill(job);
     button.addEventListener('click',async()=>{ if (!details.hidden) {app.expandedRecords.delete(job.id);details.hidden=true;button.textContent='展开步骤、配置与日志';return;} button.disabled=true; try { const full=await loadJob(job.id);app.expandedRecords.add(job.id);fill(full); } catch(error) {button.textContent=error.message;} finally {button.disabled=false;} }); card.append(button,details);container.append(card);
   }

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import stat
+import signal
 import traceback
 
 from .remote_support import atomic, job_id, member, read, ticks, validate_request
@@ -34,6 +35,10 @@ def artifact_names(job):
                     name = body.get("raw_artifact") if isinstance(body, dict) else None
                     if isinstance(name, str):
                         names.add(name)
+    complete = read(job / "complete.json", {})
+    for row in complete.get("artifacts", []):
+        if isinstance(row, dict) and isinstance(row.get("name"), str):
+            names.add(row["name"])
     return names
 
 
@@ -88,8 +93,20 @@ def artifact_index(settings, selected):
     return result
 
 
+_transport_closed = False
+
+
 def emit(value):
-    print(json.dumps(value, ensure_ascii=False), flush=True)
+    global _transport_closed
+    if _transport_closed:
+        return
+    try:
+        print(json.dumps(value, ensure_ascii=False), flush=True)
+    except BrokenPipeError:
+        _transport_closed = True
+        descriptor = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(descriptor, sys.stdout.fileno())
+        os.close(descriptor)
 
 
 def settings_from(path):
@@ -196,6 +213,7 @@ def main(argv=None):
                     emit(complete)
                     return 0
                 raise RuntimeError("Job ID already exists without completion; writes will not be replayed")
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
             from .remote_runtime import Engine
             engine = Engine(settings, request, emit)
             active = {"job_id": selected, "pid": os.getpid(), "start_ticks": ticks(os.getpid())}

@@ -6,13 +6,13 @@ from pathlib import Path
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from kvclab.remote import state, settings_from, artifact, artifact_index
 from kvclab.remote_support import atomic, job_id, physical_cpus, validate_request
 from kvclab.remote_observe import Monitor
 from kvclab.adapters.datasystem import Adapter
-from kvclab.remote_runtime import Engine, workload_sizes
+from kvclab.remote_runtime import Cancelled, Engine, workload_sizes
 from kvclab.remote_preload import pool_values
 
 
@@ -346,6 +346,173 @@ class ArtifactTests(unittest.TestCase):
                 artifact({"state_root": directory}, "job-001", "case/raw.json")
             entry = next(row for row in artifact_index({"state_root": directory}, "job-001") if row["name"] == "case/raw.json")
             self.assertFalse(entry["downloadable"])
+
+
+class ExecuteLifecycleTests(unittest.TestCase):
+    def make_engine(self, directory, action="run", products=None):
+        root = Path(directory)
+        value = request()
+        value["action"] = action
+        if products is not None:
+            value["config"]["products"] = products
+        settings = {"state_root": str(root / "state"), "native_root": str(root / "native"),
+                    "fair_root": str(root / "fair"), "cgroup_root": str(root / "cgroups")}
+        engine = Engine(settings, value, lambda value: None)
+        engine.verify_build = Mock()
+        def deploy(product):
+            engine.deployment = {"product": product, "active": True}
+            return engine.job / product, root / "cgroups" / product
+        engine.deploy = Mock(side_effect=deploy)
+        engine.qualify = Mock()
+        def measure(product, directory, group, *, repeats, sizes):
+            for repeat in repeats:
+                for size in sizes:
+                    for batch in engine.config["batches"]:
+                        for operation in engine.config["operations"]:
+                            engine.results.append({"product": product, "variant_id": engine.variant,
+                                "profile": engine.profile, "nodes": engine.config["nodes"],
+                                "workers": engine.config["nodes"] * engine.config["workers_per_node"],
+                                "workers_per_node": engine.config["workers_per_node"], "clients": engine.config["clients"],
+                                "batch": batch, "size": size, "operation": operation, "repeat": repeat,
+                                "status": "valid", "keys_s": 10, "batch_qps": 10, "p99_us": 1})
+        engine.measure = Mock(side_effect=measure)
+        def stop():
+            engine.deployment["active"] = False
+        engine.stop = Mock(side_effect=stop)
+        return engine
+
+    def test_complete_run_retains_last_product_without_deploy_only_requalification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory)
+            result = engine.execute()
+            self.assertEqual(result["status"], "succeeded")
+            self.assertEqual([call.args[0] for call in engine.deploy.call_args_list], ["datasystem", "mooncake"])
+            self.assertEqual(engine.qualify.call_count, 2)
+            self.assertEqual(engine.measure.call_count, 2)
+            self.assertEqual(result["deployment"]["product"], "mooncake")
+            self.assertTrue(result["deployment"]["active"])
+            self.assertEqual(json.loads((engine.job / "complete.json").read_text())["status"], "succeeded")
+
+    def test_missing_native_cases_cannot_reach_success_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory)
+            engine.measure.side_effect = None
+            result = engine.execute()
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["coverage"]["missing_count"], 32)
+            self.assertFalse(result["coverage"]["complete"])
+            self.assertTrue(engine.events.closed)
+
+    def test_terminal_receipt_is_published_after_event_journal_closes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory)
+            published = []
+            def emit(value):
+                if value.get("message") == "Remote execution reached terminal state":
+                    published.append((engine.job / "complete.json").exists())
+            engine.emit = emit
+            engine.execute()
+            self.assertEqual(published, [False])
+            self.assertTrue(engine.events.closed)
+            self.assertTrue((engine.job / "complete.json").is_file())
+
+    def test_single_product_deploy_has_no_unbound_retained_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory, "deploy", ["datasystem"])
+            result = engine.execute()
+            self.assertEqual(result["status"], "succeeded")
+            self.assertEqual(engine.deploy.call_count, 1)
+            self.assertEqual(engine.qualify.call_count, 1)
+            engine.measure.assert_not_called()
+            self.assertEqual(result["deployment"]["product"], "datasystem")
+
+    def test_multi_product_deploy_requalifies_actual_retained_first_product(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory, "deploy")
+            result = engine.execute()
+            self.assertEqual(result["status"], "succeeded")
+            self.assertEqual([call.args[0] for call in engine.deploy.call_args_list], ["datasystem", "mooncake", "datasystem"])
+            self.assertEqual([call.args[0] for call in engine.qualify.call_args_list], ["datasystem", "mooncake", "datasystem"])
+            engine.measure.assert_not_called()
+            self.assertEqual(result["deployment"]["product"], "datasystem")
+
+    def test_cancelled_is_terminal_only_after_successful_owned_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory)
+            engine.verify_build.side_effect = Cancelled("operator stop")
+            result = engine.execute()
+            self.assertEqual(result["status"], "cancelled")
+            self.assertTrue(result["cancelled"])
+            self.assertIsNone(result["cleanup_error"])
+            engine.stop.assert_called_once()
+            self.assertFalse(result["deployment"]["active"])
+
+    def test_cancel_with_failed_cleanup_remains_failed_and_preserves_both_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory)
+            engine.verify_build.side_effect = Cancelled("operator stop")
+            engine.stop.side_effect = RuntimeError("domain still populated")
+            result = engine.execute()
+            self.assertEqual(result["status"], "failed")
+            self.assertTrue(result["cancelled"])
+            self.assertIn("domain still populated", result["cleanup_error"])
+            self.assertIn("operator stop", result["error"])
+            self.assertIn("domain still populated", result["error"])
+
+    def test_native_failure_is_not_relabelled_as_cancellation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.make_engine(directory)
+            engine.qualify.side_effect = RuntimeError("native gate rejected")
+            result = engine.execute()
+            self.assertEqual(result["status"], "failed")
+            self.assertFalse(result["cancelled"])
+            engine.stop.assert_called_once()
+
+    def stop_engine(self, directory):
+        engine = self.make_engine(directory, "stop")
+        del engine.stop
+        root = Path(directory) / "cgroups/deployment-owned"
+        (root / "client").mkdir(parents=True)
+        (root / "cgroup.events").write_text("populated 1\nfrozen 0\n")
+        (root / "client/cgroup.procs").write_text("")
+        engine.deployment = {"cgroup": str(root), "processes": [], "active": True}
+        return engine, root
+
+    def test_stop_waits_for_asynchronous_cgroup_population_to_settle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, root = self.stop_engine(directory)
+            original = Path.read_text
+            reads = []
+            def read_text(path, *args, **kwargs):
+                if path == root / "cgroup.events":
+                    reads.append(path)
+                    return "populated 1\nfrozen 0\n" if len(reads) < 3 else "populated 0\nfrozen 0\n"
+                return original(path, *args, **kwargs)
+            try:
+                with patch.object(Path, "read_text", read_text), patch("kvclab.remote_runtime.time.sleep") as sleep:
+                    engine.stop()
+                self.assertEqual(len(reads), 3)
+                self.assertEqual(sleep.call_count, 2)
+                self.assertFalse(engine.deployment["active"])
+                receipt = json.loads((engine.job / "stop-000.json").read_text())
+                self.assertTrue(receipt["valid"])
+                self.assertIn("populated 0", receipt["cgroup_events"])
+            finally:
+                engine.events.close()
+
+    def test_stop_does_not_accept_persistently_populated_domain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, root = self.stop_engine(directory)
+            try:
+                with patch("kvclab.remote_runtime.time.monotonic", side_effect=[0, 0, 11]), patch("kvclab.remote_runtime.time.sleep"):
+                    with self.assertRaisesRegex(RuntimeError, "bounded cleanup wait"):
+                        engine.stop()
+                self.assertTrue(engine.deployment["active"])
+                receipt = json.loads((engine.job / "stop-000.json").read_text())
+                self.assertFalse(receipt["valid"])
+                self.assertIn("populated 1", receipt["cgroup_events"])
+            finally:
+                engine.events.close()
 
 
 if __name__ == "__main__":

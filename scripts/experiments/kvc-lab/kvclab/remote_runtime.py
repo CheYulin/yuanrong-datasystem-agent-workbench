@@ -13,6 +13,8 @@ import uuid
 
 from .remote_support import atomic, digest, member, read, setup_groups, terminate, ticks
 from .remote_observe import Monitor
+from .acceptance import reconcile
+from .artifacts import manifest
 
 
 def latency_us(raw, name):
@@ -158,20 +160,32 @@ class Engine:
             if root != group and root not in group.parents:
                 raise ValueError("Process cgroup outside deployment")
             outcomes.append(terminate(identity, group))
-        # Multiprocessing SDK clients inherit this fresh, exclusively owned domain.
-        for group in sorted(root.rglob("cgroup.procs"), reverse=True) if root.exists() else []:
-            for pid_text in group.read_text().split():
-                pid = int(pid_text)
-                identity = {"pid": pid, "start_ticks": ticks(pid)}
-                if identity["start_ticks"] is not None:
-                    outcomes.append(terminate(identity, group.parent))
-        populated = (root / "cgroup.events").read_text().splitlines() if root.exists() else []
-        if "populated 1" in populated:
-            raise RuntimeError("Owned deployment domain is still populated")
+        # Descendants can outlive their parent briefly; populated is propagated asynchronously.
+        deadline = time.monotonic() + 10
+        settle_start = time.monotonic_ns()
+        while True:
+            for group in sorted(root.rglob("cgroup.procs"), reverse=True) if root.exists() else []:
+                for pid_text in group.read_text().split():
+                    pid = int(pid_text)
+                    identity = {"pid": pid, "start_ticks": ticks(pid)}
+                    if identity["start_ticks"] is not None:
+                        outcomes.append(terminate(identity, group.parent))
+            populated = (root / "cgroup.events").read_text().splitlines() if root.exists() else []
+            if not root.exists() or "populated 0" in populated:
+                break
+            if time.monotonic() >= deadline:
+                path = self.job / f"stop-{self.sequence:03}.json"
+                atomic(path, {"outcomes": outcomes, "cgroup_events": populated, "valid": False,
+                              "settle_duration_s": (time.monotonic_ns() - settle_start) / 1e9,
+                              "error": "Owned deployment domain did not become empty within 10 seconds"})
+                self.step("stop_owned_deployment", begin, "failed", path)
+                raise RuntimeError("Owned deployment domain is still populated after bounded cleanup wait")
+            time.sleep(.05)
         deployment.update(active=False, stopped_wall_ns=time.time_ns(), cleanup=outcomes)
         self.persist()
         path = self.job / f"stop-{self.sequence:03}.json"
-        atomic(path, {"outcomes": outcomes, "cgroup_events": populated, "valid": True})
+        atomic(path, {"outcomes": outcomes, "cgroup_events": populated, "valid": True,
+                      "settle_duration_s": (time.monotonic_ns() - settle_start) / 1e9})
         self.step("stop_owned_deployment", begin, "passed", path)
 
     def deploy(self, product):
@@ -394,6 +408,7 @@ class Engine:
                                       "raw_artifact": self.artifact(cell / "raw.json"), "duration_s": raw.get("duration_s"), "short_window": raw.get("short_window"), "low_sample_p99": raw.get("low_sample_p99"), "put_scope": "bounded fresh insert cardinality, not a timed upsert loop" if operation == "put" else None,
                                       "server_cpus": self.config["server_cpus"], "client_cpus": self.config["client_cpus"],
                                       "master_cpus": self.config.get("master_cpus", min(2, self.config["server_cpus"])), "memory_gib": self.config["memory_gib"], **resources}
+                            result["build_sha"] = getattr(self, "verified_builds", {}).get(product, {}).get("sha")
                             result["preload_artifact"] = self.artifact(preloaded) if operation != "put" else None
                             result["common_pool_keys"] = pool if operation != "put" else 0
                             atomic(cell / "result.json", result)
@@ -423,6 +438,7 @@ class Engine:
             if not checks or not all(x["valid"] for x in checks.values()):
                 raise ValueError("Pinned build artifact identity mismatch: " + product)
             verified[product] = {"tag": row["tag"], "sha": row["sha"], "artifacts": checks}
+        self.verified_builds = verified
         path = self.job / "build-verification.json"
         atomic(path, verified)
         self.step("verify_builds", begin, "passed", path)
@@ -455,20 +471,38 @@ class Engine:
                     if self.request["action"] == "deploy" and len(self.config["products"]) > 1:
                         self.event("log", message="Products were prepared and qualified sequentially to avoid interference; starting the first selected product for the retained deployment")
                         accepted_directory, accepted_group = self.deploy(self.config["products"][0])
-                self.qualify(self.config["products"][0], accepted_directory, accepted_group)
+                        self.qualify(self.config["products"][0], accepted_directory, accepted_group)
             status = "completed_with_failures" if any(row["status"] == "failed" for row in self.results) else "succeeded"
             result = {"kind": "complete", "job_id": self.request["job_id"], "status": status,
                       "results": self.results, "deployment": self.deployment, "artifact_root": str(self.job)}
         except BaseException as exc:
             import traceback
             error = traceback.format_exc()
+            cleanup_error = None
             try:
                 self.stop()
             except BaseException:
-                error += "\nCleanup error:\n" + traceback.format_exc()
-            result = {"kind": "complete", "job_id": self.request["job_id"], "status": "failed", "cancelled": isinstance(exc, Cancelled),
-                      "error": error, "results": self.results, "deployment": self.deployment, "artifact_root": str(self.job)}
-        atomic(self.job / "complete.json", result)
+                cleanup_error = traceback.format_exc()
+                error += "\nCleanup error:\n" + cleanup_error
+            cancelled = isinstance(exc, Cancelled)
+            result = {"kind": "complete", "job_id": self.request["job_id"],
+                      "status": "cancelled" if cancelled and cleanup_error is None else "failed", "cancelled": cancelled,
+                      "cleanup_error": cleanup_error, "error": error, "results": self.results,
+                      "deployment": self.deployment, "artifact_root": str(self.job)}
+        if self.request["action"] == "run":
+            plan = self.request.get("plan") or {"variants": [{"config": self.request["config"]}]}
+            coverage = reconcile(plan, self.results, include_missing=False)["coverage"]
+            result["coverage"] = coverage
+            path = self.job / "coverage.json"
+            atomic(path, coverage)
+            self.step("accept_complete_matrix", time.monotonic_ns(), "passed" if coverage["complete"] else "failed", path)
+            if not coverage["complete"] and result["status"] == "succeeded":
+                result.update(status="failed", error="Result matrix did not close against the submitted plan")
         self.event("log", message="Remote execution reached terminal state", status=result["status"])
         self.events.close()
+        result["artifacts"] = manifest(self.job)
+        path = self.job / "artifact-manifest.json"
+        atomic(path, result["artifacts"])
+        result["artifacts"].append({"name": path.name, "size": path.stat().st_size, "downloadable": True, "sha256": digest(path)})
+        atomic(self.job / "complete.json", result)
         return result

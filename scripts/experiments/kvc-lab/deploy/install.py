@@ -37,6 +37,28 @@ def transfer(host, source, destination, evidence, name):
     return hashlib.sha256(bundle.read_bytes()).hexdigest()
 
 
+
+def source_bundle(root, evidence):
+    archive = evidence / 'source.tar.gz'
+    files = {}
+    sources = [('scripts/experiments/kvc-lab', root), ('scripts/experiments/kvc-fair', root.parent / 'kvc-fair')]
+    rfc = root.parents[2] / 'rfc/2026-10-26-kvc-control-lab'
+    if rfc.is_dir():
+        sources.append(('rfc/2026-10-26-kvc-control-lab', rfc))
+    with tarfile.open(archive, 'w:gz') as output:
+        for prefix, source in sources:
+            for path in sorted(source.rglob('*')):
+                if path.is_symlink() or not path.is_file() or any(part in ('__pycache__', '.qa', '.git') for part in path.relative_to(source).parts):
+                    continue
+                name = prefix + '/' + str(path.relative_to(source))
+                files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                output.add(path, arcname=name, recursive=False)
+    identity = hashlib.sha256(archive.read_bytes()).hexdigest()
+    record = dict(sha256=identity, files=files, scope='Installed controller/runner, reusable measurement scripts, and RFC; native product binaries and credentials excluded')
+    (evidence / 'source.json').write_text(json.dumps(record, indent=2) + '\n')
+    return identity
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--site', required=True)
@@ -54,10 +76,28 @@ def main():
     safe = remote(args.target, "import json,sys,os;from pathlib import Path;p=Path('/home/cache/kvc-lab/active-execution.json');v=json.loads(p.read_text()) if p.exists() else {};pid=v.get('pid');live=bool(pid and Path('/proc/'+str(pid)+'/stat').exists() and not v.get('terminal'));print(json.dumps({'safe':not live}))")
     if not safe['safe']:
         raise RuntimeError('An active target execution exists; wait on its original handle before installing')
-    hashes = {}
+    remote(args.site, """import sqlite3,subprocess;from pathlib import Path
+p=Path('/var/lib/kvc-lab/jobs.sqlite3')
+if p.exists():
+ db=sqlite3.connect(p,timeout=15);db.execute('BEGIN IMMEDIATE')
+ if db.execute("SELECT count(*) FROM jobs WHERE status='running'").fetchone()[0]:raise RuntimeError('Site still owns a running job; installation is forbidden')
+ subprocess.run(['systemctl','stop','kvc-lab-controller.service'],check=True)
+ db.commit();db.close()
+""")
+    source_identity = source_bundle(root, evidence)
+    hashes = {'source': source_identity}
     hashes['site_code'] = transfer(args.site, root, code_root, evidence, 'site-code')
     hashes['target_code'] = transfer(args.target, root, code_root, evidence, 'target-code')
+    from render_docs import render
+    render(evidence / 'docs')
+    hashes['docs'] = transfer(args.site, evidence / 'docs', code_root + '/web/docs', evidence, 'docs-code')
     hashes['fair_code'] = transfer(args.target, root.parent / 'kvc-fair', fair_root, evidence, 'fair-code')
+    remote(args.site, "from pathlib import Path;Path('/var/lib/kvc-lab/sources').mkdir(mode=0o700,parents=True,exist_ok=True)")
+    for suffix in ['.tar.gz', '.json']:
+        with (evidence / ('source' + suffix)).open('rb') as stream:
+            destination = '/var/lib/kvc-lab/sources/' + source_identity + suffix
+            run(['ssh', args.site, shlex.join(['tee', destination])], stdin=stream)
+        remote(args.site, "import json,sys,os;os.chmod(json.load(sys.stdin),0o600)", destination)
     hostkey = run(['ssh', args.target, 'cat /etc/ssh/ssh_host_ed25519_key.pub']).decode().strip()
     resolved = {}
     for line in run(['ssh', '-G', args.target]).decode().splitlines():
@@ -89,7 +129,7 @@ js=Path('/var/www/html/assets/js/site.js').read_text();m=re.search(r"ADMIN_USER\
 allowed=[m.group(1)] if m and m.group(1) in users else users if len(users)==1 else []
 if not allowed:raise RuntimeError('Cannot resolve existing site administrator')
 f=private/'controller.json';settings=json.loads(f.read_text()) if f.exists() else {'csrf_secret':secrets.token_hex(32)}
-settings.update(state_root='/var/lib/kvc-lab',allowed_users=allowed,ssh_target='kvc-lab-target',ssh_gateway=True,ssh_identity='/etc/kvc-lab/control-key',ssh_known_hosts='/etc/kvc-lab/known_hosts',ssh_config='/etc/kvc-lab/ssh_config',remote_code_root=x['code'],remote_fair_root=x['fair'],remote_config='/etc/kvc-lab/runner.json')
+settings.update(source_sha256=x['source_sha256'],state_root='/var/lib/kvc-lab',allowed_users=allowed,ssh_target='kvc-lab-target',ssh_gateway=True,ssh_identity='/etc/kvc-lab/control-key',ssh_known_hosts='/etc/kvc-lab/known_hosts',ssh_config='/etc/kvc-lab/ssh_config',remote_code_root=x['code'],remote_fair_root=x['fair'],remote_config='/etc/kvc-lab/runner.json')
 f.write_text(json.dumps(settings,indent=2)+'\\n');os.chmod(f,0o600)
 Path('/var/lib/kvc-lab').mkdir(mode=0o700,exist_ok=True)
 app=Path('app.py');old=app.read_text();backup=private/'app.py.before'
@@ -134,9 +174,11 @@ WantedBy=multi-user.target
 Path('/etc/systemd/system/kvc-lab-controller.service').write_text(unit)
 subprocess.run(['/opt/yche-site-venv/bin/python','-B','-c','from app import create_app; a=create_app(); assert any(r.rule=="/site-api/kvc-lab/catalog" for r in a.url_map.iter_rules())'],check=True,stdout=subprocess.DEVNULL)
 subprocess.run(['systemctl','daemon-reload'],check=True)
-subprocess.run(['systemctl','enable','--now','kvc-lab-controller.service'],check=True,stdout=subprocess.DEVNULL)
+subprocess.run(['systemctl','enable','kvc-lab-controller.service'],check=True,stdout=subprocess.DEVNULL)
+subprocess.run(['systemctl','restart','kvc-lab-controller.service'],check=True)
+subprocess.run(['systemctl','is-active','--quiet','kvc-lab-controller.service'],check=True)
 subprocess.run(['systemctl','kill','--kill-who=main','--signal=HUP','yche-site-api.service'],check=True)
-print(json.dumps({'installed':True,'api':'/site-api/kvc-lab','ui':'/site-api/kvc-lab/ui/','allowed_users_count':len(allowed)}))""", dict(code=code_root, fair=fair_root, hostkey=hostkey, resolved=resolved))
+print(json.dumps({'installed':True,'api':'/site-api/kvc-lab','ui':'/site-api/kvc-lab/ui/','allowed_users_count':len(allowed)}))""", dict(code=code_root, fair=fair_root, hostkey=hostkey, resolved=resolved, source_sha256=source_identity))
     result = dict(installed=installed, bundle_sha256=hashes, duration_s=time.monotonic()-started)
     (evidence / 'install-result.json').write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps(result))

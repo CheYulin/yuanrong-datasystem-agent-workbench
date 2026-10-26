@@ -125,7 +125,7 @@ class SiteApiTests(unittest.TestCase):
         for path in (
             "/catalog", "/state", "/jobs/" + JOB_ID,
             "/jobs/" + JOB_ID + "/artifacts/result.json",
-            "/ui/", "/ui/index.html", "/ui/app.js", "/ui/style.css", "/guide.html",
+            "/ui/", "/ui/index.html", "/ui/app.js", "/ui/style.css", "/guide.html", "/source/source.tar.gz", "/source/source.json",
         ):
             with self.subTest(path=path):
                 response = self.client.get(PREFIX + path)
