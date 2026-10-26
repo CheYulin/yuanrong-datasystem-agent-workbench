@@ -74,3 +74,5 @@
 - [2026-10-21 KVC 报告头栏与表格布局修正](2026-10-21-kvc-report-layout/README.md)
 
 - [2026-10-22 KVC 结果覆盖与 EXIST 空白说明](2026-10-22-kvc-result-coverage/README.md)
+
+- [2026-10-26 DataSystem / Mooncake 登录实验控制台](2026-10-26-kvc-control-lab/README.md)
