@@ -6,7 +6,7 @@
 
 | 验证项 | 实际结果 | 证据 |
 | --- | --- | --- |
-| 应用回归 | 153 项通过，3.738 秒；包含14项原生审核、9项IO审核、6项IO组合、11项报告绑定测试 | 本地 tests 与外部验证日志 |
+| 应用回归 | 153 项通过，最终回归4.409秒；包含14项原生审核、9项IO审核、6项IO组合、11项报告绑定测试 | 本地 tests 与外部验证日志 |
 | 匿名保护 | 15 条 UI / CSS / JS / API / 指南 / 文档 / 源码 / job下载路由均401；no-store、Vary Cookie通过 | install004-readonly-qa-SiPUfg |
 | 授权下载 | 当前与历史任务源码包、命令、资源采样、manifest 均200；逐字节数与 SHA 对应 | 同上 |
 | 源码解包 | 355 文件逐 SHA、Python AST、模块导入通过；3篇文档与2图可重建 | source-audit-fixed-qk3c_45s |
@@ -170,4 +170,4 @@ IO概述绑定原组合审核SHA和准确6任务ID，server 240个已知采样�
 
 最终清理任务 `8dc8442070d3462c9076dc4c7c1ada8e` succeeded；目标机只读复查owned cgroup无PID，active execution为terminal。旧结果、构建依赖与原失败attempt均保留。
 
-研究页：`https://yche.me/site-api/kvc-lab/ui/study.html`。研究页数据来自闭合审核与IO概述，页面仅GET；最终安装及真实四宽浏览器验收回执在随后生成的发布记录中。
+研究页：`https://yche.me/site-api/kvc-lab/ui/study.html`。研究页数据来自闭合审核与IO概述，页面仅GET；最终安装及真实四宽浏览器验收见[发布记录](05-publication-and-browser-validation.md)，全部通过。
