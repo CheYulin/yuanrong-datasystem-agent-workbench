@@ -13,6 +13,8 @@
 
 DataSystem 输出使用 `datasystem/output/datasystem/service/` 和 `.venv`；Mooncake 使用 `mooncake/venv` 中 wheel 的实际安装二进制，不能拿 build 目录同名文件的哈希冒充运行文件。两者实际 PID、argv、文件哈希进入部署与版本回执。
 
+现场 `readlink -f datasystem/.venv/bin/python` 指向 `/home/worktrees/kvc-fair-20261020/mooncake/python/cpython-3.11.15-linux-x86_64-gnu/bin/python3.11`。旧日期目录仍是本轮虚拟环境的有效解释器依赖，不能当作无用旧结果删除；重建需保留或按配方重装相同基础Python。
+
 ## 1.2 控制台安装
 
 ```bash
@@ -38,6 +40,7 @@ python3 scripts/experiments/kvc-lab/deploy/install.py \
 ## 1.4 Mooncake 关键设置
 
 - 单 Master，多个 Store peer；增加 peer 不等于增加元数据分片。
+- Master RPC线程数为 `max(4, 2 × master_cpus)`：中心1/2/4核分别使用4/4/8线程。1→2核时线程数相同；2→4核时线程数也增加，后者属于中心配置组合敏感性，不能归因于CPU配额单一因素。
 - `MC_RPC_PROTOCOL=tcp`，replica=1；关闭客户端 local hot cache、本地存储容量、可选持久化/offload/checksum/统计输出。
 - 实际 master wheel member 与运行二进制身份单独核对。
 
@@ -46,3 +49,5 @@ python3 scripts/experiments/kvc-lab/deploy/install.py \
 40 物理核 / 80 逻辑 CPU、双 NUMA。服务端、客户端与标准采集工具使用不重叠的物理核集合；内存使用 cgroup v2 memory.max，swap=0。中心 CPU 使用子 cgroup 的 cpu.max 限额，继承服务端 cpuset，并非独占物理核。中心消耗计入服务端总配额。
 
 DataSystem Coordinator 负责集群控制；对象元数据在 workers。Mooncake Master 负责集中元数据。因此图中的中心 CPU 不能直接解释为两者对等的对象元数据 CPU，应同时看服务端总负载与 DS workers。
+
+DS Coordinator的rpc/brpc线程数固定8，worker的oc/brpc线程数固定8；worker数量增加会同时增加进程与线程总数，CPU总预算不增加。本轮关闭不需要的持久化、缓存和诊断特性，但没有遍历所有线程数、传输方式或硬件，结果不能称为各规格全局最优上限。

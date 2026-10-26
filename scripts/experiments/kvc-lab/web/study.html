@@ -71,6 +71,7 @@
       <figure><div id="metadata-throughput" class="chart wide-chart"></div><figcaption>图 9. workers 与中心 CPU 配额交叉扫描的吞吐；保持预算、版本与负载分组。</figcaption></figure>
       <figure><div id="metadata-resources" class="chart wide-chart"></div><figcaption>图 10. 实线为中心平均使用核数 ÷ 中心 CPU 配额（左轴），虚线为窗口内节流总量（右轴，ms）；窗口长度不同不直接比较节流总量。</figcaption></figure>
       <p class="note">中心 CPU 配额来自子 cgroup 的 cpu.max，中心继承服务端 cpuset，并非独占物理核；限额计入服务端总预算。利用率略高于 100% 时保留观测值，不截断。</p>
+      <p class="note">Mooncake 的冻结配置同时设置 RPC 线程数：1 核配额 / 4 线程、2 核 / 4 线程、4 核 / 8 线程。1→2 核保持线程数不变；2→4 核同时增加线程，曲线验证的是中心配置敏感性，不能归因为纯 CPU 单因素。</p>
       <div id="metadata-quality" class="warning-note" hidden></div>
     </section>
     <section id="nodes">

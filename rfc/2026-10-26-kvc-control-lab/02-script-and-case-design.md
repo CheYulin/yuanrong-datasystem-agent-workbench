@@ -40,7 +40,7 @@ sequenceDiagram
 1. 基础：1逻辑节点、2 workers、8 clients、server8/client8核、中心2核、16GiB；两产品、1KiB、B=1/16/256/4096、四接口、20秒、3轮，96 cases。
 2. Worker：固定总预算，workers=1/2/4/8，clients=8，B1，四接口。用于固定成本扩展，不能解读为每worker固定资源的容量线性增长。
 3. Client：固定worker与预算，clients=1/2/4/8/16/32，B1，四接口。排查客户端限流与中心饱和。
-4. 中心敏感性：workers×中心1/2/4核，EXIST hit/miss。观察 MC Master 配额、节流与吞吐/尾延迟是否共同变化；瓶颈是待检验假设。
+4. 中心敏感性：workers×中心1/2/4核，EXIST hit/miss。MC Master分别为4/4/8个RPC线程；1→2核是相同线程数下的配额变化，2→4核同时改变线程数。观察配额、节流与吞吐/尾延迟是否共同变化；瓶颈是待检验假设，不把整个扫描称为CPU单因素实验。
 5. 逻辑节点：同一物理机内不同loopback/host ID，比较 nodes=1/2/4 的可部署拓扑；不代表跨物理机网络。
 
 默认5秒单轮仅用于部署/功能闭环。正式读和存在性测量选10或20秒。纯 PUT 是有界 fresh insert 集合，单列实际耗时、short_window、low_sample_p99，不将其称为持续定时写压测。
