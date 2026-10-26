@@ -23,7 +23,7 @@
 | 一跳资格 | 27次DS部署的独立B1 fresh写计数/回读均通过，仅限资格窗口 |
 | 回收 | 最终stop任务成功；owned cgroup无PID，active execution为terminal |
 
-安装006的站点58份与目标373份payload逐SHA匹配源码包。当前源码包378文件通过下载与解包安全检查，历史004包355文件仍按各job绑定原SHA。本文记录安装之后产生的验证回执；代码包与原生实验的冻结SHA持续作为各自身份，生成文档的MD输入SHA另列于 `reader-build.json`。
+安装006的站点58份与目标373份payload逐SHA匹配源码包。当时源码包378文件通过下载与解包安全检查，历史004包355文件仍按各job绑定原SHA。本文记录安装之后产生的验证回执；代码包与原生实验的冻结SHA持续作为各自身份，生成文档的MD输入SHA另列于 `reader-build.json`。
 
 ## 5.3 真实公开URL浏览器验收
 
@@ -78,3 +78,21 @@ bundle_sha = transfer("xqyun-32c32g", evidence / "docs",
     "bundle_sha256": bundle_sha, "duration_s": time.monotonic() - started
 }, indent=2) + "\n")
 ```
+
+## 5.6 指南补充版本007验收回执
+
+007将既有文档表格资产接入指南，修复指南三张表在手机宽度下的内部横向滚动。安装耗时60.200秒，两端payload逐SHA核对耗时5.931秒；站点58份、目标373份全部匹配，目标owned cgroup仍无PID，active execution为terminal。
+
+| 验收项 | 007实际结果 |
+| --- | --- |
+| 当前安装源码 | `3a629863857bdf6b2356eebb06c51b26e93fca9e0d673d98a6dcf50351da527a`；379文件逐manifest SHA、路径安全及下载核验通过 |
+| 指南1440/900/390/320 | 每宽三张表内外横向溢出均0；列标签、headers与roles完整；导航、单header及1张真实Mermaid SVG通过 |
+| 文档 | 六份MD逐SHA绑定reader和007源码；新发布回执文档四宽三表与六卡片索引通过 |
+| 匿名保护 | 23条涉及指南、资产、文档与源码的路由全部401；private no-store、Vary Cookie及nosniff通过；登录后alias302 |
+| 性能数据 | study、audit、manifest及IO四文件SHA均与006相同；沿用006逐点图表和原文档布局验收 |
+| 浏览器网络 | 176次browser GET、41次direct GET；非GET、页面错误及未知外源均0；12次已知统计beacon阻断 |
+| 线上验收耗时 | 47.613秒，UTC 2026-10-26 18:34:34.731至18:35:22.344 |
+
+本轮证据为 `guide-public-live-007-2026-10-26T18-34-34-730Z/result.json`、`install-007/install-result.json` 与 `installed-code-identity-007.json`。仅进行只读网页与下载核验，没有再次部署或运行原生实验。
+
+此节是007安装后的文档派生回执，按5.5入口重新生成并发布文档。007源码包保留安装时快照，本文新增内容以文档reader-build中的MD输入SHA绑定；原生004源码、各job及性能数据身份均保持冻结。
