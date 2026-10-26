@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="same-origin"><title>实验步骤与运行记录 · KVC 实验台</title><link rel="stylesheet" href="assets/lab.css?v=20261026-1"><script defer src="/perf/kvc-coordinator-modular-20261021/assets/mermaid.min.js"></script><script type="module" src="assets/lab.js?v=20261026-1"></script></head>
+<body>
+<header class="lab-header"><button class="icon-button" id="menu-toggle" aria-controls="navigation" aria-expanded="false" aria-label="展开章节导航">☰</button><a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">KV</span><span>KVC 实验台</span></a><span class="header-context">实验步骤 / 脚本设计 / 运行记录</span><span class="header-account" id="account-status">验证登录中</span></header>
+<div class="auth-panel" id="access-panel" role="status" aria-live="polite"><div class="eyebrow">PRIVATE EXPERIMENT WORKSPACE</div><h1 id="access-title">正在验证访问权限</h1><p id="access-message">实验说明、部署配置与日志需要站点管理员权限。</p><a class="button primary" id="login-link" href="/login" hidden>使用站点账户登录</a><button class="button" id="retry-auth" hidden>重新验证</button></div>
+<div id="protected-app" hidden>
+<aside class="lab-navigation" id="navigation" aria-label="章节导航"><p class="nav-label">具体步骤与运行记录</p><nav><a href="#method" class="active"><span>01</span>比较边界</a><a href="#cases"><span>02</span>关键用例</a><a href="#workflow"><span>03</span>逐步验收</a><a href="#architecture"><span>04</span>脚本与数据流</a><a href="#interpretation"><span>05</span>结论判定</a><a href="#run-records"><span>06</span>真实运行记录</a></nav><div class="nav-scope"><span class="status-dot"></span><strong>tiantiyun-80c128g</strong><p>同一物理机<br>按物理核隔离资源<br>不推导跨机扩展结论</p></div><a class="nav-guide" href="index.html">← 返回实验控制页</a></aside><div class="nav-backdrop" id="nav-backdrop" hidden></div>
+<main class="guide-content"><div class="connection-strip"><span id="connection-text">正在读取实验状态</span><button class="text-button" id="refresh-state">刷新</button></div>
+<section id="method"><div class="section-kicker">01 / COMPARISON CONTRACT</div><h1>具体步骤与运行记录</h1><p class="lede">从部署、隔离和接口正确性开始，逐步积累性能证据。每个结论都要能回到固定版本、完整配置、原始记录与独立验收。</p>
+<div class="hypothesis-grid"><article class="hypothesis ds"><span class="product-label">基础性能</span><h3>亲和写入的真实路径</h3><p>DataSystem 按元数据归属选择写入接入 worker；检查实际请求路由，证明“一跳 RPC”是否成立。</p></article><article class="hypothesis mc"><span class="product-label">扩展性</span><h3>中心路径的真实负载</h3><p>在固定资源预算下增加 workers / clients，结合 Mooncake Master 负载与吞吐曲线判断瓶颈位置。</p></article></div>
+<ul><li>运行环境固定为 tiantiyun-80c128g。逻辑节点通过 cgroup 隔离，所有节点仍位于同一物理机；不据此声称跨机扩展能力。</li><li>CPU 使用物理核口径。40 个物理核中保留 2 核监控；服务端、客户端分配互不重叠，合计最多 38 核。实际 CPU 列表、配额、内存限制以任务回执为准。</li><li>Coordinator / Master 均计入服务端总预算。固定总预算实验不能随着 workers 数量增加而默默增加 CPU 或内存。</li><li>两种产品按相同配置顺序重建运行，避免活跃进程互相干扰。DataSystem 使用 Coordinator，关闭本次内存 KV 对比不需要的 RocksDB 与 Stream 功能。</li><li>批量 B 表示每次 API 调用的独立 key 数；“API/s”和“keys/s”分开记录。失败、不支持与缺失不能填写为零。</li></ul></section>
+<section id="cases"><div class="section-kicker">02 / KEY EXPERIMENTS</div><h2>关键性能用例</h2><p>界面预设来自服务端 catalog。下表描述验证目的，实际执行范围与参数以提交配置和逐 case 记录为准。</p>
+<div class="table-scroll" tabindex="0"><table><thead><tr><th>方案</th><th>变化因素</th><th>保持不变</th><th>关键接口 / 负载</th><th>验收与观察</th></tr></thead><tbody>
+<tr><td>基础性能 baseline</td><td>用户选定的单一拓扑</td><td>两产品预算、值大小、批量、计时长度、重复次数</td><td>PUT / GET / EXIST 命中与未命中；建议从 1 KiB、B1 起步</td><td>正确性通过；亲和写入路由有证据；报告 keys/s、API/s、P99</td></tr>
+<tr><td>Worker 扩展 worker_scaling</td><td>workers 总数 1 / 2 / 4 / 8 中可被逻辑节点数整除的规格</td><td>逻辑节点数、服务端总 CPU / 内存、clients</td><td>先 B1 检查请求扩展，再用 B16 / 256 观察批处理</td><td>比较固定预算下的扩展曲线，同时记录每 worker 与中心组件资源负载</td></tr>
+<tr><td>Client 扩展 client_scaling</td><td>clients 1 / 2 / 4 / 8 / 16 / 32，不超过界面上限</td><td>worker 拓扑、服务端与客户端资源预算、值大小和批量</td><td>PUT、GET、EXIST 分别比较</td><td>观察吞吐拐点、P99 增长和 CPU 饱和；客户端不足也可能限制结果</td></tr>
+<tr><td>元数据 metadata_scaling</td><td>Worker 数 × 中心组件 1 / 2 / 4 核（不超过服务端预算）</td><td>服务端总预算、数据集定义、测量窗口；B 由用户选择</td><td>仅原生批量 EXIST 命中 / 未命中；建议扫描 B1 / 16 / 256 / 4096</td><td>检查 Master / Coordinator CPU 配额、利用率、节流、错误及尾延迟，验证中心路径是否限制扩展</td></tr>
+</tbody></table></div><p class="inline-note">单次调用载荷最多 16 MiB；大值与大批量应拆组。默认 B1 小矩阵便于先验收真实路径，再扩展到完整批量范围。服务端计划预览会给出实际规格序列、case 数和纯测量时长。</p></section>
+<section id="workflow"><div class="section-kicker">03 / ACCEPTABLE INTERMEDIATE RESULTS</div><h2>每一步都有中间结果</h2><p>网页按钮创建后台任务。刷新或关闭浏览器不会自行重启任务；任务 ID 是进度和所有产物的关联键。</p>
+<figure><div class="workflow-track"><div><span>01</span><strong>固定输入</strong><small>校验参数、版本与所有权</small></div><div><span>02</span><strong>环境与部署</strong><small>隔离资源、启动并核对进程</small></div><div><span>03</span><strong>验证与测量</strong><small>正确性门禁、原生接口与观测</small></div><div><span>04</span><strong>收集与交付</strong><small>保留原件、独立验收与清理</small></div></div><figcaption>图 1. 任务状态按真实回执推进；下游步骤消费已验收的中间产物。</figcaption></figure>
+<div class="table-scroll" tabindex="0"><table><thead><tr><th>阶段</th><th>中间产物</th><th>接受条件</th><th>失败后的行为</th></tr></thead><tbody>
+<tr><td>参数与版本</td><td>提交配置、产品 tag / commit、输入身份、任务 ID</td><td>参数在允许范围，构建产物与固定源码对应</td><td>拒绝未支持或越界配置，不启动压力测试</td></tr>
+<tr><td>环境检查</td><td>CPU 拓扑、cgroup 限制、已有进程与资源清单</td><td>保留监控预算；实验拥有的资源边界明确；无冲突</td><td>记录冲突并停止；不清理无关服务</td></tr>
+<tr><td>部署</td><td>配置文件、启动命令、组件 PID、健康检查、版本输出</td><td>当前规格进程齐全、端点就绪、实际资源与预算一致</td><td>保存日志和失败回执，回收当前任务拥有的资源</td></tr>
+<tr><td>正确性与路由</td><td>PUT / GET 字节校验、EXIST 命中 / 未命中断言、亲和路由证据</td><td>可比较接口真实可用；DataSystem 一跳结论有路由证据</td><td>不让错误结果进入成功性能统计</td></tr>
+<tr><td>测量与观测</td><td>逐 case 原始记录、起止时间、CPU / 内存 / IO 数据、中心组件负载</td><td>计时与观测窗口对应；key 数、字节数、接口状态可核对</td><td>保留失败、超时和未支持，不补数据</td></tr>
+<tr><td>结果与清理</td><td>汇总、输入 / 产物身份、每步骤耗时、资源回收回执</td><td>结果矩阵无漏项，失败单列；所拥有的进程和 cgroup 已退出</td><td>显式显示缺项或清理错误，不能仅凭脚本退出码宣称完成</td></tr>
+</tbody></table></div>
+<h3>页面操作顺序</h3><ol><li>返回控制页，选择预设和资源规格，展开“即将提交的配置”核对输入。</li><li>点击“部署选定拓扑”。确认部署步骤的版本、实际配额与健康检查通过。</li><li>点击“运行所选用例”。后台按产品、规格顺序重建，执行验证、计时与观测。</li><li>在任务列表查看步骤状态、实际耗时与日志。提交结果未知时先刷新原任务，不重复启动。</li><li>结果页切换 PUT / GET / EXIST，按 clients、workers 或逻辑节点查看图表；在完整状态表核对失败与未采集。</li><li>需要停止时点击“停止当前任务”，等待取消与资源回收回执；停止请求成功不等于清理已完成。</li></ol></section>
+<section id="architecture"><div class="section-kicker">04 / SCRIPT MODULES & REPLAY</div><h2>脚本模块与可复现数据流</h2><div class="table-scroll"><table><thead><tr><th>模块职责</th><th>输入</th><th>输出</th></tr></thead><tbody><tr><td>构建 / 版本</td><td>固定 tag / commit 与构建选项</td><td>可执行产物身份、命令与构建记录</td></tr><tr><td>部署 / 运行</td><td>已校验配置、产品与规格序列</td><td>进程所有权、实际拓扑、逐 case 记录</td></tr><tr><td>资源隔离 / 观测</td><td>CPU 拓扑、cgroup 预算与测量窗口</td><td>实际配额、CPU / 内存 / 磁盘与中心组件采样</td></tr><tr><td>收集 / 验收</td><td>原始记录、采样和版本身份</td><td>每步骤中间产物、完整性结果、耗时与失败原因</td></tr><tr><td>API / 控制页</td><td>站点账户、CSRF、白名单配置、幂等键</td><td>持久化任务 ID、轮询进度、受保护日志与产物下载</td></tr><tr><td>报告</td><td>可核对的真实结果</td><td>交互曲线、状态矩阵、脚本 / 设计 / 运行记录链接</td></tr></tbody></table></div>
+<h3>接口与重放</h3><p>控制页以同源 API 提交白名单参数。修改部署或运行状态的请求带 CSRF token 与幂等键；页面不接收或执行任意 shell 命令。源代码与操作说明的下载入口由服务端提供。</p>
+<figure class="mermaid-figure"><div class="mermaid-scroll"><div class="mermaid">sequenceDiagram
+    actor U as 站点管理员
+    participant UI as 控制页
+    participant API as 登录保护 API
+    participant R as 远端实验执行器
+    U->>UI: 选择方案与配额
+    UI->>API: POST plans 校验与预览
+    API-->>UI: 规格序列 / case数 / 时长
+    U->>UI: 部署或运行
+    UI->>API: POST jobs + CSRF + 幂等键
+    API-->>UI: 持久化任务 ID
+    API->>R: 执行白名单配置
+    loop 每个实验步骤
+      R-->>API: 中间产物 / 验收 / 耗时
+      UI->>API: 按任务 ID 轮询
+      API-->>UI: 真实进度 / 日志 / 结果
+    end
+</div></div><figcaption>图 2. 页面提交配置，后台持久化执行；浏览器刷新继续观察同一个任务。</figcaption></figure>
+<pre>GET  /site-api/kvc-lab/catalog
+GET  /site-api/kvc-lab/state
+POST /site-api/kvc-lab/plans
+POST /site-api/kvc-lab/jobs
+GET  /site-api/kvc-lab/jobs/&lt;任务 ID&gt;
+GET  /site-api/kvc-lab/jobs/&lt;任务 ID&gt;/artifacts/&lt;产物名称&gt;</pre>
+<p>POST 请求体包含 <code>action</code>（deploy / run / stop）、<code>config</code> 与 <code>idempotency_key</code>；<code>config.profile</code> 表示方案。准确命令、参数、输出目录和实际用时以每个任务的步骤回执为准，避免把说明中的示例误认成已执行证据。</p>
+<div class="links" id="catalog-links"></div></section>
+<section id="interpretation"><div class="section-kicker">05 / READING THE EVIDENCE</div><h2>如何判断性能差异</h2><ul><li><strong>一跳 RPC：</strong>需要实际亲和 key 与接入 worker 的归属关系、路由和请求证据。只打开配置或吞吐较高，不能证明没有 worker 间转发。</li><li><strong>中心瓶颈：</strong>需要在相同预算下看到扩展拐点，并有 Master CPU 配额 / 利用率、排队或尾延迟等相符证据。若客户端 CPU 饱和、内存不足或传输链路受限，应先排除这些因素。</li><li><strong>批量与吞吐：</strong>keys/s 和 API/s 表达不同含义。B4096 的单次调用处理 4096 个独立 keys，不能只看 API/s 排名。</li><li><strong>命中与未命中：</strong>EXIST 两类场景分别验证已存在集合和未写入集合。不能把错误码当作未命中，不能把超时记成 0 QPS 的成功点。</li><li><strong>重复与范围：</strong>曲线只对相同分组的有效轮次取中位数；散点保留每轮测量。不同版本、配额与负载的点不能直接归因于节点数量。</li><li><strong>当前边界：</strong>本页没有预置性能数字；尚未执行的场景保持空状态。同物理机实验不证明跨机、GPU / RDMA、故障恢复或高可用性。</li></ul></section>
+<section id="run-records"><div class="section-kicker">06 / ACTUAL RUN RECORDS</div><div class="heading-row"><h2>真实部署与运行记录</h2><a class="button" href="index.html#progress">返回控制页</a></div><p>下列任务由服务端实时返回。展开任务读取原始步骤、配置与日志；原始 JSON 与产物下载仍需要登录授权。</p><div id="run-records-list"><p class="empty">正在读取任务记录。</p></div></section>
+<footer>实验方法与实际结果分开记录 · 任务日志以服务端回执为准</footer></main></div>
+</body></html>

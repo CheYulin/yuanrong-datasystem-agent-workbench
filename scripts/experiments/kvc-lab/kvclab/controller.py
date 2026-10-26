@@ -12,6 +12,8 @@ import subprocess
 import time
 from .service import LabService
 from .store import TERMINAL
+from . import spec
+from .transport import ssh_argv, rpc
 
 
 class Controller:
@@ -24,27 +26,10 @@ class Controller:
             raise ValueError('Invalid configured SSH target')
 
     def argv(self, action):
-        remote = ['env', 'PYTHONDONTWRITEBYTECODE=1',
-                  'PYTHONPATH=' + self.settings['remote_code_root'] + ':' + self.settings['remote_fair_root'],
-                  self.settings.get('remote_python', 'python3'), '-B', '-m', 'kvclab.remote',
-                  '--config', self.settings['remote_config'], '--action', action]
-        return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15',
-                '-o', 'ServerAliveCountMax=4', self.settings['ssh_target'], shlex.join(remote)]
+        return ssh_argv(self.settings, action)
 
     def rpc(self, action, request):
-        completed = subprocess.run(self.argv(action), input=json.dumps(request).encode(), stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, timeout=35)
-        messages = []
-        for line in completed.stdout.decode(errors='replace').splitlines():
-            try:
-                value = json.loads(line)
-                if isinstance(value, dict):
-                    messages.append(value)
-            except ValueError:
-                pass
-        if completed.returncode or not messages:
-            raise RuntimeError('远端控制命令未成功返回；未重放实验')
-        return messages[-1]
+        return rpc(self.settings, action, request)
 
     def record(self, job_id, payload):
         self.store.event(job_id, payload)
@@ -72,7 +57,10 @@ class Controller:
                         break
                     if state.get('running') is False:
                         self.record(job_id, dict(kind='log', message='原远端进程已消失且无终态产物；保留中断，不自动重放写请求'))
-                        self.store.finish(job_id, 'interrupted', '远端原执行句柄已消失，未产生可验收终态')
+                        self.store.cleanup_required(True)
+                        plan = spec.preview_plan({})
+                        self.store.submit(self.store.get(job_id)['user'], 'stop', plan['config'], plan, 'recover-' + job_id)
+                        self.store.finish(job_id, 'interrupted', '远端原执行句柄已消失；回收门禁已启用，未重放写请求')
                         break
                     if self.store.get(job_id)['cancel_requested']:
                         self.rpc('stop', {'job_id': job_id})
@@ -137,6 +125,8 @@ class Controller:
                 process.stdout.close()
         if final and final.get('status') in TERMINAL and (returncode == 0 or final['status'] != 'succeeded'):
             self.store.finish(job_id, final['status'], final.get('error'))
+            if job['action'] == 'stop' and final['status'] == 'succeeded' and not final.get('deployment', {}).get('active'):
+                self.store.cleanup_required(False)
         else:
             self.record(job_id, dict(kind='log', message='SSH已结束但未收到可验收终态；核对同一远端任务，禁止自动重跑'))
             self.recover()

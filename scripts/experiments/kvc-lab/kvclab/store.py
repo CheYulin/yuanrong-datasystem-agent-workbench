@@ -58,7 +58,7 @@ class Store:
                     raise Conflict('同一幂等标识已绑定不同参数')
                 return prior['id']
             pending = db.execute("SELECT count(*) FROM jobs WHERE status='queued'").fetchone()[0]
-            if pending >= 12:
+            if pending >= 12 and action != 'stop':
                 raise Conflict('队列已满，请等待已提交任务完成')
             if action == 'stop':
                 db.execute("UPDATE jobs SET cancel_requested=1, updated=? WHERE status='running'", (now,))
@@ -73,7 +73,9 @@ class Store:
             db.execute('BEGIN IMMEDIATE')
             if db.execute("SELECT count(*) FROM jobs WHERE status='running'").fetchone()[0]:
                 return None
-            row = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END,created LIMIT 1").fetchone()
+            blocked = db.execute("SELECT value FROM state WHERE key='cleanup_required'").fetchone()
+            clause = " AND action='stop'" if blocked and blocked[0] == '1' else ''
+            row = db.execute("SELECT * FROM jobs WHERE status='queued'" + clause + " ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END,created LIMIT 1").fetchone()
             if row:
                 db.execute("UPDATE jobs SET status='running',updated=? WHERE id=?", (time.time(), row['id']))
                 return self.decode(row, status='running')
@@ -117,7 +119,7 @@ class Store:
             db.execute('INSERT INTO events(job_id,recorded,payload) VALUES(?,?,?)', (job_id, time.time(), encoded))
             db.execute('UPDATE jobs SET updated=? WHERE id=?', (time.time(), job_id))
             if payload.get('kind') == 'deployment':
-                db.execute('INSERT OR REPLACE INTO state(key,value) VALUES(?,?)', ('deployment', encoded))
+                db.execute('INSERT OR REPLACE INTO state(key,value) VALUES(?,?)', ('deployment', json.dumps(payload.get('deployment', payload))))
             if payload.get('kind') == 'complete' and 'deployment' in payload:
                 db.execute('INSERT OR REPLACE INTO state(key,value) VALUES(?,?)', ('deployment', json.dumps(payload['deployment'])))
 
@@ -131,3 +133,10 @@ class Store:
         with self.connect() as db:
             row = db.execute("SELECT value FROM state WHERE key='deployment'").fetchone()
         return json.loads(row[0]) if row else None
+
+    def cleanup_required(self, value=None):
+        with self.connect() as db:
+            if value is not None:
+                db.execute('INSERT OR REPLACE INTO state(key,value) VALUES(?,?)', ('cleanup_required', '1' if value else '0'))
+            row = db.execute("SELECT value FROM state WHERE key='cleanup_required'").fetchone()
+        return bool(row and row[0] == '1')

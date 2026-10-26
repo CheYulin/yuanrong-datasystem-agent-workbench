@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="same-origin">
+  <title>KVC 实验台 · 同机扩展对比</title>
+  <link rel="stylesheet" href="assets/lab.css?v=20261026-1">
+  <script defer src="/perf/kvc-coordinator-modular-20261021/assets/echarts.min.js"></script>
+  <script type="module" src="assets/lab.js?v=20261026-1"></script>
+</head>
+<body>
+<header class="lab-header">
+  <button class="icon-button" id="menu-toggle" aria-controls="navigation" aria-expanded="false" aria-label="展开章节导航">☰</button>
+  <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">KV</span><span>KVC 实验台</span></a>
+  <span class="header-context">DataSystem / Mooncake</span>
+  <span class="header-account" id="account-status">验证登录中</span>
+</header>
+<div class="auth-panel" id="access-panel" role="status" aria-live="polite">
+  <div class="eyebrow">PRIVATE EXPERIMENT WORKSPACE</div>
+  <h1 id="access-title">正在验证访问权限</h1>
+  <p id="access-message">请使用 yche.me 站点账户登录；实验部署、日志与结果需要管理员权限。</p>
+  <a class="button primary" id="login-link" href="/login" hidden>使用站点账户登录</a>
+  <button class="button" id="retry-auth" hidden>重新验证</button>
+</div>
+<div id="protected-app" hidden>
+<aside class="lab-navigation" id="navigation" aria-label="章节导航">
+  <p class="nav-label">同机扩展实验</p>
+  <nav>
+    <a class="active" href="#design"><span>01</span>实验设计</a>
+    <a href="#topology"><span>02</span>拓扑与资源</a>
+    <a href="#actions"><span>03</span>部署与运行</a>
+    <a href="#progress"><span>04</span>任务与验收</a>
+    <a href="#results"><span>05</span>性能与完整结果</a>
+    <a href="#records"><span>06</span>步骤与运行记录</a>
+  </nav>
+  <div class="nav-scope"><span class="status-dot"></span><strong>tiantiyun-80c128g</strong><p>同一物理机<br>cgroup 隔离逻辑节点<br>CPU / TCP 路径</p></div>
+  <a class="nav-guide" href="guide.html">阅读实验与脚本说明 ↗</a>
+  <p class="nav-footnote">版本、实际配额和原始证据均由任务回执记录。</p>
+</aside>
+<div class="nav-backdrop" id="nav-backdrop" hidden></div>
+<main>
+  <div class="connection-strip"><span id="connection-text">正在读取实验状态</span><button class="text-button" id="refresh-state">刷新</button></div>
+  <section id="design">
+    <div class="section-kicker">01 / EXPERIMENT DESIGN</div>
+    <div class="heading-row"><h1>让每一次性能对比<br class="desktop-break">都有可验收的证据</h1><span class="scope-pill">同物理机 · 逻辑节点</span></div>
+    <p class="lede">固定可比接口与资源预算，先验证元数据亲和写入，再观察 workers / clients 扩展后的吞吐、尾延迟和中心负载。</p>
+    <div class="hypothesis-grid">
+      <article class="hypothesis ds"><span class="product-label">DataSystem</span><h3>元数据亲和 · 一跳 RPC</h3><p>按元数据归属选择写入接入点；一跳是否成立，以运行时路由与观测证据验收。</p></article>
+      <article class="hypothesis mc"><span class="product-label">Mooncake</span><h3>Master 中心路径 · 扩展曲线</h3><p>增加 workers / clients，结合 Master CPU 与请求延迟，验证是否出现中心瓶颈。</p></article>
+    </div>
+    <h3>选择关键用例</h3>
+    <div class="preset-grid" id="presets"><p class="empty">正在加载服务端预设。</p></div>
+    <div class="inline-note">这是待验证的实验假设。单物理机结果不代表跨机网络、故障恢复或 GPU / RDMA 性能。</div>
+  </section>
+  <section id="topology">
+    <div class="section-kicker">02 / TOPOLOGY & RESOURCE BUDGET</div>
+    <h2>拓扑与资源</h2>
+    <form id="experiment-form">
+      <div class="form-grid">
+        <label>实验方案 <select name="profile"><option value="baseline">基础性能 · 单一拓扑</option><option value="worker_scaling">Worker 扩展 · 固定总预算</option><option value="client_scaling">Client 扩展 · 固定服务端</option><option value="metadata_scaling">元数据 / EXIST 扩展</option></select></label>
+        <label>逻辑节点 <select name="nodes"><option>1</option><option>2</option><option>4</option></select></label>
+        <label>每节点 workers <select name="workers_per_node"><option>1</option><option selected>2</option></select></label>
+        <label>并发 clients <select name="clients"><option>1</option><option>2</option><option>4</option><option selected>8</option><option>16</option><option>32</option></select></label>
+        <label>服务端总物理核 <select name="server_cpus"><option>4</option><option selected>8</option><option>16</option><option>24</option></select></label>
+        <label>客户端总物理核 <select name="client_cpus"><option>2</option><option>4</option><option selected>8</option><option>12</option></select></label>
+        <label>中心组件物理核 <select name="master_cpus"><option>1</option><option selected>2</option><option>4</option><option>8</option></select></label>
+        <label>服务端内存预算 / GiB <select name="memory_gib"><option>8</option><option selected>16</option><option>32</option><option>64</option></select></label>
+        <label>每 case 计时 / 秒 <select name="duration_s"><option selected>5</option><option>10</option><option>20</option></select></label>
+        <label>重复次数 <select name="repeats"><option selected>1</option><option>3</option></select></label>
+      </div>
+      <div class="option-groups">
+        <fieldset><legend>产品</legend><label><input type="checkbox" name="products" value="datasystem" checked>DataSystem</label><label><input type="checkbox" name="products" value="mooncake" checked>Mooncake</label></fieldset>
+        <fieldset><legend>每次调用的 keys 数</legend><label><input type="checkbox" name="batches" value="1" checked>1</label><label><input type="checkbox" name="batches" value="16">16</label><label><input type="checkbox" name="batches" value="256">256</label><label><input type="checkbox" name="batches" value="4096">4K</label></fieldset>
+        <fieldset><legend>每 key 大小</legend><label><input type="checkbox" name="value_sizes" value="1024" checked>1 KiB</label><label><input type="checkbox" name="value_sizes" value="65536">64 KiB</label><label><input type="checkbox" name="value_sizes" value="1048576">1 MiB</label></fieldset>
+        <fieldset><legend>接口 / 数据状态</legend><label><input type="checkbox" name="operations" value="put" checked>PUT</label><label><input type="checkbox" name="operations" value="get" checked>GET 命中</label><label><input type="checkbox" name="operations" value="exist_hit" checked>EXIST 命中</label><label><input type="checkbox" name="operations" value="exist_miss" checked>EXIST 未命中</label></fieldset>
+      </div>
+    </form>
+    <p class="note" id="profile-description">基础性能使用所选单一拓扑。服务端与客户端按物理核分配，监控另留 2 核；总和最多 38 核。</p>
+    <figure class="topology-figure"><div class="topology-diagram"><div class="topology-box client"><span>CLIENT DOMAIN</span><strong id="client-summary">8 clients</strong><small id="client-budget">8 CPU · 独立 cgroup</small></div><div class="topology-arrow" aria-hidden="true">→</div><div class="topology-box server"><span>SERVER DOMAIN</span><strong id="worker-summary">1 逻辑节点 × 1 worker</strong><small id="server-budget">8 CPU · 16 GiB · Coordinator / Master 计入预算</small></div></div><figcaption>图 1. 服务端与客户端隔离；产品按相同预算顺序运行。实际 cgroup 与进程拓扑以部署回执为准。</figcaption></figure>
+    <div class="summary-row"><span id="case-summary">配置读取中</span><span id="estimate-summary"></span></div>
+    <div class="plan-status" id="plan-status" role="status" aria-live="polite">参数确认后将生成服务端执行计划。</div>
+    <details><summary>查看实际规格序列</summary><div class="table-scroll"><table><thead><tr><th>规格</th><th>逻辑节点</th><th>Workers</th><th>Clients</th><th>中心物理核</th></tr></thead><tbody id="plan-rows"></tbody></table></div></details>
+    <details><summary>检查即将提交的配置</summary><pre id="config-preview"></pre></details>
+  </section>
+  <section id="actions">
+    <div class="section-kicker">03 / DEPLOY & RUN</div><h2>部署与运行</h2>
+    <div class="deployment-status" id="deployment-status"><span class="badge pending">尚未读取</span><span>正在读取当前部署。</span></div>
+    <div class="action-row"><button class="button" id="deploy-button">部署选定拓扑</button><button class="button primary" id="run-button">运行所选用例 <span aria-hidden="true">→</span></button><button class="button danger" id="stop-button" disabled>停止当前任务</button></div>
+    <p class="note">部署准备所选版本并启动首选产品；运行时按产品 / 规格顺序重建，避免同时活跃互相干扰。停止取消排队或当前任务，回收实验台拥有的进程与 cgroup。</p>
+    <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+    <div class="table-scroll"><table class="version-table"><caption>固定构建版本</caption><thead><tr><th>产品</th><th>Tag / 提交</th><th>运行配置</th></tr></thead><tbody id="version-rows"></tbody></table></div>
+  </section>
+  <section id="progress">
+    <div class="section-kicker">04 / ACCEPTANCE & TIMELINE</div><div class="heading-row"><h2>任务与逐步验收</h2><label class="compact-label">任务 <select id="job-select"><option value="">暂无任务</option></select></label></div>
+    <div class="job-overview" id="job-overview"><p class="empty">尚无任务。部署后会显示每个步骤的中间产物与验收结果。</p></div>
+    <div class="step-list" id="step-list"></div>
+    <figure><div class="chart short-chart" id="step-chart"></div><figcaption>图 2. 当前任务各步骤的实测耗时；进行中的步骤不当作已完成。</figcaption></figure>
+    <details class="logs-details"><summary>运行日志 <span id="log-count"></span></summary><pre class="log-view" id="job-logs">尚无日志。</pre></details>
+  </section>
+  <section id="results">
+    <div class="section-kicker">05 / PERFORMANCE & COMPLETENESS</div><h2>性能与完整结果</h2>
+    <p class="note">图表只使用有效记录；失败、不支持与未采集均保留状态，不补零。跨任务对比需同时核对版本、预算、批量大小和数据大小。</p>
+    <div class="compare-jobs" id="comparison-jobs"></div>
+    <div class="result-controls"><label>接口 <select id="filter-operation"><option value="put">PUT</option><option value="get">GET 命中</option><option value="exist_hit">EXIST 命中</option><option value="exist_miss">EXIST 未命中</option></select></label><label>批量 <select id="filter-batch"><option value="1">1 key</option><option value="16">16 keys</option><option value="256">256 keys</option><option value="4096">4096 keys</option><option value="all">全部</option></select></label><label>大小 <select id="filter-size"><option value="1024">1 KiB</option><option value="65536">64 KiB</option><option value="1048576">1 MiB</option><option value="all">全部</option></select></label><label>扩展轴 <select id="filter-axis"><option value="clients">Clients</option><option value="workers">Workers 总数</option><option value="nodes">逻辑节点</option></select></label><label>指标 <select id="filter-metric"><option value="keys_s">keys / 秒</option><option value="batch_qps">API 调用 / 秒</option><option value="p99_us">P99 / μs</option></select></label></div>
+    <div class="metric-cards" id="result-counts"><div><span>记录总数</span><strong>—</strong></div><div><span>有效</span><strong>—</strong></div><div><span>失败</span><strong>—</strong></div><div><span>不支持 / 其他</span><strong>—</strong></div></div>
+    <div id="result-scope" class="note"></div>
+    <figure><div class="chart" id="performance-chart"></div><figcaption id="performance-caption">图 3. 同一接口与负载下的性能；重复轮次以中位数显示，原始记录见下表。</figcaption></figure>
+    <figure><div class="chart" id="latency-chart"></div><figcaption>图 4. 有效记录的吞吐与 P99 分布；每个点对应一条实际测量记录。</figcaption></figure>
+    <h3>全 case 状态与原始证据</h3><p class="note">此表保留所选任务的全部接口与轮次，不受上方性能图筛选影响。</p>
+    <div class="table-scroll" tabindex="0" aria-label="完整实验结果表，可在表格内横向滚动"><table class="results-table"><thead><tr><th>任务 / 轮次</th><th>产品</th><th>逻辑节点 / workers / clients</th><th>物理核 / 内存</th><th>接口</th><th>Keys / 大小</th><th>状态</th><th>keys/s</th><th>API/s</th><th>P99 / μs</th><th>证据 / 原因</th></tr></thead><tbody id="result-rows"><tr><td colspan="11" class="empty">尚无结果。页面不会预置性能数据。</td></tr></tbody></table></div>
+  </section>
+  <section id="records">
+    <div class="section-kicker">06 / REPRODUCIBILITY & RECORDS</div><h2>具体步骤与运行记录</h2>
+    <div class="document-grid"><a class="document-card" href="guide.html"><span>实验说明</span><strong>设计、验收与脚本模块 ↗</strong><p>关键 cases、公平预算、元数据亲和验收、中心瓶颈判断与完整复现步骤。</p></a><a class="document-card" href="guide.html#run-records"><span>新页面</span><strong>部署与运行记录 ↗</strong><p>读取同一 API 中的真实任务，逐步查看耗时、验收与日志证据。</p></a></div>
+    <div class="links" id="catalog-links"></div><p class="note">当前页、说明页、日志与下载均由服务端检查站点管理员权限；未授权账户不能读取实验数据。</p>
+  </section>
+  <footer>DataSystem / Mooncake 实验控制台 · tiantiyun 同物理机扩展 · 数值来源于实际任务回执</footer>
+</main>
+</div>
+</body></html>

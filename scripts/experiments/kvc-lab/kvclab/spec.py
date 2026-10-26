@@ -40,6 +40,8 @@ def validate(raw):
         raise ValueError('总物理核配额超过40核，已预留2核观测')
     if max(config['batches']) * max(config['value_sizes']) > 16 * 1024 * 1024:
         raise ValueError('每次调用最多16MiB；大对象与大批量请分组实验')
+    if max(config['batches']) * config['clients'] * max(config['value_sizes']) > (config['memory_gib'] << 30) // 8:
+        raise ValueError('客户端同时在途批量超过服务端内存的1/8，请减少并发/批量或增加内存')
     return config
 
 
