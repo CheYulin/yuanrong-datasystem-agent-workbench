@@ -112,3 +112,9 @@ python3 -B validation/build_study.py \
 `validation/compose_observability.py --audit <六组性能审核> --io baseline=<IO审核> ... --out <新文件>` 消费六份单任务IO审核，不连接目标机、不重新扫描原件。它要求性能组、IO组的job ID及每case原件/测量窗口完全一致，所有输入由同一冻结IO审核器和helper产生；记录每份输入文件SHA及组合性能审核原字节SHA。
 
 概述只累加server角色，不将master/workers子角色再次相加。unknown、counter reset和已知区间分别保留；有unknown时完整读写合计为null，已知小计另列。`build_study.py` 再检查概述的 `performance_audit_sha256`、通过状态、完整六任务身份和每组窗口数，避免把其它研究的IO概述误配给当前图表。6项组合测试覆盖错任务/缺case/窗口错配、unknown处理、子角色去重、SHA/版本与确定性输出；不调用产品SDK。
+
+## 9. 文档表格的响应式输出
+
+`deploy/render_docs.py` 在共用阅读器输出上追加本实验的 `docs-tables.css/js`，复制到受保护的 `_reader/` 后由HTML引用；不修改共用模板。JS从实际thead建立列名、headers关联及table/row/cell角色，容器宽度不足880px时逐行卡片化，520px以内单列。卡片保留所有列值，避免靠压窄列或隐藏溢出来通过检查。
+
+真实5篇RFC在1440/900/390/320四宽本地共20页验收，R04每页9张表，其余各1张表；所有wrapper及表格均无横向溢出、标签完整，实际2张Mermaid渲染通过。站点注入的共享布局脚本与原生reader依赖分别识别，统计beacon在只读验收中持续阻断，不将其算作产品错误。最终线上回执另见发布记录。

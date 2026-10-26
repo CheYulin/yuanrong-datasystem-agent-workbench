@@ -1,0 +1,16 @@
+.docs-table-container{container-type:inline-size;container-name:experiment-document-table;max-width:100%}.docs-table-container td[data-label]:before{display:none}
+@container experiment-document-table (max-width:880px){
+  .docs-table-container table.docs-data-table{display:block;width:100%;min-width:0;border:0;background:#f6f9fc}
+  .docs-data-table thead{position:absolute;width:1px;height:1px;padding:0;clip-path:inset(50%);overflow:hidden;white-space:nowrap}
+  .docs-data-table tbody{display:grid;gap:13px;padding:10px}
+  .docs-data-table tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;border:1px solid #d2dfe9;border-radius:7px;overflow:hidden;background:#fff}
+  .docs-table-container table.docs-data-table td{display:block;min-width:0;max-width:none;width:auto;padding:11px 14px;border:0;border-bottom:1px solid #e5edf4;overflow-wrap:anywhere;white-space:normal}
+  .docs-data-table td:first-child{grid-column:1/-1;background:#f1f6fb}
+  .docs-table-container table.docs-data-table td[data-label]:before{display:block;content:attr(data-label);font-size:11px;color:#607c93;font-weight:600;line-height:1.8;margin-bottom:5px}
+  .docs-table-container table.docs-data-table td code{overflow-wrap:anywhere;word-break:break-all;white-space:normal}
+}
+@container experiment-document-table (max-width:520px){
+  .docs-data-table tbody{padding:7px;gap:10px}
+  .docs-data-table tbody tr{grid-template-columns:minmax(0,1fr)}
+  .docs-table-container table.docs-data-table td{padding:10px 12px}
+}
