@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="same-origin">
+  <title>同机 KVC 性能研究 · DataSystem / Mooncake</title>
+  <link rel="stylesheet" href="assets/study.css">
+  <script defer src="vendor/echarts.min.js"></script>
+  <script type="module" src="assets/study.js"></script>
+</head>
+<body>
+<header class="study-header">
+  <button id="menu-toggle" class="menu-button" aria-label="展开章节导航" aria-expanded="false" aria-controls="study-navigation">☰</button>
+  <a class="brand" href="/site-api/kvc-lab/ui/study.html"><span class="brand-mark" aria-hidden="true">KV</span><span>KVC 性能研究</span></a>
+  <span class="header-context">DataSystem / Mooncake</span><span class="readonly-pill">只读报告</span>
+</header>
+<div id="access-panel" class="access-panel" role="status" aria-live="polite">
+  <div class="kicker">EVIDENCE BEFORE CONCLUSIONS</div><h1 id="access-title">正在读取验收证据</h1>
+  <p id="access-message">报告、图表与原始产物仅向已授权的站点账户开放。</p>
+  <a id="login-link" class="button" href="/login" hidden>使用站点账户登录</a><button id="retry-load" class="button" hidden>重新读取</button>
+</div>
+<div id="study-app" hidden>
+  <aside id="study-navigation" class="navigation" aria-label="研究章节">
+    <p class="nav-label">同一物理机 · TCP / CPU</p>
+    <nav><a href="#baseline" class="active"><span>01</span>基础性能</a><a href="#workers"><span>02</span>Worker 扩展</a><a href="#clients"><span>03</span>Client 并发扩展</a><a href="#metadata"><span>04</span>中心配额敏感性</a><a href="#nodes"><span>05</span>同机逻辑节点</a><a href="#acceptance"><span>06</span>验收与可复现证据</a></nav>
+    <div class="nav-scope"><strong>tiantiyun-80c128g</strong><p>40 物理核 / 80 逻辑 CPU<br>单物理机 · cgroup 隔离<br>逻辑节点使用 loopback / host ID</p></div>
+    <a class="nav-link" href="/site-api/kvc-lab/ui/guide.html">实验设计与步骤说明 ↗</a><a class="nav-link" href="/site-api/kvc-lab/ui/docs/">构建与验收文档 ↗</a>
+    <p class="nav-note">本页仅发出 GET 请求。图表由独立审计产物生成；缺失与失败保留为空值。</p>
+  </aside>
+  <div id="nav-backdrop" class="nav-backdrop" hidden></div>
+  <main>
+    <div class="report-strip"><span id="updated-at">审计时间待确认</span><button id="refresh-data" class="text-button">重新读取数据</button></div>
+    <div id="study-status" class="status-banner" role="status" aria-live="polite"></div>
+    <section id="baseline">
+      <div class="kicker">01 / BASELINE · COMPLETE BATCH CALLS</div>
+      <div class="heading-row"><h1>同机 KVC 性能对比<br>从批量接口到扩展边界</h1><span class="scope-pill">1 物理机 · 6 组实验</span></div>
+      <p class="lede">比较 DataSystem 与 Mooncake 的 PUT、GET 和 EXIST。先核对原生结果、重复轮次与资源窗口，再观察相同预算下的吞吐、延迟和 CPU 使用。</p>
+      <div id="overview" class="metric-grid"></div>
+      <div id="findings" class="findings"></div>
+      <div class="controls"><label>每 key 大小<select id="value-size"><option value="1024">1 KiB</option></select></label><label>基础图指标<select id="baseline-metric"><option value="keys_s">吞吐 · keys/s</option><option value="batch_qps">调用速率 · API/s</option><option value="p99_us">P99 · μs</option></select></label></div>
+      <p class="note">批量为每次调用的 keys 数：1 / 16 / 256 / 4096。基础组要求 3 轮均通过，柱高为中位数，细线为最小值至最大值；这不是置信区间。完整批量调用的 P99 为原生直方图桶上界。</p>
+      <div class="chart-grid">
+        <figure><h3>PUT · 有界 fresh 插入</h3><div id="baseline-put" class="chart"></div><figcaption>图 1. PUT 的批量变化；实际插入基数有限，短窗口标记始终保留。</figcaption></figure>
+        <figure><h3>GET · 命中</h3><div id="baseline-get" class="chart"></div><figcaption>图 2. 预置数据命中 GET；延迟为一次完整批量调用的延迟。</figcaption></figure>
+        <figure><h3>EXIST · 命中</h3><div id="baseline-exist-hit" class="chart"></div><figcaption>图 3. 已存在 keys 的原生批量查询；keys/s 与 API/s 分开显示。</figcaption></figure>
+        <figure><h3>EXIST · 未命中</h3><div id="baseline-exist-miss" class="chart"></div><figcaption>图 4. 不存在 keys 的查询；不以命中结果代替未命中测量。</figcaption></figure>
+      </div>
+      <div id="baseline-quality" class="warning-note" hidden></div>
+    </section>
+    <section id="workers">
+      <div class="kicker">02 / WORKER SCALING · FIXED TOTAL BUDGET</div><h2>增加 workers，观察单位预算的收益</h2>
+      <p class="note">单逻辑节点，workers 为 1 / 2 / 4 / 8，B=1。服务端总 CPU 与内存预算固定，中心组件计入同一预算；增加进程不会增加总资源。单轮规格扫描用于观察趋势，不能证明统计显著性。</p>
+      <div class="controls"><label>接口<select id="worker-operation"><option value="put">PUT</option><option value="get">GET 命中</option><option value="exist_hit">EXIST 命中</option><option value="exist_miss">EXIST 未命中</option></select></label></div>
+      <div class="chart-grid"><figure><div id="worker-throughput" class="chart"></div><figcaption>图 5. 固定总预算的 worker 吞吐扫描；每点的 n、规格和版本见提示。</figcaption></figure><figure><div id="worker-latency" class="chart"></div><figcaption>图 6. 同一组 worker 规格对应的完整调用 P99；缺失点不连接。</figcaption></figure></div>
+      <div id="worker-quality" class="warning-note" hidden></div>
+    </section>
+    <section id="clients">
+      <div class="kicker">03 / CLIENT SCALING · CONCURRENCY</div><h2>从 1 到 32 clients，识别吞吐平台</h2>
+      <p class="note">单逻辑节点，B=1，clients 为 1 / 2 / 4 / 8 / 16 / 32。客户端总 CPU 预算固定，实际平均使用核数与服务端负载同时记录；并发数不等于新增 CPU 核。</p>
+      <div class="controls"><label>接口<select id="client-operation"><option value="put">PUT</option><option value="get">GET 命中</option><option value="exist_hit">EXIST 命中</option><option value="exist_miss">EXIST 未命中</option></select></label></div>
+      <div class="chart-grid"><figure><div id="client-throughput" class="chart"></div><figcaption>图 7. 固定客户端总预算的并发扫描；单轮扫描不作统计显著性结论。</figcaption></figure><figure><div id="client-latency" class="chart"></div><figcaption>图 8. 并发增长对应的 P99 桶上界；需结合实际客户端 CPU 判断负载是否受限。</figcaption></figure></div>
+      <div id="client-quality" class="warning-note" hidden></div>
+    </section>
+    <section id="metadata">
+      <div class="kicker">04 / CENTRAL QUOTA SENSITIVITY · EXIST</div><h2>用配额敏感性验证中心路径</h2>
+      <p class="note">单逻辑节点，workers × 中心 CPU 配额 1 / 2 / 4 核，B=1，仅扫描 EXIST。吞吐平台、中心配额利用率和配额变化的影响需共同验证；不能仅凭曲线拐点宣称瓶颈。</p>
+      <div class="explanation-grid"><div><strong>DataSystem · Coordinator</strong><p>Coordinator 负责集群协调；KV 元数据由 workers 承载。这里的中心 CPU 不是 worker 元数据处理 CPU。</p></div><div><strong>Mooncake · 单 Master</strong><p>增加 workers 是增加 store peers；本实验未将单 Master 的元数据按 workers 分片。</p></div></div>
+      <div class="controls"><label>接口<select id="metadata-operation"><option value="exist_hit">EXIST 命中</option><option value="exist_miss">EXIST 未命中</option></select></label><label>产品<select id="metadata-product"><option value="all">两个产品</option><option value="datasystem">DataSystem</option><option value="mooncake">Mooncake</option></select></label></div>
+      <figure><div id="metadata-throughput" class="chart wide-chart"></div><figcaption>图 9. workers 与中心 CPU 配额交叉扫描的吞吐；保持预算、版本与负载分组。</figcaption></figure>
+      <figure><div id="metadata-resources" class="chart wide-chart"></div><figcaption>图 10. 实线为中心平均使用核数 ÷ 中心 CPU 配额（左轴），虚线为窗口内节流总量（右轴，ms）；窗口长度不同不直接比较节流总量。</figcaption></figure>
+      <p class="note">中心 CPU 配额来自子 cgroup 的 cpu.max，中心继承服务端 cpuset，并非独占物理核；限额计入服务端总预算。利用率略高于 100% 时保留观测值，不截断。</p>
+      <div id="metadata-quality" class="warning-note" hidden></div>
+    </section>
+    <section id="nodes">
+      <div class="kicker">05 / LOGICAL NODES · SAME PHYSICAL HOST</div><h2>固定 4 workers，改变逻辑节点划分</h2>
+      <p class="note">比较 1 / 2 / 4 个同机逻辑节点，总 workers 固定为 4，共享相同服务端总预算。N=1 取第 2 章 worker_scaling 的 W=4 实测点；N=2 / 4 分别读取独立运行。各组按 loopback / host ID 区分，没有跨物理机网络结论。</p>
+      <div class="controls"><label>接口<select id="node-operation"><option value="put">PUT</option><option value="get">GET 命中</option><option value="exist_hit">EXIST 命中</option><option value="exist_miss">EXIST 未命中</option></select></label></div>
+      <div class="chart-grid"><figure><div id="node-throughput" class="chart"></div><figcaption>图 11. 同机逻辑节点划分与吞吐；N=1 复用 W=4 点，不作为另一轮测量。</figcaption></figure><figure><div id="node-latency" class="chart"></div><figcaption>图 12. 固定总 workers / 总预算的 P99；未通过的来源运行保留空值。</figcaption></figure></div>
+      <div id="node-quality" class="warning-note" hidden></div>
+    </section>
+    <section id="acceptance">
+      <div class="kicker">06 / ACCEPTANCE · VERSIONS · REPRODUCIBILITY</div><h2>让每个数据点回到原始证据</h2>
+      <p class="note">总体状态、原生完成矩阵、离线逐项审计与绘图门禁分别展示。进行中的运行不判作终态缺失；失败、缺失、重复和无效项不补零，不由部分成功记录生成中位数。</p>
+      <div class="table-scroll" tabindex="0" aria-label="运行验收表，可在表格内横向滚动"><table class="acceptance-table"><thead><tr><th>实验组 / 任务</th><th>验收</th><th>预期 / 原生完成</th><th>缺失 / 重复 / 意外 / 无效</th><th>逐项审计</th><th>实测窗口合计</th><th>原件</th></tr></thead><tbody id="run-rows"></tbody></table></div>
+      <div id="step-records" class="step-records"></div>
+      <div id="observability"></div>
+      <h3>构建版本与安装源码身份</h3><p class="note">Tag 仅在受保护目录中对应 SHA 与本次构建 SHA 完全一致时显示；安装源码声明 SHA 经独立审计核对，此处不宣称重新编译了产品。各任务的源码包是与该任务绑定的原件。</p>
+      <div class="table-scroll" tabindex="0" aria-label="构建身份表"><table class="version-table"><thead><tr><th>产品</th><th>目录 Tag</th><th>构建提交 SHA</th><th>安装源码 SHA256</th></tr></thead><tbody id="version-rows"></tbody></table></div>
+      <details><summary>全部统计组、资源数据与绘图资格</summary><div class="table-scroll" tabindex="0" aria-label="全部统计组，可在表格内横向滚动"><table class="summary-table"><thead><tr><th>来源 / 产品 / 接口</th><th>负载与拓扑</th><th>CPU / 内存预算</th><th>观测数 / 资格</th><th>keys/s 中位数 [min, max]</th><th>P99 μs 中位数 [min, max]</th><th>平均 CPU / 核<br>服务端 / 客户端 / 中心</th><th>中心节流 / ms</th><th>服务端采样计费内存峰值 / GiB</th><th>质量标记</th></tr></thead><tbody id="summary-rows"></tbody></table></div></details>
+      <p class="note">CPU 为测量窗口平均使用核数；服务端包含中心组件。内存为服务端 cgroup 采样 memory.current 峰值，含页缓存。PUT 为有界 fresh 插入；short_window 与 low_sample_p99 会随统计组保留。</p>
+      <div class="document-grid"><a href="/site-api/kvc-lab/ui/guide.html"><span>实验与模块</span><strong>脚本设计、具体步骤与运行记录 ↗</strong></a><a href="/site-api/kvc-lab/ui/docs/"><span>构建与验收</span><strong>构建配置、用例设计与独立审计文档 ↗</strong></a><a href="/site-api/kvc-lab/source/source.tar.gz"><span>当前安装包</span><strong>控制台、测量脚本与 RFC 源码包 ↗</strong></a><a href="/site-api/kvc-lab/source/source.json"><span>身份清单</span><strong>当前源码包 SHA 与逐文件 SHA ↗</strong></a></div>
+      <div class="audit-identity"><a href="data/study.json">下载本页独立审计 JSON ↗</a><span id="audit-identity"></span></div>
+    </section>
+    <footer>同物理机 CPU / TCP 实验 · 不推论跨机、GPU / RDMA、故障恢复或未测量的产品配置。</footer>
+  </main>
+</div>
+</body>
+</html>

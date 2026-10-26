@@ -66,9 +66,16 @@ def main():
     parser.add_argument('--native-root', required=True)
     parser.add_argument('--catalog', required=True)
     parser.add_argument('--evidence', required=True)
+    parser.add_argument('--study-dir', help='Frozen accepted report data directory; contains only study.json/audit.json/observability.json/study-manifest.json')
     args = parser.parse_args()
     started = time.monotonic()
     root = Path(__file__).resolve().parents[1]
+    study = None
+    if args.study_dir:
+        import sys
+        sys.path.insert(0, str(root))
+        from validation.build_study import validate_directory
+        study = validate_directory(args.study_dir).resolve(strict=True)
     evidence = Path(args.evidence)
     evidence.mkdir(parents=True, exist_ok=False)
     code_root, fair_root = '/opt/kvc-lab-20261026', '/opt/kvc-fair-20261026'
@@ -91,6 +98,69 @@ if p.exists():
     from render_docs import render
     render(evidence / 'docs')
     hashes['docs'] = transfer(args.site, evidence / 'docs', code_root + '/web/docs', evidence, 'docs-code')
+    hashes['vendor'] = transfer(args.site, root.parent / 'kvc-fair/kvcbench/report/assets', code_root + '/web/vendor', evidence, 'vendor-code')
+    if study is not None:
+        snapshot = evidence / 'study-snapshot'
+        snapshot.mkdir(mode=0o700)
+        for path in sorted(study.iterdir()):
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('Frozen report source changed before transfer')
+            (snapshot / path.name).write_bytes(path.read_bytes())
+        validate_directory(snapshot)
+        manifest = (snapshot / 'study-manifest.json').read_bytes()
+        transaction = os.urandom(12).hex()
+        staging = code_root + '/.study-stage-' + transaction
+        remote(args.site, "import json,sys;from pathlib import Path;Path(json.load(sys.stdin)).mkdir(mode=0o700)", staging)
+        hashes['study'] = transfer(args.site, snapshot, staging, evidence, 'study-data')
+        published = remote(args.site, """import ctypes,hashlib,json,os,sys;from pathlib import Path
+x=json.load(sys.stdin);stage=Path(x['stage']);destination=Path(x['destination']);backups=Path(x['backups'])
+expected=x['files'];names=set(expected)|{'study-manifest.json'}
+def verify(directory):
+ if directory.is_symlink() or not directory.is_dir() or {p.name for p in directory.iterdir()}!=names:raise ValueError('Report directory file set mismatch')
+ for path in directory.iterdir():
+  if path.is_symlink() or not path.is_file():raise ValueError('Report entry must be a regular file')
+  content=path.read_bytes();actual={'sha256':hashlib.sha256(content).hexdigest(),'size':len(content)}
+  if path.name=='study-manifest.json':
+   if actual!=x['manifest']:raise ValueError('Report manifest identity mismatch')
+  elif actual!=expected[path.name]:raise ValueError('Report file identity mismatch: '+path.name)
+verify(stage)
+if destination.is_symlink() or destination.exists() and not destination.is_dir():raise ValueError('Existing report destination is not a real directory')
+if backups.is_symlink():raise ValueError('Report backup directory cannot be a symlink')
+backups.mkdir(mode=0o700,parents=True,exist_ok=True);os.chmod(backups,0o700)
+if stage.stat().st_dev!=destination.parent.stat().st_dev or backups.stat().st_dev!=stage.stat().st_dev:raise ValueError('Atomic report replacement requires a single filesystem')
+backup=backups/x['transaction'];receipt=backups/(x['transaction']+'.json')
+if backup.exists() or receipt.exists():raise ValueError('Report transaction identity already exists')
+had_old=destination.exists();switched=False;old_location=stage
+exchange=None
+if had_old:
+ exchange=getattr(ctypes.CDLL(None,use_errno=True),'renameat2',None)
+ if exchange is None:raise RuntimeError('Atomic report directory exchange is unavailable')
+ exchange.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint];exchange.restype=ctypes.c_int
+def swap(left,right):
+ if exchange(-100,os.fsencode(left),-100,os.fsencode(right),2)!=0:raise OSError(ctypes.get_errno(),'Atomic report directory exchange failed')
+try:
+ for path in stage.iterdir():os.chmod(path,0o644)
+ os.chmod(stage,0o755)
+ if had_old:swap(stage,destination)
+ else:os.replace(stage,destination)
+ switched=True;verify(destination)
+ if had_old:
+  os.replace(stage,backup);old_location=backup
+ result={'installed':True,'directory':str(destination),'previous_backup':str(backup)if had_old else None,'manifest_sha256':x['manifest']['sha256'],'file_count':len(names),'atomic_exchange':had_old}
+ temporary=receipt.with_suffix('.tmp');temporary.write_text(json.dumps(result,indent=2)+'\\n');os.chmod(temporary,0o600);os.replace(temporary,receipt)
+except Exception as error:
+ if switched:
+  try:
+   if had_old:swap(destination,old_location)
+   else:os.replace(destination,stage)
+  except Exception as rollback:raise RuntimeError('Report publish failed and rollback requires manual recovery: '+str(destination)+' / '+str(old_location))from rollback
+ if stage.is_dir():os.chmod(stage,0o700)
+ raise RuntimeError('Report publish failed; previous directory restored; staged data retained')from error
+print(json.dumps(result))
+""", dict(stage=staging, destination=code_root + '/web/data', backups=code_root + '/.study-backups',
+          transaction=transaction, files=json.loads(manifest)['files'],
+          manifest=dict(sha256=hashlib.sha256(manifest).hexdigest(), size=len(manifest))))
+        (evidence / 'study-deploy-result.json').write_text(json.dumps(published, indent=2) + '\n')
     hashes['fair_code'] = transfer(args.target, root.parent / 'kvc-fair', fair_root, evidence, 'fair-code')
     remote(args.site, "from pathlib import Path;Path('/var/lib/kvc-lab/sources').mkdir(mode=0o700,parents=True,exist_ok=True)")
     for suffix in ['.tar.gz', '.json']:

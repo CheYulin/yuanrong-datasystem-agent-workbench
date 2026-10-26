@@ -20,7 +20,7 @@ class LabService:
     def catalog(self, user):
         return {**spec.catalog(), 'user': 'yche.me 管理账户', 'deployment_scope': '单物理机、顺序运行产品',
                 'guide_url': '/site-api/kvc-lab/ui/guide.html',
-                'links': [{'title': '构建与用例设计文档网页', 'url': '/site-api/kvc-lab/ui/docs/'}, {'title': '安装源码包', 'url': '/site-api/kvc-lab/source/source.tar.gz'},
+                'links': [{'title': '同机基础性能与扩展实验报告', 'url': '/site-api/kvc-lab/ui/study.html'}, {'title': '构建与用例设计文档网页', 'url': '/site-api/kvc-lab/ui/docs/'}, {'title': '安装源码包', 'url': '/site-api/kvc-lab/source/source.tar.gz'},
                           {'title': '源码包SHA与文件清单', 'url': '/site-api/kvc-lab/source/source.json'}]}
 
     def preview_plan(self, config):

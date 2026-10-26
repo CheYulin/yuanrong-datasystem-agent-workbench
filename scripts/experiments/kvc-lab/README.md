@@ -12,3 +12,5 @@
 安装前在调用机安装 `deploy/requirements.txt`。`deploy/install.py` 将当前脚本、原生测量依赖和 RFC 归档为 SHA256 固定的源码包，记录阶段耗时并安装私有路由；本地 RFC 经现有 `kvc-fair` 文档阅读器生成可跳转网页。
 
 `acceptance.py` 对照完整计划验收结果，终态缺失项由服务端显式补为 missing/null；原生实际结果仍单独保留。`artifacts.py` 在终态封存资源采样与命令清单，大型采样压缩后提供登录下载。页面默认5秒是功能预跑，正式性能结论须注明实际窗口、重复数和 PUT 有界插入范围。
+
+正式实验配置在 `configs/`。离线证据链依次使用 `validation/freeze_evidence.py` 收集终态最小原件、`audit_study_004.py` 审核原生矩阵/直方图/资源、`audit_observability.py` 复核采样区间IO、`build_study.py` 绑定已通过的六组结果并生成私有研究页数据。各CLI的输入/输出与失败边界见RFC03；`deploy/install.py --study-dir <frozen-report>` 发布报告，`web/study.html` 使用受保护ECharts并且只读取数据。原件与生成报告数据留在仓库外。

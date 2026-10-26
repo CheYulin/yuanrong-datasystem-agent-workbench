@@ -202,6 +202,7 @@ class SiteApiTests(unittest.TestCase):
         response = self.client.get(PREFIX + "/guide.html", follow_redirects=True)
         self.assertIn(b"PRIVATE-GUIDE", response.data)
         self.assertEqual(200, response.status_code)
+        response.close()
 
     def test_head_requests_still_require_authentication(self):
         self.assertEqual(401, self.client.head(PREFIX + "/ui/app.js").status_code)

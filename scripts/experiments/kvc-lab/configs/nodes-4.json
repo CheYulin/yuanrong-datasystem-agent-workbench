@@ -1,0 +1,28 @@
+{
+  "profile": "baseline",
+  "nodes": 4,
+  "workers_per_node": 1,
+  "clients": 8,
+  "server_cpus": 8,
+  "client_cpus": 8,
+  "master_cpus": 2,
+  "memory_gib": 16,
+  "products": [
+    "datasystem",
+    "mooncake"
+  ],
+  "batches": [
+    1
+  ],
+  "value_sizes": [
+    1024
+  ],
+  "operations": [
+    "put",
+    "get",
+    "exist_hit",
+    "exist_miss"
+  ],
+  "duration_s": 10,
+  "repeats": 1
+}
