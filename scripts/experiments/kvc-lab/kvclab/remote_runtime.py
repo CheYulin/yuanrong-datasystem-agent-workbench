@@ -189,6 +189,7 @@ class Engine:
             ports.append((host, (32531 if product == "datasystem" else 29001) + index))
         for host, port in ports:
             with socket.socket() as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind((host, port))
         if product == "datasystem":
             self.start_datasystem(directory, group)
