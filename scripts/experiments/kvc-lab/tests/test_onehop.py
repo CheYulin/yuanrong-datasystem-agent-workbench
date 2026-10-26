@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from kvclab.onehop import (
-    CHANNEL, CLIENT_GUARDS, CLIENT_MULTI, EXPECTED, ISSUE, META_SYMBOLS, WORKER_MULTI,
+    CHANNEL, CLIENT_GUARDS, CLIENT_MULTI, CLIENT_SYMBOLS, EXPECTED, ISSUE, META_SYMBOLS,
+    WORKER_GUARDS, WORKER_MULTI,
     _stop_child, assess, client_main, parse_counts, probe_program, require_symbols, verify_one_hop,
 )
 
@@ -39,6 +40,22 @@ class OneHopTests(unittest.TestCase):
             counts[name] = 0
             self.assertFalse(assess(counts, self.valid_client(), 0, True, True)["verified"])
 
+    def test_same_host_shm_probe_then_inline_publish_remains_two_rpcs_and_fails(self):
+        counts = dict(EXPECTED)
+        counts.update(client_multicreate=1, client_multicreate_channel=1, client_multicreate_issue=1,
+                      worker_multicreate=1, channel=2, issue=2)
+        result = assess(counts, self.valid_client(), 0, True, True)
+        self.assertFalse(result["verified"])
+        self.assertTrue(result["checks"]["attributed_call_totals_consistent"])
+        self.assertFalse(result["checks"]["exact_rpc_and_metadata_counts"])
+
+    def test_missing_or_unattributed_create_request_cannot_be_hidden_in_publish_total(self):
+        counts = dict(EXPECTED)
+        counts.update(client_multicreate=1, client_multicreate_channel=1, client_multicreate_issue=1)
+        result = assess(counts, self.valid_client(), 0, True, True)
+        self.assertFalse(result["verified"])
+        self.assertFalse(result["checks"]["attributed_call_totals_consistent"])
+
     def test_missing_ready_end_or_clean_exit_fails(self):
         for code, ready, ended in ((1, True, True), (0, False, True), (0, True, False)):
             self.assertFalse(assess(dict(EXPECTED), self.valid_client(), code, ready, ended)["verified"])
@@ -59,15 +76,21 @@ class OneHopTests(unittest.TestCase):
     def test_program_uses_exact_symbols_and_pid_filters(self):
         workers = [{"pid": 101, "library": "/safe/worker.so"}, {"pid": 102, "library": "/safe/worker.so"}]
         program = probe_program(201, "/safe/client.so", "/safe/brpc.so", workers, "a" * 32)
-        for symbol in (CLIENT_MULTI, CHANNEL, ISSUE, WORKER_MULTI, *META_SYMBOLS.values(), *CLIENT_GUARDS.values()):
+        for symbol in (CLIENT_MULTI, CHANNEL, ISSUE, WORKER_MULTI, *META_SYMBOLS.values(),
+                       *CLIENT_GUARDS.values(), *WORKER_GUARDS.values()):
             self.assertIn(symbol, program)
         self.assertIn("pid == 101 && @active", program)
         self.assertIn("pid == 102 && @active", program)
-        self.assertIn("@controllers[pid,arg2] = 1", program)
+        self.assertIn("@controllers[pid,arg2] = $kind", program)
         self.assertIn("@controllers[pid,arg0]", program)
         self.assertIn('print(@counts); clear(@counts)', program)
         self.assertNotIn("CreateMeta*", program)
         self.assertNotIn(".cold", program)
+        self.assertNotIn("@active = 0", program)
+        self.assertIn("delete(@controllers[pid,@current_controller[pid,tid]])", program)
+        for name in CLIENT_SYMBOLS:
+            self.assertIn(f'@counts["{name}_channel"] = sum(1)', program)
+            self.assertIn(f'@counts["{name}_issue"] = sum(1)', program)
 
     def test_program_rejects_injected_probe_paths_or_pids(self):
         for client, library, workers, nonce in (

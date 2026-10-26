@@ -34,11 +34,21 @@ CLIENT_GUARDS = {
     "client_multicreate": "_ZN10datasystem24WorkerOCService_BrpcStub11MultiCreateERKNS_10RpcOptionsERKNS_16MultiCreateReqPbERNS_16MultiCreateRspPbE",
     "client_publish": "_ZN10datasystem24WorkerOCService_BrpcStub7PublishERKNS_10RpcOptionsERKNS_12PublishReqPbERNS_12PublishRspPbERKSt6vectorINS_7MemViewESaISA_EE",
 }
+CLIENT_SYMBOLS = {"client_multi": CLIENT_MULTI, **CLIENT_GUARDS}
+WORKER_GUARDS = {
+    "worker_create": "_ZN10datasystem12object_cache19WorkerOCServiceImpl6CreateERKNS_11CreateReqPbERNS_11CreateRspPbE",
+    "worker_multicreate": "_ZN10datasystem12object_cache19WorkerOCServiceImpl11MultiCreateERKNS_16MultiCreateReqPbERNS_16MultiCreateRspPbE",
+    "worker_publish": "_ZN10datasystem12object_cache19WorkerOCServiceImpl7PublishERKNS_12PublishReqPbERNS_12PublishRspPbESt6vectorINS_10RpcMessageESaIS8_EE",
+}
 EXPECTED = dict(
     client_multi=1, channel=1, issue=1, worker_multi=1, local_multi=1,
     local_create=0, local_update=0, remote_create=0, remote_update=0, remote_multi=0,
     client_create=0, client_multicreate=0, client_publish=0,
+    worker_create=0, worker_multicreate=0, worker_publish=0,
 )
+for _method in CLIENT_SYMBOLS:
+    EXPECTED[_method + "_channel"] = int(_method == "client_multi")
+    EXPECTED[_method + "_issue"] = int(_method == "client_multi")
 
 
 def parse_counts(text):
@@ -59,6 +69,9 @@ def assess(counts, client, probe_returncode, ready, ended):
         "all_counters_present": set(counts) == set(EXPECTED)
                                 and all(type(value) is int and value >= 0 for value in counts.values()),
         "exact_rpc_and_metadata_counts": counts == EXPECTED,
+        "attributed_call_totals_consistent": counts.get("channel") == sum(
+            counts.get(name + "_channel", 0) for name in CLIENT_SYMBOLS
+        ) and counts.get("issue") == sum(counts.get(name + "_issue", 0) for name in CLIENT_SYMBOLS),
         "native_mset_once": client.get("put_calls") == 1 and client.get("native_api") == "mset"
                             and client.get("batch_size") == 1,
         "exact_value_readback": client.get("valid") is True and client.get("read_matches") is True,
@@ -105,25 +118,34 @@ def probe_program(client_pid, client_lib, brpc_lib, workers, nonce):
             raise ValueError("Unsafe probe path")
     lines = ["BEGIN {", *[f' @counts["{name}"] = sum(0);' for name in EXPECTED],
              f' printf("KVC_ONEHOP_ATTACHED {nonce}\\n");', "}"]
+    for kind, (name, symbol) in enumerate(CLIENT_SYMBOLS.items(), 1):
+        lines += [
+            f"uprobe:{client_lib}:{symbol} /pid == {client_pid}/ {{",
+            f' @counts["{name}"] = sum(1); @active = 1; @pending[pid,tid] = {kind};', "}",
+            f"uretprobe:{client_lib}:{symbol} /pid == {client_pid}/ {{",
+            " delete(@controllers[pid,@current_controller[pid,tid]]);",
+            " delete(@current_controller[pid,tid]); delete(@pending[pid,tid]);", "}",
+        ]
     lines += [
-        f"uprobe:{client_lib}:{CLIENT_MULTI} /pid == {client_pid}/ {{",
-        ' @counts["client_multi"] = sum(1); @active = 1; @pending[pid,tid] = 1;', "}",
-        f"uretprobe:{client_lib}:{CLIENT_MULTI} /pid == {client_pid}/ {{ @active = 0; delete(@pending[pid,tid]); }}",
         f"uprobe:{brpc_lib}:{CHANNEL} /pid == {client_pid} && @active && @pending[pid,tid]/ {{",
-        ' @counts["channel"] = sum(1); @controllers[pid,arg2] = 1; delete(@pending[pid,tid]);', "}",
+        ' $kind = @pending[pid,tid]; @counts["channel"] = sum(1);',
+        " @controllers[pid,arg2] = $kind; @current_controller[pid,tid] = arg2; delete(@pending[pid,tid]);",
+        *[f' if ($kind == {kind}) {{ @counts["{name}_channel"] = sum(1); }}'
+          for kind, name in enumerate(CLIENT_SYMBOLS, 1)], "}",
         f"uprobe:{brpc_lib}:{ISSUE} /pid == {client_pid} && @active && @controllers[pid,arg0]/ {{",
-        ' @counts["issue"] = sum(1);', "}",
+        ' $kind = @controllers[pid,arg0]; @counts["issue"] = sum(1);',
+        *[f' if ($kind == {kind}) {{ @counts["{name}_issue"] = sum(1); }}'
+          for kind, name in enumerate(CLIENT_SYMBOLS, 1)], "}",
     ]
-    for name, symbol in CLIENT_GUARDS.items():
-        lines.append(f'uprobe:{client_lib}:{symbol} /pid == {client_pid}/ {{ @counts["{name}"] = sum(1); }}')
     for worker in workers:
         pid, library = worker["pid"], worker["library"]
         if type(pid) is not int or pid <= 0:
             raise ValueError("Invalid worker PID")
-        entries = {"worker_multi": WORKER_MULTI, **META_SYMBOLS}
+        entries = {"worker_multi": WORKER_MULTI, **WORKER_GUARDS, **META_SYMBOLS}
         for name, symbol in entries.items():
             lines.append(f'uprobe:{library}:{symbol} /pid == {pid} && @active/ {{ @counts["{name}"] = sum(1); }}')
     lines += ["END {", " print(@counts); clear(@counts); clear(@active); clear(@pending); clear(@controllers);",
+              " clear(@current_controller);",
               f' printf("KVC_ONEHOP_ENDED {nonce}\\n");', "}"]
     return "\n".join(lines) + "\n"
 
@@ -155,7 +177,7 @@ def verify_one_hop(settings, deployment, adapter_config_path, out_dir):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
-    result = {"schema_version": 1, "verified": False, "status": "not_verified",
+    result = {"schema_version": 2, "verified": False, "status": "not_verified",
               "scope": "one fresh-key native B1 MSet, exact readback, no performance samples",
               "expected_counts": EXPECTED, "commands": [], "cleanup": [], "raw_counts": {}}
     children = []
@@ -184,7 +206,7 @@ def verify_one_hop(settings, deployment, adapter_config_path, out_dir):
             if ticks(pid) != identity["start_ticks"] or not member(pid, group / "server/workers"):
                 raise RuntimeError("Owned worker is not live in its recorded domain")
             library = mapped_library(pid, "libdatasystem_worker.so")
-            binaries.append(require_symbols(library, [WORKER_MULTI, *META_SYMBOLS.values()]))
+            binaries.append(require_symbols(library, [WORKER_MULTI, *WORKER_GUARDS.values(), *META_SYMBOLS.values()]))
             workers.append({"pid": pid, "start_ticks": identity["start_ticks"], "library": library})
         if not workers or len(workers) != deployment.get("workers") or len({worker["pid"] for worker in workers}) != len(workers):
             raise ValueError("Every deployed worker must have a unique owned live PID")
@@ -240,6 +262,15 @@ def verify_one_hop(settings, deployment, adapter_config_path, out_dir):
         result["cleanup"].append(_stop_child(probe, probe_identity, group / "monitor", True))
         raw = probe_log.read_text(errors="replace")
         result["raw_counts"] = parse_counts(raw)
+        result["rpc_breakdown"] = {
+            name: {"stub_calls": result["raw_counts"][name],
+                   "channel_calls": result["raw_counts"][name + "_channel"],
+                   "issued_attempts": result["raw_counts"][name + "_issue"]}
+            for name in CLIENT_SYMBOLS
+        }
+        result["observed_rpc_calls"] = result["raw_counts"]["channel"]
+        result["observed_rpc_attempts"] = result["raw_counts"]["issue"]
+        result["rpc_count_scope"] = "All Create/MultiCreate/Publish/MultiPublish write RPCs after SDK init; heartbeat RPCs excluded by exact methods and Controller identity"
         client.stdin.write(b"verify\n")
         client.stdin.flush()
         client.stdin.close()

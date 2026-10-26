@@ -4,7 +4,7 @@ import os
 
 class Adapter:
     def __init__(self, config):
-        from yr.datasystem import KVClient
+        from yr.datasystem import KVClient, CoordinatorServiceDiscovery, CoordinatorServiceDiscoveryOptions, ServiceAffinityPolicy
         from yr.datasystem.kv_client import DataPlacementPolicy
         from yr.datasystem.object_client import WriteMode
 
@@ -13,14 +13,21 @@ class Adapter:
         self.size = int(config["value_size"])
         self.mode = WriteMode.NONE_L2_CACHE
         os.environ["DATASYSTEM_CLIENT_LOG_DIR"] = config["log_dir"]
-        self.client = KVClient(host=host, port=int(port), enable_local_cache=False,
+        options = CoordinatorServiceDiscoveryOptions()
+        options.service_address = config.get("coordinator_address", "127.0.0.1:32511")
+        options.cluster_name = "kvc-lab"
+        options.host_id_env_name = ""
+        options.affinity_policy = ServiceAffinityPolicy.RANDOM
+        self.discovery = CoordinatorServiceDiscovery(options)
+        self.discovery.init()
+        self.client = KVClient(host=host, port=int(port), service_discovery=self.discovery, enable_local_cache=False,
                                enable_cross_node_connection=False,
                                data_placement_policy=DataPlacementPolicy.PREFERRED_META_OWNER,
                                connect_timeout_ms=10000, req_timeout_ms=10000,
                                fast_transport_mem_size=16 << 20)
         self.client.init()
         self.metadata = {"product": "datasystem", "native_batch": True,
-                         "data_placement_policy": "PREFERRED_META_OWNER", "enable_local_cache": False,
+                         "data_placement_policy": "PREFERRED_META_OWNER", "enable_local_cache": False, "sdk_host_id": "", "discovery_affinity": "RANDOM", "transport_selection": "empty-host discovery excludes SHM candidates; verified separately",
                          "write_mode": "NONE_L2_CACHE", "sdk_calls_per_batch": 1,
                          "native_api": {"put": "mset", "get": "get", "exist": "exist"},
                          "one_hop_verified": False,
@@ -54,6 +61,7 @@ class Adapter:
 
     def close(self):
         self.client = None
+        self.discovery = None
 
 
 def new_adapter(config):

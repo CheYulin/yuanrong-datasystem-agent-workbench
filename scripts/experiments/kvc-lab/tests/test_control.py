@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import hashlib
+import base64
 from kvclab import spec
 from kvclab.controller import Controller
 from kvclab.service import LabService
@@ -37,6 +40,17 @@ class Plans(unittest.TestCase):
         self.assertEqual(spec.DEFAULTS['products'], ['datasystem', 'mooncake'])
         with self.assertRaises(ValueError):
             spec.preview_plan({'profile': 'metadata_scaling', 'batches': [1, 16, 256, 4096], 'repeats': 3})
+
+class NativeResultShape(unittest.TestCase):
+    def test_real_histogram_bound_contract_is_numeric_and_missing_stays_missing(self):
+        from kvclab.remote_runtime import latency_us, workload_sizes
+        self.assertEqual(latency_us({'p99': {'lower_us': 122.88, 'upper_us': 124.928}}, 'p99'), 124.928)
+        self.assertIsNone(latency_us({'p99': None}, 'p99'))
+        self.assertIsNone(latency_us({'p99': {'upper_us': float('nan')}}, 'p99'))
+        pool, puts = workload_sizes(spec.validate({}), 1024)
+        self.assertGreaterEqual(pool, 32768)
+        self.assertGreaterEqual(puts[1], 262144)
+
 
 class Jobs(unittest.TestCase):
     def setUp(self):
@@ -87,6 +101,42 @@ class Jobs(unittest.TestCase):
         self.assertTrue(all(json.loads(p.read_text())['id'] == job['id'] for p in paths))
         with self.assertRaises(FileNotFoundError):
             service.get_artifact('owner', job['id'], '../../settings.json')
+
+    def test_stop_remains_available_with_full_queue(self):
+        for i in range(12):
+            self.submit('full-queue-' + str(i))
+        with self.assertRaises(Conflict):
+            self.submit('overflow-key')
+        stopped = self.store.submit('owner', 'stop', self.plan['config'], self.plan, 'stop-full-queue')
+        self.assertEqual(self.store.claim()['id'], stopped)
+        self.assertEqual(sum(j['status'] == 'cancelled' for j in self.store.recent('owner')), 12)
+
+    def test_cleanup_gate_blocks_runs_until_owned_stop_accepted(self):
+        job = self.submit()
+        self.store.cleanup_required(True)
+        self.assertIsNone(self.store.claim())
+        cleanup = self.store.submit('owner', 'stop', self.plan['config'], self.plan, 'recover-owner')
+        self.assertEqual(self.store.claim()['id'], cleanup)
+        self.store.finish(cleanup, 'failed')
+        self.assertTrue(self.store.cleanup_required())
+        self.assertIsNone(self.store.claim())
+
+    def test_deployment_wrapper_normalized_and_remote_artifact_is_verified(self):
+        service = LabService({'state_root': self.directory.name, 'csrf_secret': 'x' * 32})
+        job = service.create_job('owner', 'run', {}, 'artifact-key')
+        service.store.event(job['id'], {'kind': 'deployment', 'deployment': {'active': True, 'product': 'datasystem'}})
+        self.assertTrue(service.store.deployment()['active'])
+        service.store.event(job['id'], {'kind': 'step', 'name': 'qualify', 'artifact': 'stage/result.json'})
+        rendered = service.get_job('owner', job['id'])
+        name = rendered['steps'][0]['artifact_url'].split('/')[-1]
+        payload = b'{"valid":true}'
+        response = {'size': len(payload), 'sha256': hashlib.sha256(payload).hexdigest(), 'data': base64.b64encode(payload).decode()}
+        with patch('kvclab.transport.rpc', return_value=response) as rpc:
+            path, _ = service.get_artifact('owner', job['id'], name)
+            self.assertEqual(path.read_bytes(), payload)
+            self.assertEqual(rpc.call_args.args[2]['name'], 'stage/result.json')
+        with patch('kvclab.transport.rpc', return_value={**response, 'sha256': '0' * 64}), self.assertRaises(RuntimeError):
+            service.get_artifact('owner', job['id'], name)
 
     def test_controller_command_cannot_take_request_code(self):
         settings = dict(state_root=self.directory.name, csrf_secret='x' * 32,

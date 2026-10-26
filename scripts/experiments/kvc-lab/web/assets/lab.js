@@ -37,7 +37,8 @@ function accessDenied(message, loginUrl) {
   $('access-title').textContent='请使用站点管理员账户登录'; $('access-message').textContent=message || '登录 yche.me 站点账户并通过管理员授权后，可读取部署状态、任务日志与性能结果。';
   $('login-link').href=safeLink(loginUrl) || `/login?next=${encodeURIComponent(location.pathname)}`;
   $('login-link').hidden=false; $('retry-auth').hidden=false;
-  ['presets','version-rows','job-overview','step-list','comparison-jobs','result-rows','catalog-links','run-records-list','plan-rows','plan-status','deployment-status','result-scope','case-summary','estimate-summary','client-summary','client-budget','worker-summary','server-budget'].forEach((id)=>$(id)?.replaceChildren());
+  ['presets','version-rows','job-overview','step-list','comparison-jobs','result-rows','catalog-links','run-records-list','plan-rows','plan-status','deployment-status','result-scope','result-quality','case-summary','estimate-summary','client-summary','client-budget','worker-summary','server-budget'].forEach((id)=>$(id)?.replaceChildren());
+  if($('result-quality'))$('result-quality').hidden=true;
   $('result-counts')?.querySelectorAll('strong').forEach(node=>{node.textContent='—';});
   if ($('job-logs')) $('job-logs').textContent='登录后可查看日志。';
   if ($('job-select')) $('job-select').replaceChildren(element('option','登录后可读取任务'));
@@ -242,6 +243,9 @@ function renderResults() {
   const filtered=all.filter(row=>row.operation===operation && (batch==='all' || Number(row.batch)===Number(batch)) && (size==='all' || Number(row.size)===Number(size)));
   const valid=filtered.filter(row=>successStatuses.has(row.status));
   $('result-scope').textContent=`已选择 ${app.selectedComparisons.size} 个任务。当前性能筛选：${filtered.length} 条记录，其中 ${valid.length} 条有效、${filtered.length-valid.length} 条状态未进入成功性能图。`;
+  const shortCount=all.filter(row=>row.short_window===true).length,lowSampleCount=all.filter(row=>row.low_sample_p99===true).length;
+  $('result-quality').hidden=shortCount===0&&lowSampleCount===0;
+  $('result-quality').textContent=`所选任务包含 ${shortCount} 条短测量窗口、${lowSampleCount} 条 P99 样本不足记录。标记始终保留在完整表的证据列；短窗口吞吐和低样本 P99 请结合实际时长、样本量判断。`;
   const groups=new Map(); const xValues=new Set();
   for (const row of valid) if (finite(row[axis]) && finite(row[metric])) { const key=groupLabel(row,axis); if (!groups.has(key)) groups.set(key,new Map()); const values=groups.get(key); if (!values.has(row[axis])) values.set(row[axis],[]); values.get(row[axis]).push(row[metric]); xValues.add(row[axis]); }
   const xs=Array.from(xValues).sort((a,b)=>a-b); const instance=chart('performance-chart');
@@ -253,7 +257,28 @@ function renderResults() {
   const scatter=chart('latency-chart');
   if (!scatterGroups.size) emptyChart('latency-chart','尚无同时包含吞吐与 P99 的有效记录');
   else if (scatter) scatter.setOption({...baseChart(),tooltip:{trigger:'item',confine:true,extraCssText:'max-width:260px;white-space:normal;overflow-wrap:anywhere',formatter:(params)=>`${escapeHtml(params.seriesName)}<br>keys/s: ${number(params.value[0])}<br>P99: ${number(params.value[1])} μs<br>${escapeHtml(params.value[2])} · 轮次 ${escapeHtml(params.value[4])}`},xAxis:{type:'value',name:'keys / 秒',nameLocation:'middle',nameGap:27,splitLine:{lineStyle:{color:'#edf1f6'}}},yAxis:{type:'value',name:'P99 / μs',splitLine:{lineStyle:{color:'#edf1f6'}}},series:Array.from(scatterGroups,([name,data])=>({name,type:'scatter',symbolSize:10,data,itemStyle:{opacity:.8}}))},true);
+  renderCenterResources(valid,axis);
   renderResultTable(all);
+}
+function renderCenterResources(rows,axis) {
+  const groups=new Map(),xValues=new Set();let hasValues=false;
+  for(const row of rows){
+    if(!finite(row[axis]))continue;
+    xValues.add(row[axis]);const key=groupLabel(row,axis);
+    if(!groups.has(key))groups.set(key,new Map());const group=groups.get(key);
+    if(!group.has(row[axis]))group.set(row[axis],{cpu:[],throttled:[]});const values=group.get(row[axis]);
+    if(finite(row.master_cpu_cores)&&finite(row.master_cpus)&&row.master_cpus>0){values.cpu.push(row.master_cpu_cores/row.master_cpus*100);hasValues=true;}
+    if(finite(row.master_throttled_usec)){values.throttled.push(row.master_throttled_usec/1000);hasValues=true;}
+  }
+  if(!hasValues){emptyChart('center-resource-chart','当前筛选尚无有效中心 CPU / 节流观测；缺失值不补零');return;}
+  const instance=chart('center-resource-chart');if(!instance){emptyChart('center-resource-chart','');return;}
+  const xs=Array.from(xValues).sort((a,b)=>a-b),series=[];
+  for(const [index,[name,values]]of Array.from(groups).entries()){
+    const color=colors[index%colors.length];
+    series.push({name:`CPU% · ${name}`,type:'line',yAxisIndex:0,connectNulls:false,symbolSize:7,itemStyle:{color},lineStyle:{color},data:xs.map(x=>values.get(x)?.cpu.length ? median(values.get(x).cpu) : null)});
+    series.push({name:`节流ms · ${name}`,type:'bar',yAxisIndex:1,barMaxWidth:25,itemStyle:{color,opacity:.28},data:xs.map(x=>values.get(x)?.throttled.length ? median(values.get(x).throttled) : null)});
+  }
+  instance.setOption({...baseChart(),grid:{left:48,right:52,top:40,bottom:70},xAxis:{type:'category',name:{clients:'Clients',workers:'Workers',nodes:'逻辑节点'}[axis],nameLocation:'middle',nameGap:27,data:xs,axisLine:{lineStyle:{color:'#cbd9e5'}},axisTick:{show:false}},yAxis:[{type:'value',name:'CPU利用 / %',min:0,splitLine:{lineStyle:{color:'#edf1f6'}}},{type:'value',name:'节流 / ms',min:0,splitLine:{show:false}}],series},true);
 }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
 function renderResultTable(rows) {
@@ -263,10 +288,16 @@ function renderResultTable(rows) {
     tr.append(element('td',`${row.job_id} / ${row.repeat ?? '—'}`),element('td',products[row.product] || row.product || '—'),element('td',`${row.nodes ?? '—'} / ${row.workers ?? '—'} / ${row.clients ?? '—'}`),element('td',`服务 ${row.server_cpus ?? '—'} / 客户端 ${row.client_cpus ?? '—'} / 中心 ${row.master_cpus ?? '—'} 核；${row.memory_gib ?? '—'} GiB`),element('td',operations[row.operation] || row.operation || '—'),element('td',`${row.batch ?? '—'} / ${row.size===undefined ? '—' : sizeLabel(row.size)}`));
     const status=element('td'); status.append(statusBadge(row.status || 'missing')); tr.append(status);
     const valid=successStatuses.has(row.status); tr.append(element('td',valid ? number(row.keys_s) : '—'),element('td',valid ? number(row.batch_qps) : '—'),element('td',valid ? number(row.p99_us) : '—'));
+    tr.append(element('td',number(row.server_cpu_cores,3)),element('td',number(row.client_cpu_cores,3)),element('td',number(row.master_cpu_cores,3)),element('td',finite(row.master_throttled_usec) ? number(row.master_throttled_usec/1000,3) : '—'),element('td',number(row.peak_charged_memory_gib,3)));
     const evidence=element('td'); if (row.message || row.error || row.reason) evidence.append(element('span',typeof(row.message || row.error || row.reason)==='string' ? (row.message || row.error || row.reason) : JSON.stringify(row.message || row.error || row.reason)));
+    const warnings=element('div',null,'evidence-warnings');
+    if(row.short_window===true)warnings.append(element('span',`short_window · 短窗口${finite(row.duration_s) ? ' '+duration(row.duration_s) : ''}`,'badge measurement_warning'));
+    if(row.low_sample_p99===true)warnings.append(element('span','low_sample_p99 · P99 样本不足','badge measurement_warning'));
+    if(warnings.children.length)evidence.append(warnings);
+    if(row.put_scope){const scope=element('p',String(row.put_scope).includes('bounded fresh insert') ? 'PUT 范围：有界 fresh 插入，非定时 upsert。' : `PUT 范围：${String(row.put_scope)}`,'put-scope');scope.title=String(row.put_scope);evidence.append(scope);}
     const links=element('div',null,'step-links'); addLink(links,'原始记录',row.raw_url || row.artifact_url || row.evidence_url); if (links.children.length) evidence.append(links); if (!evidence.textContent) evidence.textContent=valid ? '实际测量记录' : '原因尚未提供'; tr.append(evidence); tbody.append(tr);
   }
-  if (!rows.length) {const tr=element('tr');const td=element('td','尚无结果。页面不会预置性能数据。','empty');td.colSpan=11;tr.append(td);tbody.append(tr);}
+  if (!rows.length) {const tr=element('tr');const td=element('td','尚无结果。页面不会预置性能数据。','empty');td.colSpan=16;tr.append(td);tbody.append(tr);}
 }
 function uniqueKey() { if (crypto.randomUUID) return crypto.randomUUID(); const bytes=crypto.getRandomValues(new Uint8Array(16)); return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join(''); }
 function appendArtifactLinks(container,job) {

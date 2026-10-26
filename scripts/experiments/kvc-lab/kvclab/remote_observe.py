@@ -28,7 +28,7 @@ def sample(root):
 
 
 class Monitor:
-    def __init__(self, root, out, interval=.2):
+    def __init__(self, root, out, interval=.05):
         self.root, self.out, self.interval = Path(root), Path(out), interval
         self.stop_event = threading.Event()
         self.rows = []

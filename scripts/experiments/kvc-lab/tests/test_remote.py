@@ -154,6 +154,14 @@ class NativeAdapterTests(unittest.TestCase):
         kv = types.ModuleType("yr.datasystem.kv_client")
         obj = types.ModuleType("yr.datasystem.object_client")
         ds.KVClient = lambda **kwargs: client.capture(kwargs)
+        ds.CoordinatorServiceDiscoveryOptions = types.SimpleNamespace
+        ds.ServiceAffinityPolicy = types.SimpleNamespace(RANDOM=0)
+        class Discovery:
+            def __init__(self, options):
+                self.options = options
+            def init(self):
+                self.initialized = True
+        ds.CoordinatorServiceDiscovery = Discovery
         kv.DataPlacementPolicy = types.SimpleNamespace(PREFERRED_META_OWNER=2)
         obj.WriteMode = types.SimpleNamespace(NONE_L2_CACHE=0)
         with patch.dict("sys.modules", {"yr": yr, "yr.datasystem": ds, "yr.datasystem.kv_client": kv,
@@ -183,6 +191,10 @@ class NativeAdapterTests(unittest.TestCase):
         self.assertEqual(client.arguments["data_placement_policy"], 2)
         self.assertFalse(client.arguments["enable_local_cache"])
         self.assertEqual(client.arguments["host"], "127.70.2.1")
+        discovery = client.arguments['service_discovery']
+        self.assertTrue(discovery.initialized)
+        self.assertEqual(discovery.options.host_id_env_name, '')
+        self.assertEqual(discovery.options.affinity_policy, 0)
         adapter.put_batch(["a", "b"], [b"1234", b"5678"])
         self.assertEqual(adapter.get_batch(["a", "b"]), [b"1234", b"5678"])
         self.assertEqual(adapter.exists_batch(["a", "b"]), [True, True])

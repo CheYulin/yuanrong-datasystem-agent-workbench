@@ -101,15 +101,19 @@
   </section>
   <section id="results">
     <div class="section-kicker">05 / PERFORMANCE & COMPLETENESS</div><h2>性能与完整结果</h2>
-    <p class="note">图表只使用有效记录；失败、不支持与未采集均保留状态，不补零。跨任务对比需同时核对版本、预算、批量大小和数据大小。</p>
+    <p class="note">图表只使用有效记录；失败、不支持与未采集均保留状态，不补零。PUT 是有界 fresh 插入，非定时 upsert；跨任务对比需同时核对版本、预算、批量大小与数据大小。</p>
     <div class="compare-jobs" id="comparison-jobs"></div>
     <div class="result-controls"><label>接口 <select id="filter-operation"><option value="put">PUT</option><option value="get">GET 命中</option><option value="exist_hit">EXIST 命中</option><option value="exist_miss">EXIST 未命中</option></select></label><label>批量 <select id="filter-batch"><option value="1">1 key</option><option value="16">16 keys</option><option value="256">256 keys</option><option value="4096">4096 keys</option><option value="all">全部</option></select></label><label>大小 <select id="filter-size"><option value="1024">1 KiB</option><option value="65536">64 KiB</option><option value="1048576">1 MiB</option><option value="all">全部</option></select></label><label>扩展轴 <select id="filter-axis"><option value="clients">Clients</option><option value="workers">Workers 总数</option><option value="nodes">逻辑节点</option></select></label><label>指标 <select id="filter-metric"><option value="keys_s">keys / 秒</option><option value="batch_qps">API 调用 / 秒</option><option value="p99_us">P99 / μs</option></select></label></div>
     <div class="metric-cards" id="result-counts"><div><span>记录总数</span><strong>—</strong></div><div><span>有效</span><strong>—</strong></div><div><span>失败</span><strong>—</strong></div><div><span>不支持 / 其他</span><strong>—</strong></div></div>
     <div id="result-scope" class="note"></div>
+    <div id="result-quality" class="warning-note" role="status" hidden></div>
     <figure><div class="chart" id="performance-chart"></div><figcaption id="performance-caption">图 3. 同一接口与负载下的性能；重复轮次以中位数显示，原始记录见下表。</figcaption></figure>
     <figure><div class="chart" id="latency-chart"></div><figcaption>图 4. 有效记录的吞吐与 P99 分布；每个点对应一条实际测量记录。</figcaption></figure>
+    <h3>中心组件的实际负载</h3><p class="note">吞吐平台、中心配额饱和和配额敏感性共同验证瓶颈；仅凭曲线拐点不能归因。左轴为中心平均使用核数 ÷ 中心配额，右轴为对应采样窗口的节流总时长；窗口不同时不直接比较节流总量。</p>
+    <figure><div class="chart" id="center-resource-chart"></div><figcaption>图 5. 相同接口、负载与预算下的中心 CPU 配额利用率和节流；有效轮次取中位数，未采集保留空值，原始资源数据见完整表。</figcaption></figure>
     <h3>全 case 状态与原始证据</h3><p class="note">此表保留所选任务的全部接口与轮次，不受上方性能图筛选影响。</p>
-    <div class="table-scroll" tabindex="0" aria-label="完整实验结果表，可在表格内横向滚动"><table class="results-table"><thead><tr><th>任务 / 轮次</th><th>产品</th><th>逻辑节点 / workers / clients</th><th>物理核 / 内存</th><th>接口</th><th>Keys / 大小</th><th>状态</th><th>keys/s</th><th>API/s</th><th>P99 / μs</th><th>证据 / 原因</th></tr></thead><tbody id="result-rows"><tr><td colspan="11" class="empty">尚无结果。页面不会预置性能数据。</td></tr></tbody></table></div>
+    <p class="note">实测 CPU 为采样窗口平均使用核数，服务端包含中心组件；资源观测独立保留。内存为服务端 cgroup 采样 memory.current 峰值，包含页缓存。</p>
+    <div class="table-scroll" tabindex="0" aria-label="完整实验结果表，可在表格内横向滚动"><table class="results-table"><thead><tr><th>任务 / 轮次</th><th>产品</th><th>逻辑节点 / workers / clients</th><th>物理核 / 内存</th><th>接口</th><th>Keys / 大小</th><th>状态</th><th>keys/s</th><th>API/s</th><th>P99 / μs</th><th>实测服务端 CPU / 核</th><th>实测客户端 CPU / 核</th><th>实测中心 CPU / 核</th><th>中心节流 / ms</th><th>服务端采样计费内存峰值 / GiB</th><th>证据 / 原因</th></tr></thead><tbody id="result-rows"><tr><td colspan="16" class="empty">尚无结果。页面不会预置性能数据。</td></tr></tbody></table></div>
   </section>
   <section id="records">
     <div class="section-kicker">06 / REPRODUCIBILITY & RECORDS</div><h2>具体步骤与运行记录</h2>

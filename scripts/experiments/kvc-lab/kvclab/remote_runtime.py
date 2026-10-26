@@ -1,5 +1,6 @@
 """Native product lifecycle and SDK cases behind the fixed remote control protocol."""
 import json
+import math
 import hashlib
 import os
 from pathlib import Path
@@ -14,6 +15,13 @@ from .remote_support import atomic, digest, member, read, setup_groups, terminat
 from .remote_observe import Monitor
 
 
+def latency_us(raw, name):
+    value = raw.get(name)
+    if isinstance(value, dict):
+        value = value.get('upper_us')
+    return value if type(value) in (float, int) and math.isfinite(value) else None
+
+
 class Cancelled(RuntimeError):
     pass
 
@@ -23,8 +31,8 @@ def workload_sizes(config, size):
     for batch in config["batches"]:
         count = batch * config["clients"]
         key_budget = max(count, int(config["memory_gib"] * (1 << 30) * .02 / size))
-        pools.append(count * max(1, min(16, 65536 // count, key_budget // count)))
-        puts[batch] = count * max(1, min(32, 262144 // count, key_budget // count))
+        pools.append(count * max(1, min(65536 // count, key_budget // count)))
+        puts[batch] = count * max(1, min(262144 // count, key_budget // count))
     pool = max(pools)
     if any(pool % (batch * config["clients"]) for batch in config["batches"]):
         raise ValueError("Common pool must cover complete batches for every selected cardinality")
@@ -312,6 +320,17 @@ class Engine:
         result["one_hop"] = {"verified": False, "status": "pending_protocol_audit" if product == "datasystem" else "not_applicable",
                              "reason": "Policy and raw network traces are captured; protocol-level RPC attribution is required to prove runtime hop count",
                              "network_files": [p.name for p in directory.glob("network-*") if p.is_file()]}
+        if product == "datasystem" and rc == 0 and result["valid"]:
+            from .onehop import verify_one_hop
+            probe_start = time.monotonic_ns()
+            proof = verify_one_hop(self.settings, self.deployment, config, directory / "one-hop")
+            result["one_hop"] = proof
+            self.deployment["one_hop"] = {key: proof.get(key) for key in ("verified", "status", "scope", "observed_rpc_calls", "observed_rpc_attempts", "reason")}
+            self.persist()
+            self.step("qualify_datasystem_one_hop", probe_start, "passed" if proof["verified"] else "failed", directory / "one-hop/one-hop.json")
+            if not proof["verified"]:
+                result["valid"] = False
+                result["one_hop_error"] = proof.get("reason", "Runtime one-hop qualification did not pass")
         atomic(out, result)
         self.step("qualify_" + product, begin, "passed" if rc == 0 and result["valid"] else "failed", out)
         if rc or not result["valid"]:
@@ -358,7 +377,7 @@ class Engine:
                             command = [self.deployment["python"], "-B", "-m", "kvcbench.run.workers.batch", "--adapter", str(self.lab / "kvclab/adapters" / (product + ".py")),
                                        "--config", str(config), "--op", operation, "--batch", str(batch), "--size", str(size),
                                        "--concurrency", str(self.config["clients"]), "--pool-keys", str(pool), "--put-keys", str(put),
-                                       "--put-warmup-keys", str(count), "--duration", str(self.config["duration_s"]), "--warmup", "1",
+                                       "--put-warmup-keys", str(min(put, max(count, count * (32768 // count)))), "--duration", str(self.config["duration_s"]), "--warmup", "1",
                                        "--run-id", case_run, "--skip-preload", "--out", str(cell / "raw.json")]
                             rc = self.command("native-case", command, group / "client", cell, timeout=max(300, self.config["duration_s"] + 180), check=False)
                             raw = read(cell / "raw.json", {})
@@ -368,11 +387,11 @@ class Engine:
                                       "workers": self.deployment["workers"], "workers_per_node": self.config["workers_per_node"], "clients": self.config["clients"],
                                       "batch": batch, "size": size, "value_size": size, "operation": operation, "repeat": repeat,
                                       "status": "valid" if valid else "failed", "keys_s": raw.get("keys_s") if valid else None,
-                                      "batch_qps": raw.get("batch_qps") if valid else None, "p99_us": raw.get("p99") if valid else None,
-                                      "p50_us": raw.get("p50") if valid else None, "p95_us": raw.get("p95") if valid else None,
+                                      "batch_qps": raw.get("batch_qps") if valid else None, "p99_us": latency_us(raw, "p99") if valid else None,
+                                      "p50_us": latency_us(raw, "p50") if valid else None, "p95_us": latency_us(raw, "p95") if valid else None,
                                       "throughput_mib_s": raw.get("throughput_mib_s") if valid else None,
                                       "reason": None if valid else raw.get("fatal") or [c.get("errors") for c in raw.get("clients", [])] or f"Native process returned {rc}",
-                                      "raw_artifact": self.artifact(cell / "raw.json"), "duration_s": raw.get("duration_s"),
+                                      "raw_artifact": self.artifact(cell / "raw.json"), "duration_s": raw.get("duration_s"), "short_window": raw.get("short_window"), "low_sample_p99": raw.get("low_sample_p99"), "put_scope": "bounded fresh insert cardinality, not a timed upsert loop" if operation == "put" else None,
                                       "server_cpus": self.config["server_cpus"], "client_cpus": self.config["client_cpus"],
                                       "master_cpus": self.config.get("master_cpus", min(2, self.config["server_cpus"])), "memory_gib": self.config["memory_gib"], **resources}
                             result["preload_artifact"] = self.artifact(preloaded) if operation != "put" else None
@@ -435,7 +454,8 @@ class Engine:
                             self.qualify(product, directory, group)
                     if self.request["action"] == "deploy" and len(self.config["products"]) > 1:
                         self.event("log", message="Products were prepared and qualified sequentially to avoid interference; starting the first selected product for the retained deployment")
-                        self.deploy(self.config["products"][0])
+                        accepted_directory, accepted_group = self.deploy(self.config["products"][0])
+                self.qualify(self.config["products"][0], accepted_directory, accepted_group)
             status = "completed_with_failures" if any(row["status"] == "failed" for row in self.results) else "succeeded"
             result = {"kind": "complete", "job_id": self.request["job_id"], "status": status,
                       "results": self.results, "deployment": self.deployment, "artifact_root": str(self.job)}
